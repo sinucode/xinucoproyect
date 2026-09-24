@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { logAction } from '../audit'
 import { sendCancellationNotice } from '@/lib/email/notifications'
 
-jest.mock('@/lib/supabase/server', () => ({
+jest.mock('@xinuco/supabase/server', () => ({
   createClient: jest.fn(),
 }))
 

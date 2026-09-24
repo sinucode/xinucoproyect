@@ -17,9 +17,27 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:3001',
-    reuseExistingServer: !process.env.CI,
-  },
+  // Barbería reescribe / y /admin* hacia apps/web, así que ambas zonas deben estar arriba.
+  webServer: [
+    {
+      command: 'npm run dev',
+      cwd: '../web',
+      url: 'http://localhost:3000',
+      reuseExistingServer: !process.env.CI,
+      env: {
+        NEXT_PUBLIC_WEB_URL: 'http://localhost:3000',
+        NEXT_PUBLIC_BARBERIA_URL: 'http://localhost:3001',
+      },
+    },
+    {
+      command: 'npm run dev',
+      url: 'http://localhost:3001',
+      reuseExistingServer: !process.env.CI,
+      env: {
+        NEXT_PUBLIC_WEB_URL: 'http://localhost:3000',
+        NEXT_PUBLIC_BARBERIA_URL: 'http://localhost:3001',
+        WEB_ZONE_URL: 'http://localhost:3000',
+      },
+    },
+  ],
 })

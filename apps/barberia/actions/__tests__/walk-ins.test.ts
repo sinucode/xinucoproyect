@@ -2,7 +2,7 @@ import { addWalkIn, updateWalkInStatus, assignStaff } from '../walk-ins'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 
-jest.mock('@/lib/supabase/server', () => ({
+jest.mock('@xinuco/supabase/server', () => ({
   createClient: jest.fn(),
 }))
 

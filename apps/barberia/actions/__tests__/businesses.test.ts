@@ -2,7 +2,7 @@ import { getBusinessBySlug, updateBusinessTheme, toggleBusinessFeature } from '.
 import { createClient, createAdminClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 
-jest.mock('@/lib/supabase/server', () => ({
+jest.mock('@xinuco/supabase/server', () => ({
   createClient: jest.fn(),
   createAdminClient: jest.fn(),
 }))

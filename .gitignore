@@ -55,3 +55,7 @@ yarn-error.log*
 node_modules
 supabase/.temp/
 apps/*/supabase/.temp/
+
+# Playwright artefactos
+playwright-report/
+test-results/
