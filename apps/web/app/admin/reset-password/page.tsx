@@ -11,16 +11,16 @@ type Status = 'verifying' | 'ready' | 'invalid' | 'submitting' | 'done'
  * ResetPasswordPage — Destino del link de recuperación de contraseña
  * enviado por Supabase Auth al Admin Global (super_admin).
  *
- * Ruta: /reset-password (apps/web)
+ * Ruta: /admin/reset-password (apps/web)
  *
  * El proyecto usa el flujo PKCE de Supabase. El canje real del `code` por
- * una sesión ocurre del lado del servidor en /auth/callback (necesita las
+ * una sesión ocurre del lado del servidor en /admin/auth/callback (necesita las
  * cookies donde vive el code_verifier — el cliente de navegador no tiene
  * acceso a ellas). Esta página solo se abre DESPUÉS de ese canje, así que
  * únicamente confirma que la sesión quedó activa.
  *
  * El "Site URL" del proyecto Supabase debe apuntar solo al origen
- * (sin ruta), y /auth/callback debe estar en Redirect URLs, para que el
+ * (sin ruta), y /admin/auth/callback debe estar en Redirect URLs, para que el
  * link del correo de recuperación no caiga en la landing.
  */
 export default function ResetPasswordPage() {
@@ -33,7 +33,7 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     async function checkSession() {
-      // /auth/callback marca el link roto/expirado con ?error=invalid_link
+      // /admin/auth/callback marca el link roto/expirado con ?error=invalid_link
       // en vez de intentar redirigir con una sesión que nunca se estableció.
       if (new URLSearchParams(window.location.search).get('error')) {
         setStatus('invalid')

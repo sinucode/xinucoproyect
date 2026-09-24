@@ -42,6 +42,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api') ||
     pathname === '/admin/login' ||
+    pathname === '/admin/auth/callback' ||
+    pathname === '/admin/reset-password' ||
     pathname === '/'
   ) {
     return supabaseResponse

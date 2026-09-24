@@ -46,7 +46,7 @@ export async function loginWithPassword(formData: FormData) {
 
 /**
  * requestPasswordReset — Envía el correo de recuperación de contraseña
- * del Admin Global. Redirige a /reset-password (esta misma app) tras
+ * del Admin Global. Redirige a /admin/reset-password (esta misma app) tras
  * verificar el link, NO a la landing.
  *
  * Por seguridad (evitar enumeración de usuarios) siempre responde con el
@@ -63,13 +63,14 @@ export async function requestPasswordReset(formData: FormData) {
   const supabase     = await createClient()
   const headersList  = await headers()
   const protocol     = headersList.get('x-forwarded-proto') || 'http'
-  const host         = headersList.get('host')
+  // Vía el rewrite de barbería el Host es el del deployment de web; el dominio público llega en x-forwarded-host.
+  const host         = headersList.get('x-forwarded-host') ?? headersList.get('host')
   const origin        = host ? `${protocol}://${host}` : process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
 
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    // El code de recuperación se canjea en /auth/callback (servidor, cookies),
-    // no directamente en /reset-password (cliente, sin acceso al code_verifier).
-    redirectTo: `${origin}/auth/callback?next=/reset-password`,
+    // El code de recuperación se canjea en /admin/auth/callback (servidor, cookies);
+    // va bajo /admin porque en prod solo /admin/* se reenvía de barbería a apps/web.
+    redirectTo: `${origin}/admin/auth/callback?next=/admin/reset-password`,
     captchaToken,
   })
 
