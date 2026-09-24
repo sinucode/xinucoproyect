@@ -2,6 +2,8 @@ import { createClient } from '@xinuco/supabase/server'
 import { redirect }      from 'next/navigation'
 import { AdminSidebar }  from '@/components/admin/AdminSidebar'
 import { adminLoginUrl, BARBERIA_URL } from '@xinuco/utils'
+import { LogOut } from 'lucide-react'
+import { logout } from '@/actions/auth'
 
 interface AdminLayoutProps {
   children: React.ReactNode
@@ -49,6 +51,18 @@ export default async function AdminLayout({ children }: AdminLayoutProps) {
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse-soft" />
               Desarrollo
             </span>
+
+            {/* Cerrar sesión */}
+            <form action={logout}>
+              <button
+                type="submit"
+                aria-label="Cerrar sesión"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-xinuco-border text-xs text-xinuco-muted hover:text-xinuco-text transition-colors"
+              >
+                <LogOut size={14} />
+                Salir
+              </button>
+            </form>
           </div>
         </header>
 

@@ -2,7 +2,8 @@ import { ReactNode } from 'react'
 import { createClient } from '@xinuco/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { BARBERIA_URL } from '@xinuco/utils'
+import { LogOut } from 'lucide-react'
+import { logout } from '@/actions/auth'
 
 /**
  * AdminLayout — Panel GLOBAL de todas las verticales (apps/web).
@@ -51,24 +52,29 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
           <nav className="flex items-center gap-1">
             <Link
-              href="/admin/businesses"
+              href="/admin/verticales"
               className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-white/5"
               style={{ color: 'rgba(244,244,244,0.65)' }}
             >
-              Negocios
-            </Link>
-            <Link
-              href={`${BARBERIA_URL}/adminbarberia`}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-white/5"
-              style={{ color: 'rgba(244,244,244,0.65)' }}
-            >
-              ↗ Barbería
+              Verticales
             </Link>
           </nav>
 
-          <span className="text-xs" style={{ color: 'rgba(244,244,244,0.35)' }}>
-            {fullName}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs" style={{ color: 'rgba(244,244,244,0.35)' }}>
+              {fullName}
+            </span>
+            <form action={logout}>
+              <button
+                type="submit"
+                aria-label="Cerrar sesión"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors text-[rgba(244,244,244,0.65)] hover:bg-white/5 hover:text-[#C5A059]"
+              >
+                <LogOut size={14} />
+                Salir
+              </button>
+            </form>
+          </div>
         </div>
       </header>
 

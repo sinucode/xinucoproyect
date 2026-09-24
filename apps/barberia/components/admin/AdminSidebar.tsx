@@ -2,7 +2,8 @@
 
 import Link        from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Store, CreditCard, Settings, ChevronRight, Zap } from 'lucide-react'
+import { Store, CreditCard, Settings, ChevronRight, Zap, ArrowLeft } from 'lucide-react'
+import { WEB_URL } from '@xinuco/utils'
 
 interface NavItem {
   id:    string
@@ -37,6 +38,17 @@ export function AdminSidebar() {
             <p className="text-[10px] text-xinuco-muted mt-0.5">Admin Console</p>
           </div>
         </div>
+      </div>
+
+      {/* Volver al panel global */}
+      <div className="px-3 pt-4">
+        <a
+          href={`${WEB_URL}/admin/verticales`}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-xinuco-muted hover:text-xinuco-text hover:bg-xinuco-surface/50 transition-all duration-200"
+        >
+          <ArrowLeft size={14} strokeWidth={1.75} />
+          Verticales
+        </a>
       </div>
 
       {/* Navegación */}

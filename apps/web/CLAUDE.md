@@ -16,6 +16,8 @@ app/
   admin/
     login/page.tsx      ← login del super_admin
     layout.tsx          ← guard super_admin + nav del admin global
+    page.tsx            ← redirige a /admin/verticales
+    verticales/         ← lista de verticales (home del admin global)
     businesses/         ← listado y gestión de negocios de TODAS las verticales
       [businessId]/     ← detalle de un negocio (features, trial, usuarios)
 components/
@@ -31,6 +33,7 @@ lib/
   supabase/             ← cliente Supabase (se moverá a packages/supabase en Fase 2)
   features/config.ts    ← FEATURE_CATALOG, PLAN_BUNDLES (se moverá a packages/billing-catalog)
   utils/                ← utilidades (se moverán a packages/utils)
+  verticals.ts          ← registro de verticales — agregar aquí cada vertical nueva
 types/                  ← tipos de BD (se moverán a packages/types en Fase 2)
 middleware.ts           ← guard de /admin + refresco de sesión
 ```

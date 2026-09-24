@@ -7,7 +7,7 @@ Plataforma SaaS multi-vertical. **Un repo, cada proyecto físicamente separado**
 |---|---|---|
 | `apps/web` | Plataforma: landing `xinuco.com/` + `/admin` (admin GENERAL de todas las verticales) | CONTROL |
 | `apps/barberia` | Vertical Barbería: `/adminbarberia` (consola de vertical) + `/[slug]` (back-office de cada negocio) | BARBERÍA |
-| `packages/*` | Código compartido (Fase 2 — stubs por ahora) | — |
+| `packages/*` | Código compartido (`@xinuco/types`, `utils`, `supabase`, `ui`, `billing-catalog`) | — |
 | `templates/siguiente-vertical` | Esqueleto copiable para crear una nueva vertical | — |
 
 ## Regla de oro — Contexto de Claude Code
@@ -20,6 +20,14 @@ cd apps/barberia   ← Claude carga apps/barberia/CLAUDE.md únicamente
 cd apps/web        ← Claude carga apps/web/CLAUDE.md únicamente
 ```
 No edites otras apps salvo cambios transversales en `packages/*`.
+
+## Flujo de trabajo — Planificar con Opus, ejecutar con Sonnet
+Todo cambio no trivial sigue este flujo:
+1. **Planificar con Opus** — investigar el código, diseñar el enfoque y aprobarlo con el usuario antes de tocar nada.
+2. **Ejecutar con Sonnet** — la implementación la hace un subagente con `model: sonnet`, con el plan completo en su prompt (archivos, cambios exactos, verificación).
+3. **Verificar con Opus** — revisar el diff real del subagente, correr tsc/tests/curl y recién entonces commit + push.
+
+Los agentes a medida de `.claude/agents/` ya declaran `model: sonnet`.
 
 ## Comandos (npm workspaces + Turborepo)
 ```bash
@@ -49,13 +57,15 @@ turbo run build --filter=...[HEAD^1]
 ## Doble Admin
 | URL | App | Descripción |
 |---|---|---|
-| `xinuco.com/admin` | `apps/web` | Admin GENERAL — gestiona negocios de TODAS las verticales |
+| `xinuco.com/admin/login` | `apps/web` | Login ÚNICO del super_admin para todas las verticales |
+| `xinuco.com/admin/verticales` | `apps/web` | Admin GENERAL — lista las verticales; cada una abre su consola |
 | `xinuco.com/adminbarberia` | `apps/barberia` | Consola BARBERÍA — gestiona las barberías en la base de barbería |
 
 Mismo `super_admin` (una sola cuenta). SSO por cookies del mismo dominio `xinuco.com`.
+Nueva vertical → agregarla al registro `apps/web/lib/verticals.ts` para que aparezca en `/admin/verticales`.
 
 ## Roadmap de fases
 - ✅ **Fase 1** — Monorepo + doble admin + CLAUDE.md por app
-- 🔲 **Fase 2** — Extraer `packages/*` reales (supabase, types, ui, utils, billing-catalog) y actualizar imports
+- ✅ **Fase 2** — Extraer `packages/*` reales (supabase, types, ui, utils, billing-catalog) y actualizar imports
 - 🔲 **Fase 3** — Scaffolding de nuevas verticales desde `templates/siguiente-vertical`
 - 🔲 **Fase 4** — Split físico de Supabase por vertical (CONTROL + BARBERÍA)
