@@ -15,8 +15,8 @@ test.describe('Auth & Security Flow', () => {
     await page.goto('/admin');
     
     // Should gracefully redirect to the global super-admin login
-    await page.waitForURL('**/adminbarberia/login');
-    await expect(page).toHaveURL(/.*\/adminbarberia\/login/);
+    await page.waitForURL('**/admin/login**');
+    await expect(page).toHaveURL(/.*\/admin\/login/);
   });
 
 });

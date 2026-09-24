@@ -55,8 +55,7 @@ export async function updateSession(request: NextRequest) {
   if (
     pathSegments.length === 0 ||
     pathname.startsWith('/api') ||
-    pathname.startsWith('/_next') ||
-    pathname.startsWith('/adminbarberia/login')
+    pathname.startsWith('/_next')
   ) {
     return supabaseResponse
   }
@@ -66,8 +65,6 @@ export async function updateSession(request: NextRequest) {
   const slug = pathSegments[0]
   const innerRoute = pathSegments[1] ?? ''
 
-  const isGlobalAdminRoute = slug === 'admin' && innerRoute === ''
-
   const isProtectedRoute =
     innerRoute === 'dashboard' ||
     innerRoute === 'settings' ||
@@ -76,22 +73,6 @@ export async function updateSession(request: NextRequest) {
   const isLoginRoute = innerRoute === 'login'
 
   // ── 4. Redirecciones base de sesión ──────────────────────────────────────────
-  if (isGlobalAdminRoute) {
-    // /admin debe ser servido por apps/web (multi-zone rewrite).
-    // Si llega aquí, el rewrite no está activo (ej: dev sin web zone corriendo).
-    // Redirigimos al login de la barbería como fallback.
-    if (!user) {
-      url.pathname = '/adminbarberia/login'
-      return NextResponse.redirect(url)
-    }
-    if (user.app_metadata?.role !== 'super_admin') {
-      const userSlug = user.app_metadata?.slug
-      url.pathname = userSlug ? `/${userSlug}/dashboard` : '/'
-      return NextResponse.redirect(url)
-    }
-    // super_admin sin rewrite activo: dejar pasar (web zone lo manejará)
-    return supabaseResponse
-  }
   if (isProtectedRoute && !user) {
     url.pathname = `/${slug}/login`
     return NextResponse.redirect(url)

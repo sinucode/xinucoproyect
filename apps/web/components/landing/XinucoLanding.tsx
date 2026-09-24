@@ -218,7 +218,7 @@ function Navbar() {
 
           {/* Admin — gradient pill */}
           <a
-            href="/adminbarberia/login"
+            href="/admin/login"
             className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-semibold text-white rounded-xl transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]"
             style={{
               background: `linear-gradient(135deg, ${CYAN}, ${BLUE})`,
@@ -268,7 +268,7 @@ function Navbar() {
               Portal Aliados
             </a>
             <a
-              href="/adminbarberia/login"
+              href="/admin/login"
               className="text-center py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
               style={{ background: `linear-gradient(135deg, ${CYAN}, ${BLUE})` }}
               onClick={() => setOpen(false)}
@@ -1932,7 +1932,7 @@ function Footer() {
           <a href="#verticales" className="hover:text-white/60 transition-colors">Verticales</a>
           <a href="#aliados"    className="hover:text-white/60 transition-colors">Aliados</a>
           <a href="mailto:hola@xinuco.com" className="hover:text-white/60 transition-colors">Contacto</a>
-          <a href="/adminbarberia/login" className="hover:text-white/60 transition-colors">Admin</a>
+          <a href="/admin/login" className="hover:text-white/60 transition-colors">Admin</a>
         </div>
 
         <p className="text-white/20 text-xs">© {new Date().getFullYear()} Xinuco. Todos los derechos reservados.</p>

@@ -5,6 +5,7 @@ import {
   Settings2, Server, Globe, Shield, Zap, Info,
   GitBranch, Clock,
 } from 'lucide-react'
+import { adminLoginUrl, BARBERIA_URL } from '@xinuco/utils'
 
 export const metadata: Metadata = {
   title: 'Configuración — Xinuco Admin',
@@ -42,7 +43,7 @@ function EnvVarRow({ label, value, sensitive = false, status = 'ok' }: EnvVarRow
 export default async function SettingsPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/adminbarberia/login')
+  if (!user) redirect(adminLoginUrl(`${BARBERIA_URL}/adminbarberia`))
 
   // Estadísticas globales
   const { count: totalBiz } = await supabase

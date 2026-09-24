@@ -10,6 +10,12 @@ const RESERVED_SLUGS = ['admin', 'api', 'support', 'billing', 'xinuco', 'dashboa
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+
+  // /admin* se sirve desde apps/web vía rewrite — dejar pasar sin tocar sesión.
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+    return NextResponse.next()
+  }
+
   const pathParts = pathname.split('/').filter(Boolean)
 
   // Solo ejecutar si hay segmentos y no son archivos estáticos o rutas core del sistema

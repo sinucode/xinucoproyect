@@ -103,7 +103,7 @@ describe('Auth Server Actions', () => {
         if (e.message !== 'NEXT_REDIRECT') throw e
       }
 
-      expect(redirect).toHaveBeenCalledWith('/adminbarberia')
+      expect(redirect).toHaveBeenCalledWith('/admin')
     })
 
     it('handles tenant login correctly with secure_set_user_context', async () => {

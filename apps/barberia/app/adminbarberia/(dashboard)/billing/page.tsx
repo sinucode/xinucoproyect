@@ -7,6 +7,7 @@ import {
   Clock, XCircle, Zap, Crown, Loader,
 } from 'lucide-react'
 import { PLAN_PRICES_COP } from '@xinuco/billing-catalog'
+import { adminLoginUrl, BARBERIA_URL } from '@xinuco/utils'
 
 export const metadata: Metadata = {
   title: 'Facturación SaaS — Xinuco Admin',
@@ -38,7 +39,7 @@ export default async function BillingPage() {
   // Auth guard
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/adminbarberia/login')
+  if (!user) redirect(adminLoginUrl(`${BARBERIA_URL}/adminbarberia`))
 
   // Usar service role para leer mp_subscriptions (bypass RLS)
   const adminClient = createServiceClient(

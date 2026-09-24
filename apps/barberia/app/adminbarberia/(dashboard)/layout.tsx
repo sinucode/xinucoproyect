@@ -1,6 +1,7 @@
 import { createClient } from '@xinuco/supabase/server'
 import { redirect }      from 'next/navigation'
 import { AdminSidebar }  from '@/components/admin/AdminSidebar'
+import { adminLoginUrl, BARBERIA_URL } from '@xinuco/utils'
 
 interface AdminLayoutProps {
   children: React.ReactNode
@@ -19,13 +20,13 @@ export default async function AdminLayout({ children }: AdminLayoutProps) {
 
   // ── Guard de sesión ───────────────────────────────────────────────────────
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/adminbarberia/login')
+  if (!user) redirect(adminLoginUrl(`${BARBERIA_URL}/adminbarberia`))
 
   // ── [SEC H-1] Guard de rol: solo super_admin puede acceder ───────────────
   // Se lee de app_metadata (solo modificable por service role en servidor).
   // Cualquier otro rol — incluyendo admin de tenant — es redirigido a login.
   if (user.app_metadata?.role !== 'super_admin') {
-    redirect('/adminbarberia/login')
+    redirect(adminLoginUrl(`${BARBERIA_URL}/adminbarberia`))
   }
 
   return (

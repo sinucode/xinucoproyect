@@ -10,7 +10,7 @@ Puerto de desarrollo: **3001**.
 ```
 app/
   adminbarberia/
-    login/              ← login del super_admin para la vertical
+    login/              ← solo redirige al login único /admin/login (apps/web)
     (dashboard)/        ← consola de la vertical (negocios de barbería)
   [slug]/
     page.tsx            ← vitrina pública / redirección a book
@@ -56,7 +56,8 @@ En Fase 1 comparte la misma base que `apps/web` (separación en Fase 4).
 
 ## Multi-zone (zona raíz del dominio)
 `next.config.mjs` reescribe `/` y `/admin/*` hacia `apps/web` (porta 3000 en dev, `WEB_ZONE_URL` en prod).  
-`middleware.ts` gestiona el catch-all de `/[slug]` y los slugs reservados.
+`middleware.ts` gestiona el catch-all de `/[slug]` y los slugs reservados; deja pasar `/admin*` sin tocarlo (el middleware corre antes que los rewrites).
+El login del super_admin es único: `/admin/login` en apps/web. Para enlaces/redirects entre zonas usar `adminLoginUrl()` / `BARBERIA_URL` de `@xinuco/utils` (`NEXT_PUBLIC_WEB_URL` / `NEXT_PUBLIC_BARBERIA_URL`, vacías en prod).
 
 ## Comandos
 ```bash

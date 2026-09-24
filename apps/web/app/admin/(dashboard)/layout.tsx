@@ -2,6 +2,7 @@ import { ReactNode } from 'react'
 import { createClient } from '@xinuco/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import { BARBERIA_URL } from '@xinuco/utils'
 
 /**
  * AdminLayout — Panel GLOBAL de todas las verticales (apps/web).
@@ -57,7 +58,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
               Negocios
             </Link>
             <Link
-              href="/adminbarberia"
+              href={`${BARBERIA_URL}/adminbarberia`}
               className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-white/5"
               style={{ color: 'rgba(244,244,244,0.65)' }}
             >

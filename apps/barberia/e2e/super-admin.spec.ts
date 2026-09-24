@@ -4,12 +4,12 @@ test.describe('Super Admin Flow', () => {
   test('unauthorized users cannot access super admin panel', async ({ page }) => {
     // If we try to access /adminbarberia without being logged in, it redirects to login
     await page.goto('/adminbarberia');
-    await page.waitForURL('**/adminbarberia/login');
-    await expect(page).toHaveURL(/.*\/adminbarberia\/login/);
+    await page.waitForURL('**/admin/login**');
+    await expect(page).toHaveURL(/.*\/admin\/login/);
   });
 
   test('admin login page renders correctly', async ({ page }) => {
-    await page.goto('/adminbarberia/login');
+    await page.goto('/admin/login');
     
     // We expect a form to be present
     const form = page.locator('form');

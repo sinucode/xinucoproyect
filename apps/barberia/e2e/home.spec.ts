@@ -12,8 +12,8 @@ test('has title and redirects to login when accessing admin', async ({ page }) =
 
   // Test the middleware reserved slug redirection
   await page.goto('/admin');
-  await page.waitForURL('**/adminbarberia/login');
-  
+  await page.waitForURL('**/admin/login**');
+
   // Verify that it reached the login page
-  await expect(page).toHaveURL(/.*\/adminbarberia\/login/);
+  await expect(page).toHaveURL(/.*\/admin\/login/);
 });

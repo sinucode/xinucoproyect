@@ -4,6 +4,7 @@ import { createClient }            from '@xinuco/supabase/server'
 import { redirect }                from 'next/navigation'
 import { headers }                 from 'next/headers'
 import type { Profile, Business }  from '@xinuco/types'
+import { adminLoginUrl, WEB_URL }  from '@xinuco/utils'
 
 /**
  * signUp — Server Action para registro de nuevos usuarios.
@@ -85,9 +86,8 @@ export async function loginWithPassword(formData: FormData) {
   const role = data.user?.app_metadata?.role
 
   // 1. Si es Llave Maestra (Super Admin), va al panel GLOBAL en apps/web.
-  // /admin es reescrito desde barbería hacia web (via rewrites en next.config.mjs).
   if (role === 'super_admin') {
-    redirect('/admin')
+    redirect(`${WEB_URL}/admin`)
   }
 
   // 2. Si es un usuario regular, inyectamos su contexto de negocio (Zero-DB lookup)
@@ -110,7 +110,7 @@ export async function loginWithPassword(formData: FormData) {
 
 /**
  * logout — Cierra la sesión y redirige al login correspondiente.
- * - Super Admin → /adminbarberia/login
+ * - Super Admin → /admin/login (apps/web)
  * - Usuario de tenant → /[slug]/login
  */
 export async function logout() {
@@ -125,11 +125,11 @@ export async function logout() {
 
   // Redirigir al login correcto según el contexto
   if (role === 'super_admin') {
-    redirect('/adminbarberia/login')
+    redirect(adminLoginUrl())
   } else if (slug) {
     redirect(`/${slug}/login`)
   } else {
-    redirect('/adminbarberia/login')
+    redirect(adminLoginUrl())
   }
 }
 

@@ -4,6 +4,7 @@ import { ExternalLink, Pencil, ToggleLeft, ToggleRight } from 'lucide-react'
 import { toggleTenantStatus }  from '@/actions/admin'
 import { FeatureToggles }      from './FeatureToggles'
 import type { Business }       from '@xinuco/types'
+import { adminLoginUrl, BARBERIA_URL } from '@xinuco/utils'
 
 // ── Toggle de estado (inline Server Action) ───────────────────────────────────
 function ToggleStatusButton({ id, isActive }: { id: string; isActive: boolean }) {
@@ -40,7 +41,7 @@ export async function BusinessTable() {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/adminbarberia/login')
+  if (!user) redirect(adminLoginUrl(`${BARBERIA_URL}/adminbarberia`))
 
   const { data, error } = await supabase
     .from('businesses')
