@@ -10,6 +10,7 @@ import {
 import type { Business, BusinessFeatures, BrandConfig } from '@xinuco/types'
 import { toggleBusinessFeature, updateBusinessTheme } from '@/actions/businesses'
 import { toggleTenantStatus } from '@/actions/admin'
+import { BusinessUsersPanel } from '@/components/admin/BusinessUsersPanel'
 
 // ────────────────────────────────────────────────────────────
 // Tipos
@@ -185,7 +186,7 @@ function ColorPicker({
 // Drawer principal
 // ────────────────────────────────────────────────────────────
 export function TenantDetailDrawer({ business, onClose }: TenantDetailDrawerProps) {
-  const [activeTab, setActiveTab] = useState<'flags' | 'branding' | 'status'>('flags')
+  const [activeTab, setActiveTab] = useState<'users' | 'flags' | 'branding' | 'status'>('users')
   const [brandResult, setBrandResult] = useState<ActionResult | null>(null)
   const [isBrandPending, startBrandTransition] = useTransition()
   const [isStatusPending, startStatusTransition] = useTransition()
@@ -237,6 +238,7 @@ export function TenantDetailDrawer({ business, onClose }: TenantDetailDrawerProp
   const features = business.features_enabled ?? {}
 
   const TABS = [
+    { id: 'users',    label: 'Usuarios' },
     { id: 'flags',    label: 'Módulos' },
     { id: 'branding', label: 'Branding' },
     { id: 'status',   label: 'Estado' },
@@ -308,6 +310,11 @@ export function TenantDetailDrawer({ business, onClose }: TenantDetailDrawerProp
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
+
+          {/* ── TAB: Usuarios ── */}
+          {activeTab === 'users' && (
+            <BusinessUsersPanel businessId={business.id} />
+          )}
 
           {/* ── TAB: Módulos ── */}
           {activeTab === 'flags' && (
