@@ -48,27 +48,6 @@ export default async function BusinessFeaturePage({ params }: PageProps) {
         <p className="text-sm mt-0.5" style={{ color: 'rgba(244,244,244,0.45)' }}>/{biz.slug}</p>
       </div>
 
-      {/* Tab nav */}
-      <div
-        className="flex gap-1 border-b pb-4"
-        style={{ borderColor: 'rgba(197,160,89,0.12)' }}
-      >
-        <a
-          href={`/admin/businesses/${businessId}`}
-          className="px-4 py-2 rounded-lg text-sm font-medium"
-          style={{ background: 'rgba(197,160,89,0.1)', color: '#C5A059' }}
-        >
-          Features
-        </a>
-        <a
-          href={`/admin/businesses/${businessId}/users`}
-          className="px-4 py-2 rounded-lg text-sm font-medium"
-          style={{ color: 'rgba(244,244,244,0.45)' }}
-        >
-          Usuarios
-        </a>
-      </div>
-
       {/* Trial Manager */}
       <TrialManager
         businessId={biz.id}
