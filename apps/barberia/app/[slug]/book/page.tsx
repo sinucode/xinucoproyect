@@ -2,7 +2,7 @@ import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
 import { BookingWizard } from '@/components/booking/BookingWizard'
-import type { Service, Staff, Business } from '@xinuco/types'
+import type { Service, Staff } from '@xinuco/types'
 
 interface BookPageProps {
   params: Promise<{ slug: string }>
@@ -14,18 +14,15 @@ export default async function BookPage({ params }: BookPageProps) {
 
   // Fetch de control para inyectar la metadata y asegurar existencia del negocio
   const { data: business } = await supabase
-    .from('businesses')
-    .select('id, name, features_enabled')
-    .eq('slug', slug)
-    .single<Business>()
+    .rpc('get_public_business', { p_slug: slug })
+    .maybeSingle<{ id: string; name: string; online_payments: boolean }>()
 
   if (!business) {
     notFound()
   }
 
   // Leer feature flag de MP para booking online
-  const mpBookingEnabled =
-    ((business.features_enabled ?? {}) as unknown as Record<string, boolean>)['mercadopago_booking'] === true
+  const mpBookingEnabled = business.online_payments === true
 
   // Fetch de los servicios y el staff para el BookingWizard
   const [servicesRes, staffRes] = await Promise.all([

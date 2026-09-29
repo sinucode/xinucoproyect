@@ -2,7 +2,7 @@ import React from 'react'
 import { createClient } from '@xinuco/supabase/server'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
-import type { Business, BrandConfig } from '@xinuco/types'
+import type { BrandConfig } from '@xinuco/types'
 import { Inter, Playfair_Display, Oswald } from 'next/font/google'
 
 // ── Fuentes SSR (pre-cargadas en build-time, Zero-Flicker) ──────────────────
@@ -43,6 +43,15 @@ function shadeColor(hex: string, amount: number): string {
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
 }
 
+// ── Fila devuelta por la RPC pública get_public_business (solo campos seguros) ─
+interface PublicBusinessRow {
+  id:           string
+  name:         string
+  slug:         string
+  is_active:    boolean
+  brand_config: unknown
+}
+
 // ── Props ────────────────────────────────────────────────────────────────────
 interface TenantLayoutProps {
   children: React.ReactNode
@@ -56,11 +65,10 @@ export async function generateMetadata({
   const { slug } = await params
   const supabase  = await createClient()
 
+  // Lectura pública vía RPC SECURITY DEFINER (la tabla businesses no es legible por anon)
   const { data } = await supabase
-    .from('businesses')
-    .select('name')
-    .eq('slug', slug)
-    .single<Business>()
+    .rpc('get_public_business', { p_slug: slug })
+    .maybeSingle<PublicBusinessRow>()
 
   if (!data) return { title: 'Xinuco' }
 
@@ -77,10 +85,8 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
 
   // brand_config es la FUENTE ÚNICA DE VERDAD
   const { data: business, error } = await supabase
-    .from('businesses')
-    .select('id, name, slug, is_active, brand_config')
-    .eq('slug', slug)
-    .single<Business>()
+    .rpc('get_public_business', { p_slug: slug })
+    .maybeSingle<PublicBusinessRow>()
 
   if (error || !business || !business.is_active) notFound()
 

@@ -2,7 +2,7 @@
 // Todas las funciones son best-effort: nunca lanzan, nunca bloquean la operación principal.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { Database, BusinessFeatures } from '@xinuco/types'
+import type { Database } from '@xinuco/types'
 import { sendEmail }                       from './resend'
 import {
   appointmentConfirmationEmail,
@@ -19,7 +19,8 @@ type NotificationType = 'confirmation' | 'reminder' | 'cancellation'
 // ── Helpers internos ─────────────────────────────────────────────────────────
 
 /**
- * Verifica si el negocio tiene la feature `notifications_email` habilitada.
+ * Verifica si el negocio tiene la feature `notifications_email` habilitada
+ * (vía RPC get_public_business, que expone el flag como `email_notifications`).
  * Retorna false si hay cualquier error (seguro para best-effort).
  */
 async function isEmailEnabled(
@@ -27,16 +28,11 @@ async function isEmailEnabled(
   businessId: string,
 ): Promise<boolean> {
   if (!businessId) return false
-  const { data } = await supabase
-    .from('businesses')
-    .select('features_enabled')
-    .eq('id', businessId)
-    .returns<{ features_enabled: any }[]>()
-    .single()
+  const { data } = await (supabase as any)
+    .rpc('get_public_business', { p_id: businessId })
+    .maybeSingle() as { data: { email_notifications: boolean } | null }
 
-  if (!data?.features_enabled) return false
-  const features = data.features_enabled as unknown as BusinessFeatures
-  return features.notifications_email === true
+  return data?.email_notifications === true
 }
 
 /**
@@ -117,12 +113,9 @@ export async function sendBookingConfirmation(params: {
   if (!customer?.email) return
 
   // 3. Cargar nombre del negocio
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('name')
-    .eq('id', businessId)
-    .returns<{ name: string }[]>()
-    .single()
+  const { data: business } = await (supabase as any)
+    .rpc('get_public_business', { p_id: businessId })
+    .maybeSingle() as { data: { name: string } | null }
 
   // 4. Construir y enviar el correo
   const html = appointmentConfirmationEmail({
@@ -175,12 +168,9 @@ export async function sendBookingReminder(params: {
   if (!customer?.email) return
 
   // 3. Cargar nombre del negocio
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('name')
-    .eq('id', businessId)
-    .returns<{ name: string }[]>()
-    .single()
+  const { data: business } = await (supabase as any)
+    .rpc('get_public_business', { p_id: businessId })
+    .maybeSingle() as { data: { name: string } | null }
 
   // 4. Construir y enviar el correo
   const html = appointmentReminderEmail({
@@ -231,12 +221,9 @@ export async function sendCancellationNotice(params: {
   if (!customer?.email) return
 
   // 3. Cargar nombre del negocio
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('name')
-    .eq('id', businessId)
-    .returns<{ name: string }[]>()
-    .single()
+  const { data: business } = await (supabase as any)
+    .rpc('get_public_business', { p_id: businessId })
+    .maybeSingle() as { data: { name: string } | null }
 
   // 4. Construir y enviar el correo
   const html = appointmentCancellationEmail({

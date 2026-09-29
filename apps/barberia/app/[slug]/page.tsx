@@ -1,8 +1,16 @@
 import { createClient } from '@xinuco/supabase/server'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
-import type { Business, Service, Staff } from '@xinuco/types'
+import type { Service, Staff } from '@xinuco/types'
 import { BookingWizard } from '@/components/booking/BookingWizard'
+
+// Fila devuelta por la RPC pública get_public_business (solo campos seguros)
+interface PublicBusinessRow {
+  id:        string
+  name:      string
+  is_active: boolean
+  branding:  any
+}
 
 interface PublicBookingPageProps {
   params: Promise<{ slug: string }>
@@ -13,10 +21,8 @@ export async function generateMetadata({ params }: PublicBookingPageProps): Prom
   const supabase = await createClient()
 
   const { data: business } = await supabase
-    .from('businesses')
-    .select('name')
-    .eq('slug', slug)
-    .single<Business>()
+    .rpc('get_public_business', { p_slug: slug })
+    .maybeSingle<PublicBusinessRow>()
 
   if (!business) return { title: 'Xinuco' }
 
@@ -32,10 +38,8 @@ export default async function PublicBookingPage({ params }: PublicBookingPagePro
 
   // 1. Obtener la información del negocio
   const { data: business, error: bizError } = await supabase
-    .from('businesses')
-    .select('id, name, branding, is_active')
-    .eq('slug', slug)
-    .single<Business>()
+    .rpc('get_public_business', { p_slug: slug })
+    .maybeSingle<PublicBusinessRow>()
 
   if (bizError || !business || !business.is_active) {
     notFound()

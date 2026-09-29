@@ -404,6 +404,23 @@ export interface Database {
         Args: { business_slug: string }
         Returns: void
       }
+      // RPC público (SECURITY DEFINER) — un negocio con solo campos seguros, sin exponer la tabla businesses
+      get_public_business: {
+        Args: {
+          p_slug?: string | null
+          p_id?:   string | null
+        }
+        Returns: {
+          id:                  string
+          name:                string
+          slug:                string
+          is_active:           boolean
+          branding:            Json
+          brand_config:        Json
+          online_payments:     boolean   // = features_enabled.mercadopago_booking
+          email_notifications: boolean   // = features_enabled.notifications_email
+        }[]
+      }
       // RPC P&G (RF16) — Calcula el estado de resultados de un negocio en un período
       get_profit_loss: {
         Args: {
