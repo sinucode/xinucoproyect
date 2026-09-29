@@ -51,6 +51,8 @@ const nextConfig = {
       },
     ]
   },
+  // Next loguea en dev los argumentos de cada Server Action: incluiría contraseñas en texto plano.
+  logging: { serverFunctions: false },
   typescript: {
     ignoreBuildErrors: true,
   },

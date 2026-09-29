@@ -29,6 +29,8 @@ const nextConfig = {
   // cuando ambas zonas corren bajo el mismo dominio.
   assetPrefix: process.env.NODE_ENV === 'production' ? '/web-static' : '',
 
+  // Next loguea en dev los argumentos de cada Server Action: incluiría contraseñas en texto plano.
+  logging: { serverFunctions: false },
   typescript: {
     ignoreBuildErrors: true,
   },
