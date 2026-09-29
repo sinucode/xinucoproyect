@@ -46,6 +46,7 @@ export function apptDateKey(iso: string): string {
 export function dayLabel(dateKey: string, todayKey: string): string {
   if (dateKey === todayKey) return 'Hoy'
   if (dateKey === addDaysToDateKey(todayKey, 1)) return 'Mañana'
+  if (dateKey === addDaysToDateKey(todayKey, -1)) return 'Ayer'
   const label = new Date(`${dateKey}T00:00:00Z`).toLocaleDateString('es-CO', {
     weekday: 'long',
     day: 'numeric',

@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { InteractiveAgenda } from '@/components/dashboard/InteractiveAgenda'
 import { NewAppointmentButton } from '@/components/dashboard/NewAppointmentButton'
 import { getActiveShiftDetails } from '@/actions/finance'
-import { businessTodayISODate } from '@/lib/agenda-time'
+import { businessTodayISODate, addDaysToDateKey } from '@/lib/agenda-time'
 
 interface AppointmentsPageProps {
   params: Promise<{ slug: string }>
@@ -35,8 +35,12 @@ export default async function AppointmentsPage({ params }: AppointmentsPageProps
     activeShiftId = shiftDetails?.shift?.id || null
   }
 
-  // 4. Citas de hoy en adelante (por start_time, en hora local del negocio).
+  // 4. Citas de hoy en adelante (por start_time, en hora local del negocio) +
+  //    citas de los últimos 30 días que siguen ABIERTAS (sin cobrar/cerrar), para
+  //    que una cita en curso o lista para pagar no desaparezca al cambiar el día.
   //    Ver lib/agenda-time.ts para la convención de tiempo.
+  const todayKey    = businessTodayISODate()
+  const fromOpenKey = addDaysToDateKey(todayKey, -30)
 
   // 4a. Si es barbero, obtener su staff.id vinculado al user.id
   //     La relación es: auth.users.id → staff.user_id → staff.id → appointments.staff_id
@@ -57,7 +61,10 @@ export default async function AppointmentsPage({ params }: AppointmentsPageProps
     .from('appointments')
     .select('*, customers(full_name, phone), services(name, price_cop, duration_minutes), staff(full_name)')
     .eq('business_id', businessId)
-    .gte('start_time', `${businessTodayISODate()}T00:00:00Z`)
+    .or(
+      `start_time.gte.${todayKey}T00:00:00Z,` +
+      `and(start_time.gte.${fromOpenKey}T00:00:00Z,status.in.(scheduled,in_progress,ready_to_pay,payment_pending))`,
+    )
     .order('start_time', { ascending: true })
     .limit(300)
 
