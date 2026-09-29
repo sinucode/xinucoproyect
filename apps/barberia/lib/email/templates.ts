@@ -19,18 +19,30 @@ const MESES: readonly string[] = [
  * Formatea una fecha ISO al estilo español colombiano:
  * "Lunes, 26 de mayo de 2025 a las 10:00 AM"
  */
+// start_time guarda la hora LOCAL del negocio como UTC (ver lib/agenda-time.ts):
+// se lee con getUTC* para no depender de la zona horaria del servidor.
 function formatDateSpanish(isoString: string): string {
   const date = new Date(isoString)
-  const diaNombre = DIAS[date.getDay()]
-  const dia       = date.getDate()
-  const mes       = MESES[date.getMonth()]
-  const anio      = date.getFullYear()
-  const horas     = date.getHours()
-  const minutos   = date.getMinutes().toString().padStart(2, '0')
+  const diaNombre = DIAS[date.getUTCDay()]
+  const dia       = date.getUTCDate()
+  const mes       = MESES[date.getUTCMonth()]
+  const anio      = date.getUTCFullYear()
+  const horas     = date.getUTCHours()
+  const minutos   = date.getUTCMinutes().toString().padStart(2, '0')
   const periodo   = horas >= 12 ? 'PM' : 'AM'
   const hora12    = horas % 12 === 0 ? 12 : horas % 12
 
   return `${diaNombre}, ${dia} de ${mes} de ${anio} a las ${hora12}:${minutos} ${periodo}`
+}
+
+// Los nombres (cliente, productos) los escribe el cliente al reservar.
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 // ── Wrapper de layout HTML ────────────────────────────────────────────────────
@@ -108,9 +120,13 @@ export function appointmentConfirmationEmail(data: {
   durationMinutes: number
   priceCop:        number
   businessPhone?:  string
+  /** Productos apartados al reservar (se pagan en el local). */
+  reservedProducts?: { name: string; quantity: number; unitPrice: number }[]
 }): string {
   const fechaFormateada = formatDateSpanish(data.startTime)
   const precio          = formatCOP(data.priceCop)
+  const products        = data.reservedProducts ?? []
+  const productsTotal   = products.reduce((sum, p) => sum + p.quantity * p.unitPrice, 0)
 
   const detailRows: { label: string; value: string }[] = [
     { label: 'Servicio',     value: data.serviceName },
@@ -120,24 +136,38 @@ export function appointmentConfirmationEmail(data: {
     { label: 'Precio',       value: precio },
   ]
 
+  for (const p of products) {
+    detailRows.push({
+      label: 'Producto apartado',
+      value: `${p.quantity} × ${escapeHtml(p.name)} · ${formatCOP(p.quantity * p.unitPrice)}`,
+    })
+  }
+  if (products.length > 0) {
+    detailRows.push({ label: 'Total a pagar en el local', value: formatCOP(data.priceCop + productsTotal) })
+  }
+
   if (data.businessPhone) {
     detailRows.push({ label: 'Teléfono', value: data.businessPhone })
   }
+
+  const productsNote = products.length > 0
+    ? `Te guardamos los productos apartados hasta el día de tu cita; los pagas en el local.<br/>`
+    : ''
 
   const content = `
     <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#F4F4F4;line-height:1.3;">
       ¡Tu cita está confirmada!
     </h1>
     <p style="margin:0 0 20px 0;font-size:14px;color:#999999;">
-      Hola <strong style="color:#F4F4F4;">${data.customerName}</strong>, tu cita en
-      <strong style="color:#C5A059;">${data.businessName}</strong> ha sido registrada exitosamente.
+      Hola <strong style="color:#F4F4F4;">${escapeHtml(data.customerName)}</strong>, tu cita en
+      <strong style="color:#C5A059;">${escapeHtml(data.businessName)}</strong> ha sido registrada exitosamente.
     </p>
 
     ${appointmentDetailsBlock(detailRows)}
 
     <div style="margin-top:24px;padding:16px;background-color:#0A0A0A;border-left:3px solid #C5A059;border-radius:4px;">
       <p style="margin:0;font-size:13px;color:#999999;line-height:1.6;">
-        Si necesitas reagendar o cancelar tu cita, comunícate con nosotros con anticipación.
+        ${productsNote}Si necesitas reagendar o cancelar tu cita, comunícate con nosotros con anticipación.
         ¡Te esperamos!
       </p>
     </div>`

@@ -117,6 +117,18 @@ export async function sendBookingConfirmation(params: {
     .rpc('get_public_business', { p_id: businessId })
     .maybeSingle() as { data: { name: string } | null }
 
+  // 3b. Productos apartados al reservar (best-effort)
+  const { data: productRows } = await (supabase as any)
+    .from('appointment_products')
+    .select('quantity, unit_price, inventory_items(name)')
+    .eq('appointment_id', appointmentId) as {
+      data: { quantity: number; unit_price: number; inventory_items: { name: string } | { name: string }[] | null }[] | null
+    }
+  const reservedProducts = (productRows ?? []).map((row) => {
+    const inv = Array.isArray(row.inventory_items) ? row.inventory_items[0] : row.inventory_items
+    return { name: inv?.name ?? 'Producto', quantity: row.quantity, unitPrice: row.unit_price }
+  })
+
   // 4. Construir y enviar el correo
   const html = appointmentConfirmationEmail({
     customerName:    customer.full_name,
@@ -126,6 +138,7 @@ export async function sendBookingConfirmation(params: {
     startTime:       appt.start_time ?? new Date().toISOString(),
     durationMinutes: service.duration_minutes,
     priceCop:        service.price_cop,
+    reservedProducts,
   })
 
   const result = await sendEmail({

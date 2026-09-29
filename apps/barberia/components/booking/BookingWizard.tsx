@@ -280,6 +280,26 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
           <strong className="text-xinuco-text">{state.date}</strong> a las{' '}
           <strong style={{ color: 'var(--primary-color)' }}>{state.time}</strong> ha sido agendada con éxito.
         </p>
+        {selectedProducts.length > 0 && (
+          <div className="mt-5 w-full max-w-sm rounded-2xl border border-xinuco-border bg-xinuco-surface/40 p-4 text-left">
+            <p className="text-xs font-semibold uppercase tracking-wider text-xinuco-muted mb-2">Te guardamos</p>
+            <ul className="space-y-1.5">
+              {selectedProducts.map((p) => (
+                <li key={p.item_id} className="flex justify-between gap-3 text-sm">
+                  <span className="text-xinuco-text">{p.quantity} × {p.name}</span>
+                  <span className="text-xinuco-muted tabular-nums">{formatCOP(p.unit_price * p.quantity)}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3 pt-3 border-t border-xinuco-border flex justify-between text-sm">
+              <span className="text-xinuco-muted">Total a pagar en el local</span>
+              <strong className="tabular-nums" style={{ color: 'var(--primary-color)' }}>
+                {formatCOP((selectedService?.price_cop ?? 0) + productsTotal)}
+              </strong>
+            </div>
+            <p className="text-[11px] text-xinuco-muted mt-2">Los productos quedan apartados hasta el día de tu cita.</p>
+          </div>
+        )}
         <p className="text-xs text-xinuco-muted mt-4 opacity-60">Te contactaremos por WhatsApp si hay algún cambio.</p>
       </div>
     )
