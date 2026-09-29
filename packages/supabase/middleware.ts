@@ -12,6 +12,9 @@ import { NextResponse, type NextRequest } from 'next/server'
  *  - Se compara el slug de la URL con el slug del JWT para aislar tenants.
  *  - Cero consultas a la base de datos en el hot-path del Edge.
  */
+// Agregar aquí la consola de cada vertical nueva (/admin<vertical>).
+const VERTICAL_CONSOLE_SLUGS = ['adminbarberia']
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -65,6 +68,16 @@ export async function updateSession(request: NextRequest) {
   const slug = pathSegments[0]
   const innerRoute = pathSegments[1] ?? ''
 
+  // Las consolas de vertical no son tenants: su propio layout exige super_admin.
+  // Tratarlas como slug mandaba /adminbarberia/settings a /admin. Lista explícita
+  // (no startsWith) para no saltarse el aislamiento de un tenant con slug "admin…".
+  if (VERTICAL_CONSOLE_SLUGS.includes(slug)) {
+    return supabaseResponse
+  }
+
+  // El panel global vive en apps/web (en dev, otro puerto; en prod, mismo dominio).
+  const globalAdminUrl = new URL(`${process.env.NEXT_PUBLIC_WEB_URL ?? ''}/admin`, request.url)
+
   const isProtectedRoute =
     innerRoute === 'dashboard' ||
     innerRoute === 'settings' ||
@@ -80,11 +93,9 @@ export async function updateSession(request: NextRequest) {
 
   if (isLoginRoute && user) {
     if (user.app_metadata?.role === 'super_admin') {
-      // Super admin logueado → panel global en apps/web (reescrito via multi-zone).
-      url.pathname = '/admin'
-    } else {
-      url.pathname = `/${slug}/dashboard`
+      return NextResponse.redirect(globalAdminUrl)
     }
+    url.pathname = `/${slug}/dashboard`
     return NextResponse.redirect(url)
   }
 
@@ -94,8 +105,7 @@ export async function updateSession(request: NextRequest) {
   if (user && isProtectedRoute) {
     // Si es super_admin, no tiene tenant. Lo mandamos al panel global.
     if (user.app_metadata?.role === 'super_admin') {
-      url.pathname = '/admin'
-      return NextResponse.redirect(url)
+      return NextResponse.redirect(globalAdminUrl)
     }
 
     const userSlug = user.app_metadata?.slug as string | undefined
