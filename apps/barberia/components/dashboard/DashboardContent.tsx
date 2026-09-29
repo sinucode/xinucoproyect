@@ -4,6 +4,7 @@ import { getActiveShiftDetails } from '@/actions/finance'
 import { CashShiftManager } from '@/components/finance/CashShiftManager'
 import { RetailSaleButton } from '@/components/finance/RetailSaleButton'
 import { InteractiveAgenda } from './InteractiveAgenda'
+import { businessTodayISODate, addDaysToDateKey } from '@/lib/agenda-time'
 import { roleLabel } from '@/lib/roles'
 
 interface DashboardContentProps {
@@ -41,15 +42,17 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
 
   // 4. Citas de HOY filtradas por start_time (no created_at — una cita de hoy pudo
   //    haberse creado hace días).
-  const todayStr = new Date().toISOString().split('T')[0] // 'YYYY-MM-DD'
+  //    "Hoy" = fecha actual en America/Bogota (ver lib/agenda-time.ts).
+  const todayStr = businessTodayISODate() // 'YYYY-MM-DD'
+  const tomorrowStr = addDaysToDateKey(todayStr, 1)
 
   let query = supabase
     .from('appointments')
-    .select('*, customers(full_name, phone), services(name, price_cop)')
+    .select('*, customers(full_name, phone), services(name, price_cop, duration_minutes), staff(full_name)')
     .eq('business_id', businessId)
     .not('status', 'in', '("cancelled","no_show")')
-    .gte('start_time', `${todayStr}T00:00:00+00:00`)
-    .lte('start_time', `${todayStr}T23:59:59+00:00`)
+    .gte('start_time', `${todayStr}T00:00:00Z`)
+    .lt('start_time', `${tomorrowStr}T00:00:00Z`)
     .order('start_time', { ascending: true })
 
   // Si es barbero, filtrar solo sus propias citas via staff.user_id

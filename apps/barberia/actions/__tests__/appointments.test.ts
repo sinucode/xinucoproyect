@@ -58,7 +58,7 @@ describe('Appointments Server Actions', () => {
       const result = await updateAppointmentStatus('apt1', 'completed')
       
       expect(result.success).toBe(true)
-      expect(mockSupabase.update).toHaveBeenCalledWith({ status: 'completed' })
+      expect(mockSupabase.update).toHaveBeenCalledWith({ status: 'completed', updated_at: expect.any(String) })
       expect(logAction).toHaveBeenCalledWith(expect.objectContaining({
         action: 'appointment.status_changed',
         newValue: { status: 'completed' }

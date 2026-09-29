@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@xinuco/supabase/server'
+import { createClient, createAdminClient } from '@xinuco/supabase/server'
 import { isValid, parseISO } from 'date-fns'
 import { sendBookingConfirmation } from '@/lib/email/notifications'
 import { Preference } from 'mercadopago'
@@ -18,6 +18,57 @@ export interface BookingData {
   business_id: string
 }
 
+// ── RPC create_public_booking (SECURITY DEFINER) ─────────────────────────────
+// El anon no puede escribir customers/appointments bajo RLS, así que la reserva
+// pública pasa por esta RPC, que valida el slot y crea cliente + cita atómicamente.
+
+interface PublicBookingRpcResult {
+  appointment_id: string
+  customer_id:    string
+  staff_id:       string | null
+}
+
+const RPC_ERROR_MESSAGES: Record<string, string> = {
+  slot_unavailable:   'Ese horario ya no está disponible. Elige otro.',
+  service_not_found:  'El servicio no está disponible.',
+  business_not_found: 'La barbería no está disponible.',
+  missing_fields:     'Faltan datos obligatorios.',
+}
+
+async function callCreatePublicBooking(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  data: BookingData,
+  status: 'scheduled' | 'payment_pending',
+): Promise<
+  | { ok: true; result: PublicBookingRpcResult }
+  | { ok: false; error: { error: string; message: string } }
+> {
+  const { data: rpcData, error } = await supabase.rpc('create_public_booking', {
+    p_business_id: data.business_id,
+    p_service_id:  data.service_id,
+    p_staff_id:    data.staff_id === 'any' || !data.staff_id ? null : data.staff_id,
+    p_start_time:  data.start_time,
+    p_full_name:   data.full_name,
+    p_phone:       data.phone,
+    p_email:       data.email || null,
+    p_status:      status,
+  })
+
+  if (error) {
+    const known = Object.keys(RPC_ERROR_MESSAGES).find((k) => error.message?.includes(k))
+    if (known) return { ok: false, error: { error: known, message: RPC_ERROR_MESSAGES[known] } }
+    console.error('create_public_booking failed:', error)
+    return { ok: false, error: { error: 'db_error', message: 'No pudimos crear la cita. Inténtalo de nuevo.' } }
+  }
+
+  const result = rpcData as PublicBookingRpcResult | null
+  if (!result?.appointment_id) {
+    console.error('create_public_booking returned no appointment:', rpcData)
+    return { ok: false, error: { error: 'db_error', message: 'No pudimos crear la cita. Inténtalo de nuevo.' } }
+  }
+  return { ok: true, result }
+}
+
 // ── createBooking — reserva directa sin pago online ──────────────────────────
 
 export async function createBooking(bookingData: BookingData) {
@@ -30,53 +81,27 @@ export async function createBooking(bookingData: BookingData) {
     return { error: 'validation_error', message: 'La fecha/hora de inicio no es válida.' }
   }
 
-  const { full_name, phone, email, service_id, staff_id, start_time, business_id } = bookingData
+  const { business_id } = bookingData
 
-  // Upsert cliente
-  const { data: customer, error: customerError } = await supabase
-    .from('customers')
-    .upsert({ business_id, phone, full_name, email: email || null },
-             { onConflict: 'business_id,phone' })
-    .select('id')
-    .single()
+  const rpc = await callCreatePublicBooking(supabase, bookingData, 'scheduled')
+  if (!rpc.ok) return rpc.error
+  const { appointment_id, customer_id } = rpc.result
 
-  if (customerError || !customer) {
-    return { error: 'db_error', message: `Error en registro de cliente: ${customerError?.message}` }
-  }
-
-  // Insertar cita
-  const { data: appointment, error: appointmentError } = await supabase
-    .from('appointments')
-    .insert({
-      business_id,
-      customer_id: customer.id,
-      service_id,
-      staff_id: staff_id === 'any' ? null : staff_id,
-      start_time,
-      status: 'scheduled' as const,
-      notes: null,
-    })
-    .select('id')
-    .single()
-
-  if (appointmentError) {
-    return { error: 'db_error', message: `Error al crear la cita: ${appointmentError.message}` }
-  }
-
-  // Notificación (best-effort)
+  // Notificación (best-effort). Cliente service-role: el anon no puede leer de
+  // vuelta la cita/cliente bajo RLS.
   try {
-    await sendBookingConfirmation({ supabase, businessId: business_id,
-      appointmentId: appointment.id, customerId: customer.id })
+    const admin = await createAdminClient()
+    await sendBookingConfirmation({ supabase: admin, businessId: business_id,
+      appointmentId: appointment_id, customerId: customer_id })
   } catch { /* silenciar */ }
 
-  return { success: true, appointment_id: appointment.id, customer_id: customer.id }
+  return { success: true, appointment_id, customer_id }
 }
 
 // ── createBookingWithPayment — reserva + pago online con MercadoPago ─────────
 //
 // Flujo:
-//  1. Upsert cliente
-//  2. Crea cita con status 'payment_pending'
+//  1-2. RPC create_public_booking: cliente + cita con status 'payment_pending'
 //  3. Crea preferencia MP con external_reference = 'booking_{appointmentId}'
 //  4. Guarda registro en mp_payments (status: pending)
 //  5. Devuelve QR + link al wizard para mostrárselo al cliente
@@ -114,38 +139,11 @@ export async function createBookingWithPayment(
     return { error: 'mp_not_configured', message: 'MercadoPago no está configurado en este negocio.' }
   }
 
-  // ── 1. Upsert cliente ──────────────────────────────────────────────────────
-  const { data: customer, error: customerError } = await supabase
-    .from('customers')
-    .upsert({ business_id, phone, full_name, email: email || null },
-             { onConflict: 'business_id,phone' })
-    .select('id')
-    .single()
+  // ── 1-2. Cliente + cita en estado payment_pending (RPC atómica) ────────────
+  const rpc = await callCreatePublicBooking(supabase, bookingData, 'payment_pending')
+  if (!rpc.ok) return rpc.error
+  const { appointment_id: appointmentId, customer_id: customerId } = rpc.result
 
-  if (customerError || !customer) {
-    return { error: 'db_error', message: `Error de cliente: ${customerError?.message}` }
-  }
-
-  // ── 2. Crear cita en estado payment_pending ────────────────────────────────
-  const { data: appointment, error: appointmentError } = await supabase
-    .from('appointments')
-    .insert({
-      business_id,
-      customer_id: customer.id,
-      service_id,
-      staff_id: staff_id === 'any' ? null : staff_id,
-      start_time,
-      status: 'payment_pending' as const,
-      notes: null,
-    })
-    .select('id')
-    .single()
-
-  if (appointmentError) {
-    return { error: 'db_error', message: `Error al crear la cita: ${appointmentError.message}` }
-  }
-
-  const appointmentId  = appointment.id
   const externalRef    = `booking_${appointmentId}`   // prefijo que el webhook detecta
   const appUrl         = process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.xinuco.com'
   const isTestMode     = (process.env.MP_ACCESS_TOKEN ?? '').startsWith('TEST-')
@@ -176,7 +174,7 @@ export async function createBookingWithPayment(
         metadata: {
           business_id:    business_id,
           appointment_id: appointmentId,
-          customer_id:    customer.id,
+          customer_id:    customerId,
           booking_flow:   true,
         },
       },
@@ -188,8 +186,9 @@ export async function createBookingWithPayment(
     const qrUrl            = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(initPoint)}`
 
     // ── 4. Guardar registro mp_payments (pending) ───────────────────────────
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: mpRow } = await (supabase as any)
+    // Service-role: el anon no puede insertar en mp_payments.
+    const admin = await createAdminClient()
+    const { data: mpRow } = await admin
       .from('mp_payments')
       .insert({
         business_id,
@@ -209,7 +208,7 @@ export async function createBookingWithPayment(
     return {
       data: {
         appointment_id:     appointmentId,
-        customer_id:        customer.id,
+        customer_id:        customerId,
         preference_id:      preferenceId,
         init_point:         initPoint,
         sandbox_init_point: sandboxInitPoint,
@@ -222,7 +221,9 @@ export async function createBookingWithPayment(
     }
   } catch (err) {
     // MP falló — revertir la cita a cancelada para no dejar citas huérfanas
-    await supabase.from('appointments')
+    // (service-role: el anon no puede actualizar citas bajo RLS)
+    const adminForRevert = await createAdminClient()
+    await adminForRevert.from('appointments')
       .update({ status: 'cancelled' as const })
       .eq('id', appointmentId)
 

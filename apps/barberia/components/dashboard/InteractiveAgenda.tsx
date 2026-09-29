@@ -2,10 +2,10 @@
 
 import { useState, useTransition } from 'react'
 import { Play, Clock, CheckCircle2, XCircle, AlertCircle, CalendarX, Loader2, ArrowRight } from 'lucide-react'
-import { parseTimeRange, formatTime, getDurationMinutes } from '@xinuco/utils'
 import { updateAppointmentStatus } from '@/actions/appointments'
 import { CheckoutModal } from '../finance/CheckoutModal'
-import type { Appointment, AppointmentStatus } from '@xinuco/types'
+import { apptDateKey, businessTodayISODate, dayLabel, formatApptTime } from '@/lib/agenda-time'
+import type { AppointmentStatus } from '@xinuco/types'
 
 interface InteractiveAgendaProps {
   appointments: any[]
@@ -66,6 +66,15 @@ const STATUS_CONFIG: Record<AppointmentStatus, StatusConfig> = {
   },
 }
 
+const COP = new Intl.NumberFormat('es-CO', {
+  style: 'currency',
+  currency: 'COP',
+  maximumFractionDigits: 0,
+})
+
+const SECONDARY_BTN =
+  'text-xs px-2.5 py-1.5 rounded-lg border border-xinuco-border text-xinuco-muted hover:text-xinuco-text transition-colors shrink-0'
+
 export function InteractiveAgenda({
   appointments: initialAppointments,
   activeShiftId,
@@ -81,14 +90,16 @@ export function InteractiveAgenda({
   // Checkout Modal
   const [selectedAppt, setSelectedAppt] = useState<any | null>(null)
   const [checkoutWarning, setCheckoutWarning] = useState<string | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
 
   // Cambiar estado de cita
   const handleStatusChange = (appointmentId: string, nextStatus: AppointmentStatus) => {
     setUpdatingId(appointmentId)
+    setStatusError(null)
     startTransition(async () => {
       const result = await updateAppointmentStatus(appointmentId, nextStatus)
       if (result.error) {
-        alert(`Error al actualizar estado: ${result.error}`)
+        setStatusError(`Error al actualizar estado: ${result.error}`)
       } else {
         // Actualizar localmente para feedback inmediato
         setAppointments((prev) =>
@@ -121,12 +132,46 @@ export function InteractiveAgenda({
     window.location.reload() // Recargar para sincronizar el consolidado de caja
   }
 
+  // Agrupar por día (start_time en UTC = hora local del negocio). Sin fecha → al final.
+  const todayKey = businessTodayISODate()
+  const groups: { key: string; label: string; items: any[] }[] = []
+  const noDate: any[] = []
+  for (const appt of appointments) {
+    if (!appt.start_time) {
+      noDate.push(appt)
+      continue
+    }
+    const key = apptDateKey(appt.start_time)
+    let group = groups.find((g) => g.key === key)
+    if (!group) {
+      group = { key, label: dayLabel(key, todayKey), items: [] }
+      groups.push(group)
+    }
+    group.items.push(appt)
+  }
+  if (noDate.length > 0) groups.push({ key: 'sin-fecha', label: 'Sin fecha', items: noDate })
+
   return (
     <div className="space-y-6">
       {/* Advertencia de Caja Cerrada al intentar cobrar */}
       {checkoutWarning && (
         <div className="p-3 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-400 text-xs flex gap-2 animate-fade-in shrink-0">
           <span>{checkoutWarning}</span>
+        </div>
+      )}
+
+      {/* Error al cambiar estado */}
+      {statusError && (
+        <div className="p-3 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-400 text-xs flex gap-2 animate-fade-in shrink-0">
+          <span className="flex-1">{statusError}</span>
+          <button
+            type="button"
+            onClick={() => setStatusError(null)}
+            aria-label="Cerrar aviso"
+            className="shrink-0 font-bold hover:opacity-80"
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -139,21 +184,26 @@ export function InteractiveAgenda({
             <CalendarX size={24} style={{ color: 'var(--primary-color)' }} />
           </div>
           <div>
-            <p className="text-sm font-semibold text-xinuco-text">Sin citas para hoy</p>
-            <p className="text-xs text-xinuco-muted mt-1">Las nuevas citas aparecerán aquí</p>
+            <p className="text-sm font-semibold text-xinuco-text">No hay citas próximas</p>
+            <p className="text-xs text-xinuco-muted mt-1">Cuando alguien reserve, aparecerá aquí.</p>
           </div>
         </div>
       ) : (
-        <ul className="flex flex-col gap-2" aria-label="Lista de citas del día">
-          {appointments.map((appt) => {
+        groups.map((group) => (
+        <div key={group.key} className="flex flex-col gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-widest text-xinuco-muted mt-2">
+          {group.label}
+        </h3>
+        <ul className="flex flex-col gap-2" aria-label={`Citas: ${group.label}`}>
+          {group.items.map((appt) => {
             const customerName = appt.customers?.full_name || appt.customer_name || 'Cliente sin nombre'
             const customerPhone = appt.customers?.phone || appt.customer_phone
             const serviceName = appt.services?.name || appt.service_name || 'Servicio'
             const servicePrice = appt.services?.price_cop || 0
+            const barberName = appt.staff?.full_name || 'Sin asignar'
 
-            const parsed = appt.start_time ? { start: new Date(appt.start_time) } : parseTimeRange(appt.time_range ?? '')
-            const timeStr = parsed ? formatTime(parsed.start) : '—'
-            const duration = appt.time_range ? getDurationMinutes(appt.time_range) : 30
+            const timeStr = appt.start_time ? formatApptTime(appt.start_time) : '—'
+            const duration = appt.services?.duration_minutes ?? 30
 
             const cfg = STATUS_CONFIG[appt.status as AppointmentStatus] || STATUS_CONFIG.scheduled
             const Icon = cfg.Icon
@@ -164,8 +214,8 @@ export function InteractiveAgenda({
               <li key={appt.id} className="flex items-stretch gap-3 animate-fade-in">
                 {/* Columna hora */}
                 <time
-                  dateTime={parsed?.start.toISOString()}
-                  className="text-xs font-bold text-xinuco-muted w-12 shrink-0 pt-4 text-right leading-none"
+                  dateTime={appt.start_time ?? undefined}
+                  className="text-xs font-bold text-xinuco-muted w-16 shrink-0 pt-4 text-right leading-none"
                 >
                   {timeStr}
                 </time>
@@ -224,7 +274,17 @@ export function InteractiveAgenda({
                       <div className="flex items-center gap-2 text-xs text-xinuco-muted mt-0.5">
                         <span className="truncate">{serviceName}</span>
                         <span>•</span>
-                        <span>{duration} min</span>
+                        <span className="shrink-0">{duration} min</span>
+                        {servicePrice > 0 && (
+                          <>
+                            <span>•</span>
+                            <span className="shrink-0">{COP.format(servicePrice)}</span>
+                          </>
+                        )}
+                        <span>•</span>
+                        <span className="truncate">
+                          {appt.staff?.full_name ? `con ${barberName}` : barberName}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -250,6 +310,34 @@ export function InteractiveAgenda({
                           >
                             <Play size={11} fill="black" />
                             Iniciar
+                          </button>
+                        )}
+
+                        {appt.status === 'scheduled' && (
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`¿Marcar que ${customerName} no asistió?`)) {
+                                handleStatusChange(appt.id, 'no_show')
+                              }
+                            }}
+                            disabled={isPending}
+                            className={SECONDARY_BTN}
+                          >
+                            No asistió
+                          </button>
+                        )}
+
+                        {(appt.status === 'scheduled' || appt.status === 'payment_pending') && (
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`¿Cancelar la cita de ${customerName}?`)) {
+                                handleStatusChange(appt.id, 'cancelled')
+                              }
+                            }}
+                            disabled={isPending}
+                            className={`${SECONDARY_BTN} hover:!text-red-400 hover:!border-red-500/40`}
+                          >
+                            Cancelar
                           </button>
                         )}
 
@@ -282,6 +370,8 @@ export function InteractiveAgenda({
             )
           })}
         </ul>
+        </div>
+        ))
       )}
 
       {/* Checkout Modal */}

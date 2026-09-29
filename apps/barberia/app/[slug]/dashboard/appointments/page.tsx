@@ -2,7 +2,9 @@ import { Suspense } from 'react'
 import { createClient } from '@xinuco/supabase/server'
 import { redirect } from 'next/navigation'
 import { InteractiveAgenda } from '@/components/dashboard/InteractiveAgenda'
+import { NewAppointmentButton } from '@/components/dashboard/NewAppointmentButton'
 import { getActiveShiftDetails } from '@/actions/finance'
+import { businessTodayISODate } from '@/lib/agenda-time'
 
 interface AppointmentsPageProps {
   params: Promise<{ slug: string }>
@@ -33,10 +35,8 @@ export default async function AppointmentsPage({ params }: AppointmentsPageProps
     activeShiftId = shiftDetails?.shift?.id || null
   }
 
-  // 4. Obtener TODAS las citas futuras o de un rango (Aquí podríamos implementar paginación o filtro por mes)
-  // Por ahora, mostraremos las citas a partir de hoy para dar una vista de agenda general
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
+  // 4. Citas de hoy en adelante (por start_time, en hora local del negocio).
+  //    Ver lib/agenda-time.ts para la convención de tiempo.
 
   // 4a. Si es barbero, obtener su staff.id vinculado al user.id
   //     La relación es: auth.users.id → staff.user_id → staff.id → appointments.staff_id
@@ -55,10 +55,11 @@ export default async function AppointmentsPage({ params }: AppointmentsPageProps
 
   let query = supabase
     .from('appointments')
-    .select('*, customers(full_name, phone), services(name, price_cop)')
+    .select('*, customers(full_name, phone), services(name, price_cop, duration_minutes), staff(full_name)')
     .eq('business_id', businessId)
-    .gte('created_at', todayStart.toISOString())
+    .gte('start_time', `${businessTodayISODate()}T00:00:00Z`)
     .order('start_time', { ascending: true })
+    .limit(300)
 
   // Aplicar filtro de barbero usando staff_id correcto
   if (profile?.role === 'barber') {
@@ -77,11 +78,14 @@ export default async function AppointmentsPage({ params }: AppointmentsPageProps
     <div className="bg-xinuco-bg min-h-screen">
       <main className="px-4 py-6 pb-24 space-y-6 max-w-2xl mx-auto">
         <section aria-label="Encabezado de Agenda">
-          <h1 className="text-2xl font-bold text-xinuco-text">
-            Agenda Completa
-          </h1>
+          <div className="flex items-start justify-between gap-3">
+            <h1 className="text-2xl font-bold text-xinuco-text">
+              Agenda Completa
+            </h1>
+            <NewAppointmentButton slug={slug} />
+          </div>
           <p className="text-sm text-xinuco-muted mt-1">
-            Gestiona todas tus citas programadas e historial reciente.
+            Citas de hoy en adelante, agrupadas por día.
           </p>
         </section>
 
