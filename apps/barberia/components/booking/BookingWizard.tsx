@@ -140,9 +140,11 @@ interface BookingWizardProps {
   staff:            Staff[]
   mpBookingEnabled?: boolean
   bookableProducts?: BookableProducts
+  /** servicio → barberos que lo hacen (get_public_service_staff). Sin entrada = todos. */
+  serviceStaff?:    Record<string, string[]>
 }
 
-export function BookingWizard({ businessId, services, staff, mpBookingEnabled = false, bookableProducts }: BookingWizardProps) {
+export function BookingWizard({ businessId, services, staff, mpBookingEnabled = false, bookableProducts, serviceStaff }: BookingWizardProps) {
   const [state, dispatch] = useReducer(wizardReducer, initialState)
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -456,8 +458,13 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
             <span className="text-[10px] text-xinuco-muted -mt-1">Máx. disponibilidad</span>
           </button>
 
-          {/* Tarjetas del Staff */}
-          {staff.map(st => {
+          {/* Tarjetas del Staff (solo quienes hacen el servicio elegido) */}
+          {staff
+            .filter(st => {
+              const allowed = state.serviceId ? serviceStaff?.[state.serviceId] : undefined
+              return !allowed || allowed.includes(st.id)
+            })
+            .map(st => {
             const initials = st.full_name
               .split(' ')
               .map(n => n[0])

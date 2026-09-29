@@ -62,6 +62,10 @@ export default async function PublicBookingPage({ params }: PublicBookingPagePro
   ])
 
   // 3. Productos que el cliente puede apartar al reservar (error → deshabilitado)
+  // Barberos que hacen cada servicio (error → sin filtro: se muestran todos)
+  const { data: serviceStaffData } = await supabase.rpc('get_public_service_staff', { p_business_id: business.id })
+  const serviceStaff = (serviceStaffData ?? undefined) as Record<string, string[]> | undefined
+
   const { data: productsData, error: productsError } = await supabase.rpc('get_bookable_products', {
     p_business_id: business.id,
   })
@@ -134,6 +138,7 @@ export default async function PublicBookingPage({ params }: PublicBookingPagePro
           services={services}
           staff={staff}
           bookableProducts={bookableProducts}
+          serviceStaff={serviceStaff}
         />
       </main>
     </div>
