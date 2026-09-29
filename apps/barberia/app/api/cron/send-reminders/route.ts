@@ -1,8 +1,8 @@
 // ============================================================
 // app/api/cron/send-reminders/route.ts — RF18 Recordatorios
-// Vercel Cron invoca este endpoint cada hora.
-// Busca citas en el rango +22h a +26h que aún no tienen
-// recordatorio enviado y dispara el correo por Resend.
+// Vercel Cron lo invoca una vez al día (vercel.json: 13:00 UTC = 8:00 a. m.
+// Colombia) y envía el recordatorio de TODAS las citas programadas para
+// mañana (día del negocio) que aún no lo recibieron.
 //
 // Seguridad: el header Authorization: Bearer <CRON_SECRET>
 // es añadido automáticamente por Vercel cuando CRON_SECRET
@@ -13,6 +13,7 @@ import { NextResponse }          from 'next/server'
 import { createClient }          from '@supabase/supabase-js'
 import { sendBookingReminder }   from '@/lib/email/notifications'
 import type { Database }         from '@xinuco/types'
+import { businessTodayISODate, addDaysToDateKey } from '@/lib/agenda-time'
 
 // Forzar renderizado dinámico — esta ruta nunca debe ser cacheada por Next.js
 export const dynamic = 'force-dynamic'
@@ -45,17 +46,19 @@ export async function GET(request: Request) {
 
   const supabase: any = createClient<any>(supabaseUrl, serviceRoleKey)
 
-  // ── 3. Ventana de 24 h ± 2 h de tolerancia ────────────────────────────────
-  const now  = new Date()
-  const from = new Date(now.getTime() + 22 * 60 * 60 * 1000).toISOString()
-  const to   = new Date(now.getTime() + 26 * 60 * 60 * 1000).toISOString()
+  // ── 3. Ventana: el día de MAÑANA del negocio ──────────────────────────────
+  // start_time guarda la hora local como UTC (lib/agenda-time.ts), así que
+  // "mañana" es [mañanaT00:00Z, pasadoT00:00Z) — no now()+24h en UTC real.
+  const tomorrow = addDaysToDateKey(businessTodayISODate(), 1)
+  const from     = `${tomorrow}T00:00:00Z`
+  const to       = `${addDaysToDateKey(tomorrow, 1)}T00:00:00Z`
 
   const { data: appointments, error: fetchError } = await supabase
     .from('appointments')
     .select('id, business_id')
     .eq('status', 'scheduled')
     .gte('start_time', from)
-    .lte('start_time', to)
+    .lt('start_time', to)
 
   if (fetchError) {
     console.error('[cron/send-reminders] Error al obtener citas:', fetchError.message)

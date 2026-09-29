@@ -5,9 +5,27 @@
   "ignoreCommand": "npx turbo-ignore barberia",
   "outputDirectory": ".next",
   "rewrites": [
-    { "source": "/", "destination": "https://xinuco-web.vercel.app/" },
-    { "source": "/admin", "destination": "https://xinuco-web.vercel.app/admin" },
-    { "source": "/admin/:path*", "destination": "https://xinuco-web.vercel.app/admin/:path*" },
-    { "source": "/web-static/:path*", "destination": "https://xinuco-web.vercel.app/web-static/:path*" }
+    {
+      "source": "/",
+      "destination": "https://xinuco-web.vercel.app/"
+    },
+    {
+      "source": "/admin",
+      "destination": "https://xinuco-web.vercel.app/admin"
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "https://xinuco-web.vercel.app/admin/:path*"
+    },
+    {
+      "source": "/web-static/:path*",
+      "destination": "https://xinuco-web.vercel.app/web-static/:path*"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/send-reminders",
+      "schedule": "0 13 * * *"
+    }
   ]
 }

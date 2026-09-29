@@ -129,8 +129,8 @@ export function appointmentConfirmationEmail(data: {
   const productsTotal   = products.reduce((sum, p) => sum + p.quantity * p.unitPrice, 0)
 
   const detailRows: { label: string; value: string }[] = [
-    { label: 'Servicio',     value: data.serviceName },
-    { label: 'Profesional',  value: data.staffName ?? 'Cualquier disponible' },
+    { label: 'Servicio',     value: escapeHtml(data.serviceName) },
+    { label: 'Profesional',  value: data.staffName ? escapeHtml(data.staffName) : 'Cualquier disponible' },
     { label: 'Fecha y hora', value: fechaFormateada },
     { label: 'Duración',     value: `${data.durationMinutes} minutos` },
     { label: 'Precio',       value: precio },
@@ -184,14 +184,22 @@ export function appointmentReminderEmail(data: {
   staffName:     string | null
   startTime:     string
   businessPhone?: string
+  reservedProducts?: { name: string; quantity: number; unitPrice: number }[]
 }): string {
   const fechaFormateada = formatDateSpanish(data.startTime)
 
   const detailRows: { label: string; value: string }[] = [
-    { label: 'Servicio',     value: data.serviceName },
-    { label: 'Profesional',  value: data.staffName ?? 'Cualquier disponible' },
+    { label: 'Servicio',     value: escapeHtml(data.serviceName) },
+    { label: 'Profesional',  value: data.staffName ? escapeHtml(data.staffName) : 'Cualquier disponible' },
     { label: 'Fecha y hora', value: fechaFormateada },
   ]
+
+  for (const p of data.reservedProducts ?? []) {
+    detailRows.push({
+      label: 'Te guardamos',
+      value: `${p.quantity} × ${escapeHtml(p.name)} · ${formatCOP(p.quantity * p.unitPrice)}`,
+    })
+  }
 
   if (data.businessPhone) {
     detailRows.push({ label: 'Teléfono', value: data.businessPhone })
@@ -202,8 +210,8 @@ export function appointmentReminderEmail(data: {
       Recordatorio de tu cita
     </h1>
     <p style="margin:0 0 20px 0;font-size:14px;color:#999999;">
-      Hola <strong style="color:#F4F4F4;">${data.customerName}</strong>, te recordamos que mañana
-      tienes una cita en <strong style="color:#C5A059;">${data.businessName}</strong>.
+      Hola <strong style="color:#F4F4F4;">${escapeHtml(data.customerName)}</strong>, te recordamos que mañana
+      tienes una cita en <strong style="color:#C5A059;">${escapeHtml(data.businessName)}</strong>.
     </p>
 
     ${appointmentDetailsBlock(detailRows)}
@@ -230,7 +238,7 @@ export function appointmentCancellationEmail(data: {
   const fechaFormateada = formatDateSpanish(data.startTime)
 
   const detailRows: { label: string; value: string }[] = [
-    { label: 'Servicio',     value: data.serviceName },
+    { label: 'Servicio',     value: escapeHtml(data.serviceName) },
     { label: 'Fecha y hora', value: fechaFormateada },
   ]
 
@@ -243,8 +251,8 @@ export function appointmentCancellationEmail(data: {
       Tu cita ha sido cancelada
     </h1>
     <p style="margin:0 0 20px 0;font-size:14px;color:#999999;">
-      Hola <strong style="color:#F4F4F4;">${data.customerName}</strong>, te informamos que tu cita
-      en <strong style="color:#C5A059;">${data.businessName}</strong> ha sido cancelada.
+      Hola <strong style="color:#F4F4F4;">${escapeHtml(data.customerName)}</strong>, te informamos que tu cita
+      en <strong style="color:#C5A059;">${escapeHtml(data.businessName)}</strong> ha sido cancelada.
     </p>
 
     ${appointmentDetailsBlock(detailRows)}
