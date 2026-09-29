@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { getActiveShiftDetails } from '@/actions/finance'
 import { CashShiftManager } from '@/components/finance/CashShiftManager'
 import { RetailSaleButton } from '@/components/finance/RetailSaleButton'
+import { NewAppointmentButton } from '@/components/dashboard/NewAppointmentButton'
 import { InteractiveAgenda } from './InteractiveAgenda'
 import { businessTodayISODate, addDaysToDateKey, businessHour } from '@/lib/agenda-time'
 import { roleLabel } from '@/lib/roles'
@@ -133,13 +134,17 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
               </span>
             )}
           </h2>
-          <a
-            href={`/${slug}/dashboard/appointments`}
-            id="link-view-all-appointments"
-            className="text-xs text-xinuco-primary hover:underline transition-colors"
-          >
-            Ver todas →
-          </a>
+          <div className="flex items-center gap-3">
+            <a
+              href={`/${slug}/dashboard/appointments`}
+              id="link-view-all-appointments"
+              className="text-xs text-xinuco-primary hover:underline transition-colors"
+            >
+              Ver todas →
+            </a>
+            {/* Abre la reserva pública en otra pestaña */}
+            <NewAppointmentButton slug={slug} />
+          </div>
         </div>
 
         {/* Agenda Interactiva Premium */}
