@@ -2,21 +2,30 @@ import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { searchCustomers } from '@/actions/crm'
+import { listCustomers } from '@/actions/crm'
 import { CustomerCRM } from '@/components/dashboard/crm/CustomerCRM'
 import type { BusinessFeatures } from '@xinuco/types'
+import { businessTodayISODate } from '@/lib/agenda-time'
+import { parseCustomerFilter, parseCustomerSort } from '@/lib/crm-utils'
 
 export const metadata: Metadata = {
   title: 'Clientes — Xinuco',
   description: 'Expediente del cliente — historial, notas y preferencias',
 }
 
+function firstParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
+}
+
 export default async function CRMPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { slug } = await params
+  const sp = await searchParams
 
   // 1. Auth guard
   const supabase = await createClient()
@@ -34,8 +43,6 @@ export default async function CRMPage({
 
   if (!profile?.business_id) redirect(`/${slug}/login`)
 
-  const businessId = profile.business_id
-
   // 3. Feature gate: verificar flag crm
   const { data: biz } = await supabase
     .from('businesses')
@@ -46,17 +53,26 @@ export default async function CRMPage({
   const features = (biz?.features_enabled ?? {}) as unknown as BusinessFeatures
   if (!features?.crm) redirect(`/${slug}/dashboard`)
 
-  // 4. Cargar clientes recientes
-  const recentCustomers = await searchCustomers(businessId, '')
+  // 4. Listado (búsqueda, filtro, orden y página desde la URL) vía RPC list_customers
+  const query  = firstParam(sp.q).trim().slice(0, 100)
+  const filter = parseCustomerFilter(firstParam(sp.filter))
+  const sort   = parseCustomerSort(firstParam(sp.sort))
+  const rawPage = parseInt(firstParam(sp.page), 10)
+  const page   = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 0
+
+  const list = await listCustomers({ query, filter, sort, page })
 
   return (
     <div className="flex flex-col gap-6 max-w-5xl mx-auto pb-24">
       <Suspense fallback={<CRMSkeleton />}>
         <CustomerCRM
-          initialCustomers={recentCustomers}
-          businessId={businessId}
-          staffId={user.id}
-          slug={slug}
+          customers={list.items}
+          total={list.total}
+          page={list.page}
+          query={query}
+          filter={filter}
+          todayKey={businessTodayISODate()}
+          loadError={list.error}
         />
       </Suspense>
     </div>

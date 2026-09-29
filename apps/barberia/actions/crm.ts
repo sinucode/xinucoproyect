@@ -2,7 +2,15 @@
 
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
-import type { Customer, CustomerNote, CustomerTag, Staff, Service, Appointment } from '@xinuco/types'
+import type { Customer, Staff } from '@xinuco/types'
+import {
+  CUSTOMERS_PAGE_SIZE,
+  businessNowWallISO,
+  parseCustomerFilter,
+  parseCustomerSort,
+  validateCustomerInput,
+  type CustomerInput,
+} from '@/lib/crm-utils'
 
 // ── Tipos de resultado ────────────────────────────────────────────────────────
 
@@ -11,144 +19,219 @@ interface ActionResult {
   error?:   string
 }
 
-// Resultado enriquecido de búsqueda de clientes
-export interface CustomerSearchResult {
-  id:              string
-  business_id:     string
-  full_name:       string
-  phone:           string
-  email:           string | null
+/** Fila de la lista (RPC list_customers). */
+export interface CustomerListItem {
+  id:                 string
+  full_name:          string
+  phone:              string
+  email:              string | null
+  birthday:           string | null   // 'YYYY-MM-DD'
   preferred_staff_id: string | null
-  created_at:      string
-  updated_at:      string
-  last_visit:      string | null   // ISO string de la última cita completada
-  total_visits:    number
-  tags:            string[]
+  created_at:         string          // instante real
+  visits:             number          // citas completadas
+  last_visit:         string | null   // start_time (hora local como UTC)
+  next_appointment:   string | null   // start_time (hora local como UTC)
+  total_spent:        number          // COP, ventas pagadas
+  tags:               string[]
 }
+
+export interface CustomerListResult {
+  items: CustomerListItem[]
+  total: number
+  page:  number
+  error?: string
+}
+
+export interface ListCustomersParams {
+  query?:  string
+  filter?: string
+  sort?:   string
+  page?:   number
+}
+
+export type CustomerRecord = Customer & { birthday: string | null }
 
 // Visita con detalles para el historial
 export interface CustomerVisit {
   id:           string
-  created_at:   string
-  start_time:   string | null
+  start_time:   string            // hora local como UTC
   status:       string
-  total_paid:   number            // COP INTEGER
   service_name: string
   staff_name:   string | null
+  amount_paid:  number | null     // venta pagada de esta cita (sales.appointment_id), si existe
 }
 
-// Nota enriquecida con nombre del autor
+// Próxima cita abierta
+export interface CustomerUpcomingAppointment {
+  id:           string
+  start_time:   string
+  status:       string
+  service_name: string
+  staff_name:   string | null
+  products:     { name: string; quantity: number }[]
+}
+
+// Producto comprado (sale_items type product)
+export interface CustomerPurchasedProduct {
+  description: string
+  quantity:    number
+  total_price: number
+  created_at:  string             // instante real
+}
+
+// Fila de customer_notes
+export interface CustomerNote {
+  id:             string
+  business_id:    string
+  customer_id:    string
+  staff_id:       string | null   // ficha de barbero del autor (null si es admin sin ficha)
+  appointment_id: string | null
+  content:        string
+  created_at:     string          // instante real
+}
+
+// Nota enriquecida con autor
 export interface CustomerNoteWithAuthor extends CustomerNote {
-  staff_name: string | null
+  created_by:  string | null
+  author_name: string | null
+  staff_name:  string | null
 }
 
 // Expediente completo del cliente
 export interface CustomerExpediente {
-  customer:     Customer
-  total_visits: number
-  total_spent:  number            // COP INTEGER
-  last_visit:   string | null
-  tags:         string[]
-  notes:        CustomerNoteWithAuthor[]
-  visits:       CustomerVisit[]
-  staff_list:   Pick<Staff, 'id' | 'full_name'>[]  // para el selector de barbero preferido
+  customer:           CustomerRecord
+  total_visits:       number      // citas completadas
+  total_spent:        number      // COP INTEGER — ventas pagadas
+  paid_sales:         number
+  avg_ticket:         number      // COP INTEGER
+  last_visit:         string | null
+  tags:               string[]
+  notes:              CustomerNoteWithAuthor[]
+  visits:             CustomerVisit[]
+  upcoming:           CustomerUpcomingAppointment[]
+  purchased_products: CustomerPurchasedProduct[]
+  staff_list:         Pick<Staff, 'id' | 'full_name'>[]  // para el selector de barbero preferido
+}
+
+// ── Helpers internos ──────────────────────────────────────────────────────────
+
+type SupabaseClient = Awaited<ReturnType<typeof createClient>>
+
+interface TenantContext {
+  userId:     string
+  businessId: string
+  fullName:   string | null
+}
+
+/** businessId SIEMPRE desde el perfil de la sesión (nunca del cliente). */
+async function getTenantContext(supabase: SupabaseClient): Promise<TenantContext | null> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('business_id, full_name')
+    .eq('id', user.id)
+    .single()
+
+  const p = profile as { business_id?: string | null; full_name?: string | null } | null
+  if (!p?.business_id) return null
+  return { userId: user.id, businessId: p.business_id, fullName: p.full_name ?? null }
+}
+
+async function customerBelongsToBusiness(
+  supabase:   SupabaseClient,
+  businessId: string,
+  customerId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from('customers')
+    .select('id')
+    .eq('business_id', businessId)
+    .eq('id', customerId)
+    .maybeSingle()
+  return !!data
+}
+
+const DUPLICATE_PHONE_ERROR = 'Ya existe un cliente con ese teléfono.'
+const NOT_AUTHENTICATED     = 'No autenticado.'
+const CUSTOMER_NOT_FOUND    = 'Cliente no encontrado.'
+
+const num = (v: unknown): number => {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// searchCustomers
-// Busca clientes por nombre o teléfono (ilike). Enriquece con última visita,
-// total de visitas y etiquetas.
+// listCustomers
+// Lista paginada (30) vía RPC list_customers: búsqueda, filtro y orden con
+// métricas REALES (gasto = ventas pagadas). SECURITY INVOKER → RLS de tenant.
 // ════════════════════════════════════════════════════════════════════════════
 
-export async function searchCustomers(
-  businessId: string,
-  query: string
-): Promise<CustomerSearchResult[]> {
+export async function listCustomers(params: ListCustomersParams = {}): Promise<CustomerListResult> {
   const supabase = await createClient()
+  const ctx = await getTenantContext(supabase)
 
-  // Construir filtro: si hay query filtramos, si no devolvemos los últimos 10
-  let customersQuery = supabase
-    .from('customers')
-    .select('id, business_id, full_name, phone, email, preferred_staff_id, created_at, updated_at')
-    .eq('business_id', businessId)
+  const filter = parseCustomerFilter(params.filter)
+  const sort   = parseCustomerSort(params.sort)
+  const rawPage = Math.floor(Number(params.page))
+  const page   = Number.isFinite(rawPage) && rawPage > 0 ? Math.min(rawPage, 10_000) : 0
+  const query  = (params.query ?? '').trim().slice(0, 100)
 
-  if (query.trim().length > 0) {
-    const q = `%${query.trim()}%`
-    customersQuery = customersQuery.or(`full_name.ilike.${q},phone.ilike.${q}`)
-  }
+  if (!ctx) return { items: [], total: 0, page, error: NOT_AUTHENTICATED }
 
-  const { data: customers, error: custErr } = await customersQuery
-    .order('updated_at', { ascending: false })
-    .limit(20)
+  const { data, error } = await supabase.rpc('list_customers', {
+    p_business_id: ctx.businessId,
+    p_query:       query || null,
+    p_filter:      filter,
+    p_sort:        sort,
+    p_limit:       CUSTOMERS_PAGE_SIZE,
+    p_offset:      page * CUSTOMERS_PAGE_SIZE,
+  })
 
-  if (custErr) throw custErr
-  if (!customers || customers.length === 0) return []
+  if (error) return { items: [], total: 0, page, error: error.message }
 
-  const customerIds = customers.map(c => c.id)
-
-  // Obtener última visita y total de visitas por cliente en una sola query
-  const { data: visits, error: visitsErr } = await supabase
-    .from('appointments')
-    .select('customer_id, created_at, status')
-    .eq('business_id', businessId)
-    .in('customer_id', customerIds)
-    .eq('status', 'completed')
-    .order('created_at', { ascending: false })
-
-  if (visitsErr) throw visitsErr
-
-  // Obtener tags
-  const { data: tags, error: tagsErr } = await supabase
-    .from('customer_tags')
-    .select('customer_id, tag')
-    .eq('business_id', businessId)
-    .in('customer_id', customerIds)
-
-  if (tagsErr) throw tagsErr
-
-  // Agrupar visitas y tags por customer_id
-  const visitMap = new Map<string, { last_visit: string | null; count: number }>()
-  for (const v of visits ?? []) {
-    const existing = visitMap.get(v.customer_id)
-    if (!existing) {
-      visitMap.set(v.customer_id, { last_visit: v.created_at, count: 1 })
-    } else {
-      existing.count += 1
-    }
-  }
-
-  const tagMap = new Map<string, string[]>()
-  for (const t of tags ?? []) {
-    const arr = tagMap.get(t.customer_id) ?? []
-    arr.push(t.tag)
-    tagMap.set(t.customer_id, arr)
-  }
-
-  return customers.map(c => ({
-    ...c,
-    preferred_staff_id: c.preferred_staff_id ?? null,
-    last_visit:   visitMap.get(c.id)?.last_visit   ?? null,
-    total_visits: visitMap.get(c.id)?.count         ?? 0,
-    tags:         tagMap.get(c.id)                  ?? [],
+  const payload = (data ?? {}) as { total?: unknown; items?: Record<string, unknown>[] }
+  const items: CustomerListItem[] = (payload.items ?? []).map((r) => ({
+    id:                 r.id as string,
+    full_name:          r.full_name as string,
+    phone:              (r.phone as string) ?? '',
+    email:              (r.email as string | null) ?? null,
+    birthday:           (r.birthday as string | null) ?? null,
+    preferred_staff_id: (r.preferred_staff_id as string | null) ?? null,
+    created_at:         r.created_at as string,
+    visits:             num(r.visits),
+    last_visit:         (r.last_visit as string | null) ?? null,
+    next_appointment:   (r.next_appointment as string | null) ?? null,
+    total_spent:        num(r.total_spent),
+    tags:               Array.isArray(r.tags) ? (r.tags as string[]) : [],
   }))
+
+  return { items, total: num(payload.total), page }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
 // getCustomerExpediente
-// Carga el perfil completo: datos del cliente + historial de citas (últimas 20)
-// + notas del equipo + etiquetas + staff disponible para el selector.
+// Perfil completo: datos, historial (últimas 30 por start_time), próximas citas
+// con productos apartados, notas, etiquetas, staff activo y dinero REAL
+// (sales pagadas + productos comprados).
 // ════════════════════════════════════════════════════════════════════════════
 
-export async function getCustomerExpediente(
-  businessId: string,
-  customerId:  string
-): Promise<CustomerExpediente | null> {
+export async function getCustomerExpediente(customerId: string): Promise<CustomerExpediente | null> {
   const supabase = await createClient()
+  const ctx = await getTenantContext(supabase)
+  if (!ctx) return null
+  const { businessId } = ctx
 
-  // Cargar todo en paralelo
+  const nowWall = businessNowWallISO()
+
   const [
     customerResult,
     appointmentsResult,
+    upcomingResult,
+    completedResult,
+    salesResult,
+    productsResult,
     notesResult,
     tagsResult,
     staffResult,
@@ -158,33 +241,67 @@ export async function getCustomerExpediente(
       .select('*')
       .eq('business_id', businessId)
       .eq('id', customerId)
-      .single(),
+      .maybeSingle(),
 
+    // Historial: por start_time desc
+    supabase
+      .from('appointments')
+      .select('id, start_time, status, services ( name ), staff:staff_id ( full_name )')
+      .eq('business_id', businessId)
+      .eq('customer_id', customerId)
+      .order('start_time', { ascending: false })
+      .limit(30),
+
+    // Próximas citas abiertas (start_time >= ahora del negocio) + productos apartados
     supabase
       .from('appointments')
       .select(`
-        id,
-        created_at,
-        start_time,
-        status,
-        services!inner ( name, price_cop ),
-        staff:staff_id ( full_name )
+        id, start_time, status,
+        services ( name ),
+        staff:staff_id ( full_name ),
+        appointment_products ( quantity, inventory_items ( name ) )
       `)
       .eq('business_id', businessId)
       .eq('customer_id', customerId)
+      .in('status', ['scheduled', 'payment_pending'])
+      .gte('start_time', nowWall)
+      .order('start_time', { ascending: true })
+      .limit(10),
+
+    // Visitas completadas: conteo real + última
+    supabase
+      .from('appointments')
+      .select('start_time', { count: 'exact' })
+      .eq('business_id', businessId)
+      .eq('customer_id', customerId)
+      .eq('status', 'completed')
+      .order('start_time', { ascending: false })
+      .limit(1),
+
+    // Dinero real: ventas pagadas
+    supabase
+      .from('sales')
+      .select('appointment_id, total_amount')
+      .eq('business_id', businessId)
+      .eq('customer_id', customerId)
+      .eq('status', 'paid'),
+
+    // Productos comprados (últimos 10)
+    supabase
+      .from('sale_items')
+      .select('description, quantity, total_price, created_at, sales!inner ( customer_id, status )')
+      .eq('business_id', businessId)
+      .eq('item_type', 'product')
+      .eq('sales.customer_id', customerId)
+      .eq('sales.status', 'paid')
       .order('created_at', { ascending: false })
-      .limit(20),
+      .limit(10),
 
     supabase
       .from('customer_notes')
       .select(`
-        id,
-        business_id,
-        customer_id,
-        staff_id,
-        appointment_id,
-        content,
-        created_at,
+        id, business_id, customer_id, staff_id, appointment_id, content, created_at,
+        created_by, author_name,
         staff:staff_id ( full_name )
       `)
       .eq('business_id', businessId)
@@ -206,40 +323,78 @@ export async function getCustomerExpediente(
   ])
 
   if (customerResult.error || !customerResult.data) return null
+  const customer = customerResult.data as unknown as CustomerRecord
 
-  const customer = customerResult.data as unknown as Customer
-
-  // Mapear visitas
-  type AppointmentRow = {
-    id:         string
-    created_at: string
-    start_time: string | null
-    status:     string
-    services:   { name: string; price_cop: number } | null
-    staff:      { full_name: string } | null
+  // ── Ventas pagadas → totales y monto por cita ───────────────────────────────
+  type SaleRow = { appointment_id: string | null; total_amount: number }
+  const sales = (salesResult.data ?? []) as unknown as SaleRow[]
+  const totalSpent = sales.reduce((sum, s) => sum + num(s.total_amount), 0)
+  const paidByAppt = new Map<string, number>()
+  for (const s of sales) {
+    if (!s.appointment_id) continue
+    paidByAppt.set(s.appointment_id, (paidByAppt.get(s.appointment_id) ?? 0) + num(s.total_amount))
   }
 
-  const rawAppts = (appointmentsResult.data ?? []) as unknown as AppointmentRow[]
+  // ── Próximas citas ──────────────────────────────────────────────────────────
+  type One<T> = T | T[] | null
+  type UpcomingRow = {
+    id: string
+    start_time: string
+    status: string
+    services: One<{ name: string }>
+    staff: One<{ full_name: string }>
+    appointment_products: { quantity: number; inventory_items: One<{ name: string }> }[] | null
+  }
+  const first = <T,>(v: One<T>): T | null => (Array.isArray(v) ? (v[0] ?? null) : v)
 
-  const visits: CustomerVisit[] = rawAppts.map(a => ({
+  const upcoming: CustomerUpcomingAppointment[] = ((upcomingResult.data ?? []) as unknown as UpcomingRow[]).map((a) => ({
     id:           a.id,
-    created_at:   a.created_at,
-    start_time:   a.start_time ?? null,
+    start_time:   a.start_time,
     status:       a.status,
-    total_paid:   a.services?.price_cop ?? 0,
-    service_name: a.services?.name      ?? 'Servicio desconocido',
-    staff_name:   a.staff?.full_name    ?? null,
+    service_name: first(a.services)?.name ?? 'Servicio',
+    staff_name:   first(a.staff)?.full_name ?? null,
+    products: (a.appointment_products ?? []).map((p) => ({
+      name:     first(p.inventory_items)?.name ?? 'Producto',
+      quantity: num(p.quantity),
+    })),
+  }))
+  const upcomingIds = new Set(upcoming.map((u) => u.id))
+
+  // ── Historial (sin las próximas, que van en su propia sección) ──────────────
+  type ApptRow = {
+    id: string
+    start_time: string
+    status: string
+    services: One<{ name: string }>
+    staff: One<{ full_name: string }>
+  }
+  const visits: CustomerVisit[] = ((appointmentsResult.data ?? []) as unknown as ApptRow[])
+    .filter((a) => !upcomingIds.has(a.id))
+    .map((a) => ({
+      id:           a.id,
+      start_time:   a.start_time,
+      status:       a.status,
+      service_name: first(a.services)?.name ?? 'Servicio desconocido',
+      staff_name:   first(a.staff)?.full_name ?? null,
+      amount_paid:  paidByAppt.has(a.id) ? (paidByAppt.get(a.id) as number) : null,
+    }))
+
+  // ── Productos comprados ─────────────────────────────────────────────────────
+  type ProductRow = { description: string; quantity: number; total_price: number; created_at: string }
+  const purchased_products: CustomerPurchasedProduct[] = ((productsResult.data ?? []) as unknown as ProductRow[]).map((p) => ({
+    description: p.description,
+    quantity:    num(p.quantity),
+    total_price: num(p.total_price),
+    created_at:  p.created_at,
   }))
 
-  const completedVisits = visits.filter(v => v.status === 'completed')
-  const totalSpent = completedVisits.reduce((sum, v) => sum + v.total_paid, 0)
-  const lastVisit  = completedVisits[0]?.created_at ?? null
-
-  // Mapear notas
-  type NoteRow = CustomerNote & { staff: { full_name: string } | null }
-  const rawNotes = (notesResult.data ?? []) as unknown as NoteRow[]
-
-  const notes: CustomerNoteWithAuthor[] = rawNotes.map(n => ({
+  // ── Notas ───────────────────────────────────────────────────────────────────
+  type NoteRow = CustomerNote & {
+    created_by: string | null
+    author_name: string | null
+    staff: One<{ full_name: string }>
+  }
+  const notes: CustomerNoteWithAuthor[] = ((notesResult.data ?? []) as unknown as NoteRow[]).map((n) => ({
     id:             n.id,
     business_id:    n.business_id,
     customer_id:    n.customer_id,
@@ -247,77 +402,113 @@ export async function getCustomerExpediente(
     appointment_id: n.appointment_id,
     content:        n.content,
     created_at:     n.created_at,
-    staff_name:     n.staff?.full_name ?? null,
+    created_by:     n.created_by ?? null,
+    author_name:    n.author_name ?? null,
+    staff_name:     first(n.staff)?.full_name ?? null,
   }))
 
-  const tags = (tagsResult.data ?? []).map(t => t.tag)
-  const staffList = (staffResult.data ?? []) as unknown as Pick<Staff, 'id' | 'full_name'>[]
+  const completedRows = (completedResult.data ?? []) as unknown as { start_time: string }[]
+  const totalVisits = completedResult.count ?? completedRows.length
+  const paidSales = sales.length
 
   return {
     customer,
-    total_visits: completedVisits.length,
-    total_spent:  totalSpent,
-    last_visit:   lastVisit,
-    tags,
+    total_visits:       totalVisits,
+    total_spent:        totalSpent,
+    paid_sales:         paidSales,
+    avg_ticket:         paidSales > 0 ? Math.round(totalSpent / paidSales) : 0,
+    last_visit:         completedRows[0]?.start_time ?? null,
+    tags:               (tagsResult.data ?? []).map((t) => (t as { tag: string }).tag),
     notes,
     visits,
-    staff_list: staffList,
+    upcoming,
+    purchased_products,
+    staff_list:         (staffResult.data ?? []) as unknown as Pick<Staff, 'id' | 'full_name'>[],
   }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
 // addCustomerNote
-// Inserta una nueva nota técnica del barbero sobre el cliente.
+// Autor = usuario de la sesión: created_by, author_name (perfil) y staff_id
+// (ficha de barbero con user_id = usuario, o null para admins sin ficha).
 // ════════════════════════════════════════════════════════════════════════════
 
 export async function addCustomerNote(
-  businessId:     string,
   customerId:     string,
-  staffId:        string,
   content:        string,
-  appointmentId?: string
+  appointmentId?: string,
 ): Promise<ActionResult & { note?: CustomerNoteWithAuthor }> {
-  const supabase = await createClient()
+  const text = (content ?? '').trim()
+  if (!text) return { error: 'El contenido de la nota no puede estar vacío.' }
+  if (text.length > 1000) return { error: 'La nota no puede superar 1000 caracteres.' }
 
-  if (!content.trim()) {
-    return { error: 'El contenido de la nota no puede estar vacío.' }
+  const supabase = await createClient()
+  const ctx = await getTenantContext(supabase)
+  if (!ctx) return { error: NOT_AUTHENTICATED }
+
+  if (!(await customerBelongsToBusiness(supabase, ctx.businessId, customerId))) {
+    return { error: CUSTOMER_NOT_FOUND }
   }
+
+  if (appointmentId) {
+    const { data: appt } = await supabase
+      .from('appointments')
+      .select('id')
+      .eq('business_id', ctx.businessId)
+      .eq('customer_id', customerId)
+      .eq('id', appointmentId)
+      .maybeSingle()
+    if (!appt) return { error: 'Cita no encontrada.' }
+  }
+
+  // staff.id del usuario (si tiene ficha de barbero)
+  const { data: staffRow } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('business_id', ctx.businessId)
+    .eq('user_id', ctx.userId)
+    .maybeSingle()
+  const staffId = (staffRow as { id?: string } | null)?.id ?? null
 
   const { data, error } = await supabase
     .from('customer_notes')
     .insert({
-      business_id:    businessId,
+      business_id:    ctx.businessId,
       customer_id:    customerId,
       staff_id:       staffId,
+      created_by:     ctx.userId,
+      author_name:    ctx.fullName,
       appointment_id: appointmentId ?? null,
-      content:        content.trim(),
+      content:        text,
     })
     .select(`
-      id,
-      business_id,
-      customer_id,
-      staff_id,
-      appointment_id,
-      content,
-      created_at,
+      id, business_id, customer_id, staff_id, appointment_id, content, created_at,
+      created_by, author_name,
       staff:staff_id ( full_name )
     `)
     .single()
 
   if (error) return { error: error.message }
 
-  type NoteRow = CustomerNote & { staff: { full_name: string } | null }
-  const row = data as unknown as NoteRow
+  type Row = CustomerNote & {
+    created_by: string | null
+    author_name: string | null
+    staff: { full_name: string } | { full_name: string }[] | null
+  }
+  const row = data as unknown as Row
+  const staffJoin = Array.isArray(row.staff) ? (row.staff[0] ?? null) : row.staff
 
   const note: CustomerNoteWithAuthor = {
     id:             row.id,
     business_id:    row.business_id,
     customer_id:    row.customer_id,
-    staff_id:       row.staff_id,
-    appointment_id: row.appointment_id,
+    staff_id:       row.staff_id ?? null,
+    appointment_id: row.appointment_id ?? null,
     content:        row.content,
     created_at:     row.created_at,
-    staff_name:     row.staff?.full_name ?? null,
+    created_by:     row.created_by ?? ctx.userId,
+    author_name:    row.author_name ?? ctx.fullName,
+    staff_name:     staffJoin?.full_name ?? null,
   }
 
   revalidatePath('/[slug]/dashboard/crm', 'page')
@@ -325,19 +516,111 @@ export async function addCustomerNote(
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// createCustomer / updateCustomer
+// Cualquier rol del negocio puede crear/editar. businessId desde el perfil.
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function createCustomer(
+  input: CustomerInput,
+): Promise<ActionResult & { customerId?: string }> {
+  const validated = validateCustomerInput(input)
+  if ('error' in validated) return { error: validated.error }
+  const v = validated.value
+
+  const supabase = await createClient()
+  const ctx = await getTenantContext(supabase)
+  if (!ctx) return { error: NOT_AUTHENTICATED }
+
+  const { data: dup } = await supabase
+    .from('customers')
+    .select('id')
+    .eq('business_id', ctx.businessId)
+    .eq('phone', v.phone)
+    .maybeSingle()
+  if (dup) return { error: DUPLICATE_PHONE_ERROR }
+
+  const { data, error } = await supabase
+    .from('customers')
+    .insert({
+      business_id: ctx.businessId,
+      full_name:   v.full_name,
+      phone:       v.phone,
+      email:       v.email,
+      birthday:    v.birthday,
+    })
+    .select('id')
+    .single()
+
+  if (error) {
+    return { error: error.code === '23505' ? DUPLICATE_PHONE_ERROR : error.message }
+  }
+
+  revalidatePath('/[slug]/dashboard/crm', 'page')
+  return { success: true, customerId: (data as { id: string } | null)?.id }
+}
+
+export async function updateCustomer(
+  customerId: string,
+  input:      CustomerInput,
+): Promise<ActionResult> {
+  const validated = validateCustomerInput(input)
+  if ('error' in validated) return { error: validated.error }
+  const v = validated.value
+
+  const supabase = await createClient()
+  const ctx = await getTenantContext(supabase)
+  if (!ctx) return { error: NOT_AUTHENTICATED }
+
+  if (!(await customerBelongsToBusiness(supabase, ctx.businessId, customerId))) {
+    return { error: CUSTOMER_NOT_FOUND }
+  }
+
+  const { data: dup } = await supabase
+    .from('customers')
+    .select('id')
+    .eq('business_id', ctx.businessId)
+    .eq('phone', v.phone)
+    .neq('id', customerId)
+    .maybeSingle()
+  if (dup) return { error: DUPLICATE_PHONE_ERROR }
+
+  const { error } = await supabase
+    .from('customers')
+    .update({
+      full_name: v.full_name,
+      phone:     v.phone,
+      email:     v.email,
+      birthday:  v.birthday,
+    })
+    .eq('business_id', ctx.businessId)
+    .eq('id', customerId)
+
+  if (error) {
+    return { error: error.code === '23505' ? DUPLICATE_PHONE_ERROR : error.message }
+  }
+
+  revalidatePath('/[slug]/dashboard/crm', 'page')
+  return { success: true }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // updateCustomerTags
-// Reemplaza todas las etiquetas del cliente de forma atómica
-// (DELETE + INSERT dentro de la misma transacción lógica).
+// Reemplaza todas las etiquetas del cliente (DELETE + INSERT).
 // ════════════════════════════════════════════════════════════════════════════
 
 export async function updateCustomerTags(
-  businessId:  string,
-  customerId:  string,
-  tags:        string[]
+  customerId: string,
+  tags:       string[],
 ): Promise<ActionResult> {
   const supabase = await createClient()
+  const ctx = await getTenantContext(supabase)
+  if (!ctx) return { error: NOT_AUTHENTICATED }
+  const { businessId } = ctx
 
-  // Eliminar tags actuales
+  if (!(await customerBelongsToBusiness(supabase, businessId, customerId))) {
+    return { error: CUSTOMER_NOT_FOUND }
+  }
+
   const { error: delError } = await supabase
     .from('customer_tags')
     .delete()
@@ -346,20 +629,16 @@ export async function updateCustomerTags(
 
   if (delError) return { error: delError.message }
 
-  // Insertar nuevos (si los hay)
-  const uniqueTags = [...new Set(tags.map(t => t.trim()).filter(t => t.length > 0))]
+  const uniqueTags = [...new Set(tags.map((t) => t.trim().slice(0, 40)).filter((t) => t.length > 0))]
 
   if (uniqueTags.length > 0) {
-    const rows: CustomerTag[] = uniqueTags.map(tag => ({
+    const rows = uniqueTags.map((tag) => ({
       customer_id: customerId,
       business_id: businessId,
       tag,
     }))
 
-    const { error: insError } = await supabase
-      .from('customer_tags')
-      .insert(rows)
-
+    const { error: insError } = await supabase.from('customer_tags').insert(rows)
     if (insError) return { error: insError.message }
   }
 
@@ -369,19 +648,36 @@ export async function updateCustomerTags(
 
 // ════════════════════════════════════════════════════════════════════════════
 // updateCustomerPreferences
-// Actualiza preferencias del cliente (barbero preferido, etc.)
+// Barbero preferido (debe ser del mismo negocio).
 // ════════════════════════════════════════════════════════════════════════════
 
 export async function updateCustomerPreferences(
-  businessId:  string,
-  customerId:  string,
-  data: { preferred_staff_id?: string | null }
+  customerId: string,
+  data:       { preferred_staff_id?: string | null },
 ): Promise<ActionResult> {
   const supabase = await createClient()
+  const ctx = await getTenantContext(supabase)
+  if (!ctx) return { error: NOT_AUTHENTICATED }
+  const { businessId } = ctx
+
+  if (!(await customerBelongsToBusiness(supabase, businessId, customerId))) {
+    return { error: CUSTOMER_NOT_FOUND }
+  }
+
+  const preferred = data.preferred_staff_id || null
+  if (preferred) {
+    const { data: staffRow } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('business_id', businessId)
+      .eq('id', preferred)
+      .maybeSingle()
+    if (!staffRow) return { error: 'Barbero no encontrado.' }
+  }
 
   const { error } = await supabase
     .from('customers')
-    .update({ preferred_staff_id: data.preferred_staff_id ?? null })
+    .update({ preferred_staff_id: preferred })
     .eq('id', customerId)
     .eq('business_id', businessId)
 

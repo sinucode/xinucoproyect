@@ -7,33 +7,53 @@ import {
   useRef,
   useEffect,
 } from 'react'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import {
   ArrowLeft,
-  Search,
   Plus,
   X,
   Loader2,
   User,
   Phone,
   Mail,
+  Cake,
+  CalendarClock,
   ChevronDown,
   ChevronUp,
+  Pencil,
   Send,
+  ShoppingBag,
 } from 'lucide-react'
 import {
-  searchCustomers,
   getCustomerExpediente,
   addCustomerNote,
   updateCustomerTags,
   updateCustomerPreferences,
 } from '@/actions/crm'
 import type {
-  CustomerSearchResult,
+  CustomerListItem,
   CustomerExpediente,
   CustomerNoteWithAuthor,
 } from '@/actions/crm'
 import { formatCOP } from '@xinuco/utils'
 import { AdminPageHeader } from '@xinuco/ui'
+import { CustomerFilters } from './CustomerFilters'
+import { CustomerFormModal } from './CustomerFormModal'
+import {
+  CUSTOMERS_PAGE_SIZE,
+  displayPhone,
+  formatApptDateTime,
+  formatApptDay,
+  formatBirthday,
+  formatInstantDay,
+  getInitials,
+  isBirthdayThisMonth,
+  isPlaceholderPhone,
+  relativeVisitLabel,
+  whatsappUrl,
+  type CustomerFilter,
+} from '@/lib/crm-utils'
+import { customerSince, formatLongDate } from '@/lib/customer-utils'
 
 // ── Etiquetas predefinidas ────────────────────────────────────────────────────
 
@@ -62,35 +82,17 @@ function getTagStyle(tag: string): string {
   }
 }
 
-// ── Iniciales para avatar ─────────────────────────────────────────────────────
-
-function getInitials(name: string): string {
-  const parts = name.trim().split(' ')
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return (parts[0][0] + parts[1][0]).toUpperCase()
-}
-
-// ── Formato de fecha corta ────────────────────────────────────────────────────
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('es-CO', {
-    day:   '2-digit',
-    month: 'short',
-    year:  'numeric',
-  })
-}
-
 // ── Badge de estado de cita ───────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
   const config: Record<string, { label: string; className: string }> = {
-    completed:    { label: 'Completada',  className: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' },
-    cancelled:    { label: 'Cancelada',   className: 'text-red-400 bg-red-400/10 border-red-400/20' },
-    no_show:      { label: 'No asistió',  className: 'text-orange-400 bg-orange-400/10 border-orange-400/20' },
-    in_progress:  { label: 'En proceso',  className: 'text-sky-400 bg-sky-400/10 border-sky-400/20' },
-    ready_to_pay: { label: 'Por cobrar',  className: 'text-violet-400 bg-violet-400/10 border-violet-400/20' },
-    scheduled:    { label: 'Agendada',    className: 'text-xinuco-muted bg-white/[0.04] border-white/10' },
+    completed:       { label: 'Completada',   className: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' },
+    cancelled:       { label: 'Cancelada',    className: 'text-red-400 bg-red-400/10 border-red-400/20' },
+    no_show:         { label: 'No asistió',   className: 'text-orange-400 bg-orange-400/10 border-orange-400/20' },
+    in_progress:     { label: 'En proceso',   className: 'text-sky-400 bg-sky-400/10 border-sky-400/20' },
+    ready_to_pay:    { label: 'Por cobrar',   className: 'text-violet-400 bg-violet-400/10 border-violet-400/20' },
+    payment_pending: { label: 'Pago pendiente', className: 'text-amber-400 bg-amber-400/10 border-amber-400/20' },
+    scheduled:       { label: 'Agendada',     className: 'text-xinuco-muted bg-white/[0.04] border-white/10' },
   }
   const { label, className } = config[status] ?? { label: status, className: 'text-xinuco-muted bg-white/[0.04] border-white/10' }
 
@@ -101,15 +103,32 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+// ── Textos de estado vacío por filtro ─────────────────────────────────────────
+
+function emptyMessage(filter: CustomerFilter, hasQuery: boolean): string {
+  if (hasQuery) return 'No se encontraron clientes con estos criterios.'
+  switch (filter) {
+    case 'frequent': return 'Aún no hay clientes frecuentes (3 o más visitas en 90 días).'
+    case 'inactive': return 'No hay clientes que no vengan hace más de 30 días 🎉'
+    case 'new':      return 'Aún no hay clientes nuevos este mes.'
+    case 'birthday': return 'Nadie cumple años este mes.'
+    default:         return 'No hay clientes aún. Crea el primero con «Nuevo cliente».'
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // Props del componente principal
 // ════════════════════════════════════════════════════════════════════════════
 
 interface CustomerCRMProps {
-  initialCustomers: CustomerSearchResult[]
-  businessId:       string
-  staffId:          string   // auth user.id — autor de las notas
-  slug:             string
+  customers:  CustomerListItem[]
+  total:      number
+  page:       number
+  query:      string
+  filter:     CustomerFilter
+  /** Hoy en la zona del negocio ('YYYY-MM-DD'), calculado en el servidor. */
+  todayKey:   string
+  loadError?: string
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -117,49 +136,31 @@ interface CustomerCRMProps {
 // ════════════════════════════════════════════════════════════════════════════
 
 export function CustomerCRM({
-  initialCustomers,
-  businessId,
-  staffId,
+  customers,
+  total,
+  page,
+  query,
+  filter,
+  todayKey,
+  loadError,
 }: CustomerCRMProps) {
+  const router = useRouter()
   const [view, setView] = useState<'list' | 'expediente'>('list')
-  const [customers, setCustomers] = useState<CustomerSearchResult[]>(initialCustomers)
-  const [query, setQuery] = useState('')
-  const [isSearching, startSearch] = useTransition()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [expediente, setExpediente] = useState<CustomerExpediente | null>(null)
   const [isLoadingExp, startLoadExp] = useTransition()
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // ── Búsqueda con debounce 300ms ───────────────────────────────────────────
-
-  function handleSearchChange(value: string) {
-    setQuery(value)
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => {
-      startSearch(async () => {
-        const results = await searchCustomers(businessId, value)
-        setCustomers(results)
-      })
-    }, 300)
-  }
-
-  // Cleanup debounce
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-    }
-  }, [])
+  const [showCreate, setShowCreate] = useState(false)
 
   // ── Abrir expediente ──────────────────────────────────────────────────────
 
   const openExpediente = useCallback((customerId: string) => {
     setSelectedId(customerId)
     startLoadExp(async () => {
-      const data = await getCustomerExpediente(businessId, customerId)
+      const data = await getCustomerExpediente(customerId)
       setExpediente(data)
       setView('expediente')
     })
-  }, [businessId])
+  }, [])
 
   // ── Volver a la lista ─────────────────────────────────────────────────────
 
@@ -167,17 +168,18 @@ export function CustomerCRM({
     setView('list')
     setSelectedId(null)
     setExpediente(null)
+    router.refresh() // la lista pudo cambiar (edición, notas, etiquetas)
   }
 
-  // ── Actualizar expediente localmente tras mutación ────────────────────────
+  // ── Actualizar expediente tras una mutación ───────────────────────────────
 
   const refreshExpediente = useCallback(() => {
     if (!selectedId) return
     startLoadExp(async () => {
-      const data = await getCustomerExpediente(businessId, selectedId)
+      const data = await getCustomerExpediente(selectedId)
       setExpediente(data)
     })
-  }, [businessId, selectedId])
+  }, [selectedId])
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -186,8 +188,6 @@ export function CustomerCRM({
       <ExpedienteView
         expediente={expediente}
         isLoading={isLoadingExp}
-        businessId={businessId}
-        staffId={staffId}
         onBack={goBack}
         onRefresh={refreshExpediente}
       />
@@ -198,55 +198,99 @@ export function CustomerCRM({
     <>
       <AdminPageHeader
         title="Clientes"
-        subtitle="Busca clientes por nombre o teléfono, accede a su expediente y gestiona notas y etiquetas."
+        subtitle={`${total} ${total === 1 ? 'cliente' : 'clientes'}`}
         hasData={true}
+        actionButton={
+          <button type="button" onClick={() => setShowCreate(true)} className="btn-primary">
+            <Plus size={16} />
+            Nuevo cliente
+          </button>
+        }
       />
 
-      {/* Search bar */}
-      <div className="relative">
-        <Search
-          size={16}
-          className="absolute left-4 top-1/2 -translate-y-1/2 text-xinuco-muted pointer-events-none"
-        />
-        <input
-          type="text"
-          value={query}
-          onChange={e => handleSearchChange(e.target.value)}
-          placeholder="Buscar por nombre o teléfono…"
-          className="input-base w-full pl-11 pr-4"
-          aria-label="Buscar cliente"
-        />
-        {isSearching && (
-          <Loader2
-            size={14}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-xinuco-muted animate-spin"
-          />
-        )}
-      </div>
+      <CustomerFilters />
+
+      {loadError && (
+        <p role="alert" className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+          No se pudo cargar la lista: {loadError}
+        </p>
+      )}
 
       {/* Lista de clientes */}
-      <section aria-label="Resultados de búsqueda" className="flex flex-col gap-2">
+      <section aria-label="Clientes" className="flex flex-col gap-2">
         {customers.length === 0 ? (
           <div
             className="flex flex-col items-center justify-center py-16 text-center rounded-xl"
             style={{ border: '1px dashed var(--border-color)' }}
           >
             <User size={32} className="text-xinuco-muted mb-3 opacity-40" />
-            <p className="text-sm text-xinuco-muted">
-              {query.trim() ? 'No se encontraron clientes.' : 'No hay clientes aún.'}
-            </p>
+            <p className="text-sm text-xinuco-muted">{emptyMessage(filter, query.trim() !== '')}</p>
           </div>
         ) : (
           customers.map(c => (
             <CustomerCard
               key={c.id}
               customer={c}
+              todayKey={todayKey}
               onSelect={() => openExpediente(c.id)}
             />
           ))
         )}
       </section>
+
+      <Pagination page={page} total={total} />
+
+      {showCreate && (
+        <CustomerFormModal
+          onClose={() => setShowCreate(false)}
+          onSaved={(id) => {
+            setShowCreate(false)
+            router.refresh()
+            if (id) openExpediente(id)
+          }}
+        />
+      )}
     </>
+  )
+}
+
+// ── Paginación ────────────────────────────────────────────────────────────────
+
+function Pagination({ page, total }: { page: number; total: number }) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const [isPending, startTransition] = useTransition()
+
+  if (total <= CUSTOMERS_PAGE_SIZE) return null
+
+  const totalPages = Math.ceil(total / CUSTOMERS_PAGE_SIZE)
+
+  function go(target: number) {
+    const params = new URLSearchParams(searchParams.toString())
+    if (target <= 0) params.delete('page')
+    else params.set('page', String(target))
+    const qs = params.toString()
+    startTransition(() => {
+      router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: true })
+    })
+  }
+
+  const btn =
+    'inline-flex h-8 items-center gap-1 rounded-lg border border-xinuco-border px-3 text-xs text-xinuco-muted hover:text-xinuco-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
+
+  return (
+    <nav className="flex items-center justify-between pt-2" aria-label="Paginación">
+      <button type="button" className={btn} disabled={page <= 0 || isPending} onClick={() => go(page - 1)}>
+        Anterior
+      </button>
+      <span className="text-xs text-xinuco-muted tabular-nums">
+        Página {page + 1} de {totalPages}
+      </span>
+      <button type="button" className={btn} disabled={page + 1 >= totalPages || isPending} onClick={() => go(page + 1)}>
+        Siguiente
+      </button>
+    </nav>
   )
 }
 
@@ -256,11 +300,16 @@ export function CustomerCRM({
 
 function CustomerCard({
   customer,
+  todayKey,
   onSelect,
 }: {
-  customer: CustomerSearchResult
+  customer: CustomerListItem
+  todayKey: string
   onSelect: () => void
 }) {
+  const since = customerSince(customer.created_at)
+  const birthdayMonth = isBirthdayThisMonth(customer.birthday, todayKey)
+
   return (
     <button
       type="button"
@@ -283,7 +332,6 @@ function CustomerCard({
           <span className="font-semibold text-sm text-xinuco-text truncate">
             {customer.full_name}
           </span>
-          {/* Tags */}
           {customer.tags.slice(0, 3).map(tag => (
             <span
               key={tag}
@@ -293,36 +341,51 @@ function CustomerCard({
             </span>
           ))}
           {customer.tags.length > 3 && (
-            <span className="text-[10px] text-xinuco-muted">
-              +{customer.tags.length - 3}
-            </span>
+            <span className="text-[10px] text-xinuco-muted">+{customer.tags.length - 3}</span>
           )}
         </div>
-        <div className="flex items-center gap-3 mt-0.5">
-          <span className="text-xs text-xinuco-muted tabular-nums">
-            {customer.phone}
+
+        <div className="flex items-center gap-x-3 gap-y-0.5 mt-0.5 flex-wrap">
+          <span className={`text-xs tabular-nums ${isPlaceholderPhone(customer.phone) ? 'text-xinuco-muted/60 italic' : 'text-xinuco-muted'}`}>
+            {displayPhone(customer.phone)}
           </span>
-          {customer.last_visit && (
-            <>
-              <span className="text-xinuco-muted/40">·</span>
-              <span className="text-xs text-xinuco-muted">
-                Última visita: {fmtDate(customer.last_visit)}
-              </span>
-            </>
-          )}
+          <span className="text-xinuco-muted/40">·</span>
+          <span className="text-xs text-xinuco-muted">
+            {customer.last_visit
+              ? `Última visita: ${relativeVisitLabel(customer.last_visit, todayKey)}`
+              : 'Sin visitas aún'}
+          </span>
         </div>
+
+        {(since.label || customer.next_appointment || birthdayMonth) && (
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            {customer.next_appointment && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border text-sky-400 bg-sky-400/10 border-sky-400/25">
+                <CalendarClock size={10} />
+                Próxima cita: {formatApptDateTime(customer.next_appointment)}
+              </span>
+            )}
+            {birthdayMonth && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border text-amber-400 bg-amber-400/10 border-amber-400/25">
+                🎂 Cumple este mes
+              </span>
+            )}
+            {since.label && (
+              <span className="text-[10px] text-xinuco-muted/70">
+                {since.label}{since.age ? ` · ${since.age}` : ''}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Estadística derecha */}
       <div className="text-right flex-shrink-0">
-        <div
-          className="text-sm font-bold tabular-nums"
-          style={{ color: 'var(--primary-color)' }}
-        >
-          {customer.total_visits}
+        <div className="text-sm font-bold tabular-nums" style={{ color: 'var(--primary-color)' }}>
+          {formatCOP(customer.total_spent)}
         </div>
-        <div className="text-[10px] text-xinuco-muted uppercase tracking-wide">
-          {customer.total_visits === 1 ? 'visita' : 'visitas'}
+        <div className="text-[10px] text-xinuco-muted tabular-nums">
+          {customer.visits} {customer.visits === 1 ? 'visita' : 'visitas'}
         </div>
       </div>
     </button>
@@ -333,18 +396,16 @@ function CustomerCard({
 // EXPEDIENTE DEL CLIENTE — Vista de detalle
 // ════════════════════════════════════════════════════════════════════════════
 
+const CARD_STYLE = { border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }
+
 function ExpedienteView({
   expediente,
   isLoading,
-  businessId,
-  staffId,
   onBack,
   onRefresh,
 }: {
   expediente: CustomerExpediente | null
   isLoading:  boolean
-  businessId: string
-  staffId:    string
   onBack:     () => void
   onRefresh:  () => void
 }) {
@@ -382,32 +443,18 @@ function ExpedienteView({
         Clientes
       </button>
 
-      {/* Header del cliente */}
-      <CustomerHeader
-        expediente={expediente}
-        businessId={businessId}
-        onRefresh={onRefresh}
-      />
+      <CustomerHeader expediente={expediente} onRefresh={onRefresh} />
 
-      {/* Fila de estadísticas */}
       <StatsRow expediente={expediente} />
 
-      {/* Selector de barbero preferido */}
-      <PreferredBarberSelector
-        expediente={expediente}
-        businessId={businessId}
-        onRefresh={onRefresh}
-      />
+      {expediente.upcoming.length > 0 && <UpcomingAppointments expediente={expediente} />}
 
-      {/* Notas del equipo */}
-      <TeamNotes
-        expediente={expediente}
-        businessId={businessId}
-        staffId={staffId}
-        onRefresh={onRefresh}
-      />
+      <PreferredBarberSelector expediente={expediente} onRefresh={onRefresh} />
 
-      {/* Historial de visitas */}
+      <TeamNotes expediente={expediente} onRefresh={onRefresh} />
+
+      {expediente.purchased_products.length > 0 && <PurchasedProducts expediente={expediente} />}
+
       <VisitHistory expediente={expediente} />
     </div>
   )
@@ -417,11 +464,9 @@ function ExpedienteView({
 
 function CustomerHeader({
   expediente,
-  businessId,
   onRefresh,
 }: {
   expediente: CustomerExpediente
-  businessId: string
   onRefresh:  () => void
 }) {
   const { customer } = expediente
@@ -429,7 +474,12 @@ function CustomerHeader({
   const [showTagInput, setShowTagInput] = useState(false)
   const [newTag, setNewTag] = useState('')
   const [isSavingTags, startSaveTags] = useTransition()
+  const [showEdit, setShowEdit] = useState(false)
   const customInputRef = useRef<HTMLInputElement>(null)
+
+  const noPhone = isPlaceholderPhone(customer.phone)
+  const wa = whatsappUrl(customer.phone)
+  const birthday = formatBirthday(customer.birthday)
 
   // Sincronizar si el expediente se refresca externamente
   useEffect(() => {
@@ -446,7 +496,7 @@ function CustomerHeader({
     const newTags = [...tags, trimmed]
     setTags(newTags)
     startSaveTags(async () => {
-      await updateCustomerTags(businessId, customer.id, newTags)
+      await updateCustomerTags(customer.id, newTags)
       onRefresh()
     })
     setShowTagInput(false)
@@ -457,7 +507,7 @@ function CustomerHeader({
     const newTags = tags.filter(t => t !== tag)
     setTags(newTags)
     startSaveTags(async () => {
-      await updateCustomerTags(businessId, customer.id, newTags)
+      await updateCustomerTags(customer.id, newTags)
       onRefresh()
     })
   }
@@ -467,12 +517,9 @@ function CustomerHeader({
   }, [showTagInput, newTag])
 
   return (
-    <div
-      className="p-5 rounded-2xl flex flex-col gap-4"
-      style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
-    >
-      {/* Avatar + datos básicos */}
-      <div className="flex items-start gap-4">
+    <div className="p-5 rounded-2xl flex flex-col gap-4" style={CARD_STYLE}>
+      {/* Avatar + datos básicos + acciones */}
+      <div className="flex items-start gap-4 flex-wrap sm:flex-nowrap">
         <div
           className="w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center text-xl font-bold"
           style={{ backgroundColor: 'rgba(197,160,89,0.2)', color: 'var(--primary-color)' }}
@@ -485,19 +532,47 @@ function CustomerHeader({
             {customer.full_name}
           </h2>
           <div className="flex flex-col gap-1 mt-1.5">
-            {customer.phone && (
-              <span className="flex items-center gap-2 text-xs text-xinuco-muted">
-                <Phone size={12} className="text-xinuco-muted/60" />
-                {customer.phone}
+            <span className="flex items-center gap-2 text-xs text-xinuco-muted">
+              <Phone size={12} className="text-xinuco-muted/60" />
+              <span className={noPhone ? 'italic text-xinuco-muted/60' : 'tabular-nums'}>
+                {displayPhone(customer.phone)}
               </span>
-            )}
+            </span>
             {customer.email && (
               <span className="flex items-center gap-2 text-xs text-xinuco-muted">
                 <Mail size={12} className="text-xinuco-muted/60" />
                 {customer.email}
               </span>
             )}
+            {birthday && (
+              <span className="flex items-center gap-2 text-xs text-xinuco-muted">
+                <Cake size={12} className="text-xinuco-muted/60" />
+                Cumpleaños: {birthday}
+              </span>
+            )}
           </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {wa && (
+            <a
+              href={wa}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-ghost !py-2 !px-3 text-xs"
+              aria-label="Abrir WhatsApp en una pestaña nueva"
+            >
+              WhatsApp
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowEdit(true)}
+            className="btn-ghost !py-2 !px-3 text-xs"
+          >
+            <Pencil size={13} />
+            Editar
+          </button>
         </div>
       </div>
 
@@ -541,6 +616,7 @@ function CustomerHeader({
                 ref={customInputRef}
                 type="text"
                 placeholder="Nueva etiqueta"
+                maxLength={40}
                 className="h-7 text-xs rounded-lg border px-2 bg-transparent text-xinuco-text outline-none w-28"
                 style={{ borderColor: 'var(--border-color)' }}
                 onKeyDown={e => {
@@ -556,7 +632,7 @@ function CustomerHeader({
                   ? (customInputRef.current?.value ?? '')
                   : newTag
               )}
-              disabled={!newTag || (newTag === '__custom' && !customInputRef.current?.value)}
+              disabled={!newTag}
               className="h-7 px-2.5 text-xs rounded-lg font-medium transition-colors disabled:opacity-40"
               style={{ background: 'var(--primary-color)', color: '#080808' }}
             >
@@ -587,6 +663,23 @@ function CustomerHeader({
           </button>
         )}
       </div>
+
+      {showEdit && (
+        <CustomerFormModal
+          customerId={customer.id}
+          initial={{
+            full_name: customer.full_name,
+            phone:     noPhone ? '' : customer.phone,
+            email:     customer.email ?? '',
+            birthday:  customer.birthday ?? '',
+          }}
+          onClose={() => setShowEdit(false)}
+          onSaved={() => {
+            setShowEdit(false)
+            onRefresh()
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -594,25 +687,38 @@ function CustomerHeader({
 // ── Fila de estadísticas ──────────────────────────────────────────────────────
 
 function StatsRow({ expediente }: { expediente: CustomerExpediente }) {
-  const stats = [
-    { label: 'Total visitas',  value: String(expediente.total_visits) },
-    { label: 'Última visita',  value: fmtDate(expediente.last_visit) },
-    { label: 'Gasto total',    value: formatCOP(expediente.total_spent) },
+  const since = customerSince(expediente.customer.created_at)
+
+  const stats: { label: string; value: string; sub?: string }[] = [
+    { label: 'Visitas',         value: String(expediente.total_visits) },
+    { label: 'Total gastado',   value: formatCOP(expediente.total_spent) },
+    { label: 'Ticket promedio', value: expediente.paid_sales > 0 ? formatCOP(expediente.avg_ticket) : '—' },
+    { label: 'Última visita',   value: formatApptDay(expediente.last_visit) },
+    {
+      label: 'Cliente desde',
+      value: formatLongDate(expediente.customer.created_at),
+      sub:   since.age || (since.label === 'Nuevo este mes' ? since.label : undefined),
+    },
   ]
 
   return (
     <div
-      className="grid grid-cols-3 divide-x rounded-xl overflow-hidden"
-      style={{ border: '1px solid var(--border-color)', borderColor: 'var(--border-color)' }}
+      className="grid grid-cols-2 sm:grid-cols-5 gap-px rounded-xl overflow-hidden"
+      style={{ border: '1px solid var(--border-color)', background: 'var(--border-color)' }}
     >
-      {stats.map(s => (
-        <div key={s.label} className="flex flex-col items-center py-4 px-2 gap-1">
+      {stats.map((s, i) => (
+        <div
+          key={s.label}
+          className={`flex flex-col items-center justify-center text-center py-4 px-2 gap-1 ${i === stats.length - 1 ? 'col-span-2 sm:col-span-1' : ''}`}
+          style={{ background: 'var(--bg-color)' }}
+        >
           <span
-            className="text-lg font-bold tabular-nums"
+            className="text-base sm:text-sm lg:text-base font-bold tabular-nums leading-tight"
             style={{ color: 'var(--primary-color)' }}
           >
             {s.value}
           </span>
+          {s.sub && <span className="text-[11px] text-xinuco-muted">{s.sub}</span>}
           <span className="text-[10px] uppercase tracking-wider text-xinuco-muted">
             {s.label}
           </span>
@@ -622,15 +728,53 @@ function StatsRow({ expediente }: { expediente: CustomerExpediente }) {
   )
 }
 
+// ── Próximas citas ────────────────────────────────────────────────────────────
+
+function UpcomingAppointments({ expediente }: { expediente: CustomerExpediente }) {
+  return (
+    <section className="p-5 rounded-2xl flex flex-col gap-3" style={CARD_STYLE}>
+      <h3 className="text-sm font-semibold text-xinuco-text flex items-center gap-2">
+        <CalendarClock size={15} style={{ color: 'var(--primary-color)' }} />
+        Próximas citas
+      </h3>
+      <div className="flex flex-col">
+        {expediente.upcoming.map((a, idx) => (
+          <div
+            key={a.id}
+            className="flex items-start justify-between gap-3 py-3"
+            style={{ borderTop: idx === 0 ? undefined : '1px solid rgba(255,255,255,0.05)' }}
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-medium text-xinuco-text">{a.service_name}</span>
+                <StatusBadge status={a.status} />
+              </div>
+              {a.staff_name && <p className="text-xs text-xinuco-muted mt-0.5">{a.staff_name}</p>}
+              {a.products.length > 0 && (
+                <p className="text-xs text-xinuco-muted mt-1 flex items-center gap-1.5 flex-wrap">
+                  <ShoppingBag size={11} className="text-xinuco-muted/60" />
+                  Productos apartados:{' '}
+                  {a.products.map(p => `${p.name} ×${p.quantity}`).join(', ')}
+                </p>
+              )}
+            </div>
+            <span className="text-xs font-semibold tabular-nums flex-shrink-0" style={{ color: 'var(--primary-color)' }}>
+              {formatApptDateTime(a.start_time)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 // ── Selector de barbero preferido ─────────────────────────────────────────────
 
 function PreferredBarberSelector({
   expediente,
-  businessId,
   onRefresh,
 }: {
   expediente: CustomerExpediente
-  businessId: string
   onRefresh:  () => void
 }) {
   const [value, setValue] = useState(expediente.customer.preferred_staff_id ?? '')
@@ -643,7 +787,7 @@ function PreferredBarberSelector({
   function handleChange(staffId: string) {
     setValue(staffId)
     startSave(async () => {
-      await updateCustomerPreferences(businessId, expediente.customer.id, {
+      await updateCustomerPreferences(expediente.customer.id, {
         preferred_staff_id: staffId || null,
       })
       onRefresh()
@@ -651,10 +795,7 @@ function PreferredBarberSelector({
   }
 
   return (
-    <div
-      className="p-4 rounded-xl flex items-center gap-4"
-      style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
-    >
+    <div className="p-4 rounded-xl flex items-center gap-4" style={CARD_STYLE}>
       <div className="flex-1">
         <label
           htmlFor="preferred-barber"
@@ -684,15 +825,13 @@ function PreferredBarberSelector({
 
 // ── Notas del equipo ──────────────────────────────────────────────────────────
 
+const NOTE_MAX = 1000
+
 function TeamNotes({
   expediente,
-  businessId,
-  staffId,
   onRefresh,
 }: {
   expediente: CustomerExpediente
-  businessId: string
-  staffId:    string
   onRefresh:  () => void
 }) {
   const [notes, setNotes] = useState<CustomerNoteWithAuthor[]>(expediente.notes)
@@ -708,12 +847,7 @@ function TeamNotes({
     e.preventDefault()
     setAddError(null)
     startAdd(async () => {
-      const result = await addCustomerNote(
-        businessId,
-        expediente.customer.id,
-        staffId,
-        content
-      )
+      const result = await addCustomerNote(expediente.customer.id, content)
       if (result.error) {
         setAddError(result.error)
         return
@@ -727,10 +861,7 @@ function TeamNotes({
   }
 
   return (
-    <section
-      className="p-5 rounded-2xl flex flex-col gap-4"
-      style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
-    >
+    <section className="p-5 rounded-2xl flex flex-col gap-4" style={CARD_STYLE}>
       <h3 className="text-sm font-semibold text-xinuco-text">Notas del Equipo</h3>
 
       {/* Timeline de notas */}
@@ -758,16 +889,16 @@ function TeamNotes({
 
               {/* Contenido de la nota */}
               <div className="pb-4 flex-1 min-w-0">
-                <p className="text-sm text-xinuco-text leading-relaxed whitespace-pre-wrap">
+                <p className="text-sm text-xinuco-text leading-relaxed whitespace-pre-wrap break-words">
                   {note.content}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-[10px] text-xinuco-muted">
-                    {note.staff_name ?? 'Equipo'}
+                    {note.author_name || note.staff_name || 'Equipo'}
                   </span>
                   <span className="text-xinuco-muted/30">·</span>
                   <span className="text-[10px] text-xinuco-muted tabular-nums">
-                    {fmtDate(note.created_at)}
+                    {formatInstantDay(note.created_at)}
                   </span>
                 </div>
               </div>
@@ -787,6 +918,7 @@ function TeamNotes({
           onChange={e => setContent(e.target.value)}
           placeholder="Agregar nota técnica (textura del cabello, alergias, preferencias de corte…)"
           rows={3}
+          maxLength={NOTE_MAX}
           disabled={isAdding}
           className="input-base resize-none text-sm disabled:opacity-60"
         />
@@ -798,19 +930,57 @@ function TeamNotes({
             {addError}
           </p>
         )}
-        <button
-          type="submit"
-          disabled={isAdding || !content.trim()}
-          className="self-end flex items-center gap-2 btn-primary !py-2 !px-4 text-sm disabled:opacity-40"
-        >
-          {isAdding ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <Send size={14} />
-          )}
-          Agregar nota
-        </button>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[10px] text-xinuco-muted tabular-nums">
+            {content.length}/{NOTE_MAX}
+          </span>
+          <button
+            type="submit"
+            disabled={isAdding || !content.trim()}
+            className="flex items-center gap-2 btn-primary !py-2 !px-4 text-sm disabled:opacity-40"
+          >
+            {isAdding ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Send size={14} />
+            )}
+            Agregar nota
+          </button>
+        </div>
       </form>
+    </section>
+  )
+}
+
+// ── Productos comprados ───────────────────────────────────────────────────────
+
+function PurchasedProducts({ expediente }: { expediente: CustomerExpediente }) {
+  return (
+    <section className="p-5 rounded-2xl flex flex-col gap-3" style={CARD_STYLE}>
+      <h3 className="text-sm font-semibold text-xinuco-text flex items-center gap-2">
+        <ShoppingBag size={15} style={{ color: 'var(--primary-color)' }} />
+        Productos comprados
+      </h3>
+      <div className="flex flex-col">
+        {expediente.purchased_products.map((p, idx) => (
+          <div
+            key={`${p.created_at}-${idx}`}
+            className="flex items-center justify-between gap-3 py-2.5"
+            style={{ borderTop: idx === 0 ? undefined : '1px solid rgba(255,255,255,0.05)' }}
+          >
+            <div className="min-w-0">
+              <p className="text-sm text-xinuco-text truncate">
+                {p.description}
+                {p.quantity > 1 && <span className="text-xinuco-muted"> ×{p.quantity}</span>}
+              </p>
+              <p className="text-[10px] text-xinuco-muted tabular-nums">{formatInstantDay(p.created_at)}</p>
+            </div>
+            <span className="text-sm font-semibold tabular-nums flex-shrink-0" style={{ color: 'var(--primary-color)' }}>
+              {formatCOP(p.total_price)}
+            </span>
+          </div>
+        ))}
+      </div>
     </section>
   )
 }
@@ -818,7 +988,7 @@ function TeamNotes({
 // ── Historial de visitas ──────────────────────────────────────────────────────
 
 function VisitHistory({ expediente }: { expediente: CustomerExpediente }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
   const [showAll, setShowAll] = useState(false)
 
   const visitsToShow = showAll
@@ -897,16 +1067,16 @@ function VisitHistory({ expediente }: { expediente: CustomerExpediente }) {
                     )}
                   </div>
 
-                  {/* Fecha + monto */}
+                  {/* Fecha (start_time) + monto pagado real */}
                   <div className="text-right flex-shrink-0">
                     <div
                       className="text-sm font-bold tabular-nums"
-                      style={{ color: v.status === 'completed' ? 'var(--primary-color)' : 'var(--text-muted)' }}
+                      style={{ color: v.amount_paid != null ? 'var(--primary-color)' : 'var(--text-muted)' }}
                     >
-                      {v.status === 'completed' ? formatCOP(v.total_paid) : '—'}
+                      {v.amount_paid != null ? formatCOP(v.amount_paid) : '—'}
                     </div>
                     <div className="text-[10px] text-xinuco-muted tabular-nums">
-                      {fmtDate(v.created_at)}
+                      {formatApptDay(v.start_time)}
                     </div>
                   </div>
                 </div>
