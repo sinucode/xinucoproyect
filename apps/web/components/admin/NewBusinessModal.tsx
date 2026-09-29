@@ -201,7 +201,7 @@ export function NewBusinessModal({ isOpen, onClose }: NewBusinessModalProps) {
             </label>
             <div className="flex items-center gap-0">
               <span className="input-base !rounded-r-none !w-auto shrink-0 px-3 text-xinuco-muted border-r-0">
-                xinuco.app/
+                xinuco.com/
               </span>
               <input
                 id="biz-slug"
@@ -258,7 +258,7 @@ export function NewBusinessModal({ isOpen, onClose }: NewBusinessModalProps) {
                   {name || 'Nombre del negocio'}
                 </p>
                 <p className="text-xs" style={{ color: '#6B6B6B' }}>
-                  xinuco.app/{slug || 'slug'}
+                  xinuco.com/{slug || 'slug'}
                 </p>
               </div>
             </div>

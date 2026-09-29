@@ -113,7 +113,7 @@ export async function createMPPreference(
     const client = getMPClient()
     const preferenceApi = new Preference(client)
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://xinuco.app'
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.xinuco.com'
     const slug = externalRef.split('_')[0] // heurístico; idealmente se pasa el slug
 
     // Crear preferencia en MP
@@ -274,7 +274,7 @@ export async function createMPSaaSSubscription(params: {
   }
 
   const amountCop      = PLAN_PRICES_COP[planId]
-  const appUrl         = process.env.NEXT_PUBLIC_APP_URL ?? 'https://xinuco.app'
+  const appUrl         = process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.xinuco.com'
   const externalRef    = `saas_${businessId}_${planId}`
   const planLabels: Record<'profesional' | 'elite', string> = {
     profesional: 'Plan Profesional',

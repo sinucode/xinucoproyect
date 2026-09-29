@@ -277,7 +277,7 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
               <input
                 id="biz-slug"
                 type="text"
-                value={`xinuco.app/${slug}/book`}
+                value={`https://www.xinuco.com/${slug}/book`}
                 readOnly
                 className="input-base font-mono text-sm pr-24 select-all"
                 style={{ color: 'var(--primary-color)', opacity: 0.8 }}

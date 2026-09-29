@@ -128,7 +128,7 @@ export default async function SettingsPage({
   const features    = (biz.features_enabled ?? {}) as unknown as BusinessFeatures
   const currentPlan = detectCurrentPlan(features)
   const planMeta    = PLAN_BUNDLES[currentPlan as keyof typeof PLAN_BUNDLES]
-  const bookingUrl  = `xinuco.app/${slug}/book`
+  const bookingUrl  = `https://www.xinuco.com/${slug}/book`
 
   // 3. Tarjetas de navegación
   const settingCards: SettingCard[] = [

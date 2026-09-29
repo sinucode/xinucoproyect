@@ -147,7 +147,7 @@ export async function createBookingWithPayment(
 
   const appointmentId  = appointment.id
   const externalRef    = `booking_${appointmentId}`   // prefijo que el webhook detecta
-  const appUrl         = process.env.NEXT_PUBLIC_APP_URL ?? 'https://xinuco.app'
+  const appUrl         = process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.xinuco.com'
   const isTestMode     = (process.env.MP_ACCESS_TOKEN ?? '').startsWith('TEST-')
 
   // ── 3. Crear preferencia en MercadoPago ───────────────────────────────────

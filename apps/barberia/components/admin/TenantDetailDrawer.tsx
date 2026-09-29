@@ -382,7 +382,7 @@ export function TenantDetailDrawer({ business, onClose }: TenantDetailDrawerProp
                   <div className="w-10 h-10 rounded-xl" style={{ background: primary }} />
                   <div>
                     <p className="text-sm font-bold" style={{ color: text }}>{business.name}</p>
-                    <p className="text-[10px]" style={{ color: '#6B6B6B' }}>xinuco.app/{business.slug}</p>
+                    <p className="text-[10px]" style={{ color: '#6B6B6B' }}>xinuco.com/{business.slug}</p>
                   </div>
                 </div>
                 <div
