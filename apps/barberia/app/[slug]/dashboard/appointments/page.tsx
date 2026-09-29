@@ -7,7 +7,7 @@ import { getActiveShiftDetails } from '@/actions/finance'
 import { AgendaFilters } from '@/components/dashboard/agenda/AgendaFilters'
 import { StaffDayTimeline } from '@/components/dashboard/agenda/StaffDayTimeline'
 import type { BreakRow, TimeOffRow, TimelineAppt } from '@/components/dashboard/agenda/staff-day-utils'
-import { businessTodayISODate, addDaysToDateKey, businessNowHHMM, dayLabel } from '@/lib/agenda-time'
+import { businessTodayISODate, addDaysToDateKey, businessNowHHMM } from '@/lib/agenda-time'
 
 interface AppointmentsPageProps {
   params: Promise<{ slug: string }>
@@ -241,11 +241,6 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
             </h1>
             <NewAppointmentButton slug={slug} />
           </div>
-          <p className="text-sm text-xinuco-muted mt-1">
-            {dateFilter === 'upcoming'
-              ? 'Citas de hoy en adelante, agrupadas por día.'
-              : `Citas de ${dayLabel(dateFilter, todayKey).toLowerCase()}.`}
-          </p>
         </section>
 
         <Suspense fallback={null}>

@@ -1,9 +1,9 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { X } from 'lucide-react'
-import { addDaysToDateKey } from '@/lib/agenda-time'
+import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { addDaysToDateKey, dayLabel } from '@/lib/agenda-time'
 
 export interface AgendaStaffOption {
   id: string
@@ -18,7 +18,7 @@ interface AgendaFiltersProps {
   showStaff: boolean
 }
 
-const STATUS_CHIPS: { value: string; label: string }[] = [
+const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'all', label: 'Todas' },
   { value: 'active', label: 'Activas' },
   { value: 'completed', label: 'Completadas' },
@@ -28,11 +28,27 @@ const STATUS_CHIPS: { value: string; label: string }[] = [
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
-function chipClass(active: boolean): string {
+const FOCUS_RING =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-color)]'
+
+const NAV_BTN = `inline-flex h-8 w-8 items-center justify-center text-xinuco-muted hover:text-xinuco-text transition-colors ${FOCUS_RING} focus-visible:ring-inset`
+
+/** 'jue 1 oct' (sin puntos), a partir de 'YYYY-MM-DD'. */
+function shortDate(dateKey: string): string {
+  return new Date(`${dateKey}T00:00:00Z`)
+    .toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
+    .replace(/[.,]/g, '')
+    .replace(/\bde\b\s*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function selectClass(active: boolean): string {
   return [
-    'text-xs px-3 py-1.5 rounded-full border transition-colors shrink-0 whitespace-nowrap',
+    'h-8 rounded-lg border px-2 text-xs bg-transparent cursor-pointer transition-colors max-w-full',
+    FOCUS_RING,
     active
-      ? 'font-bold text-black border-transparent bg-[var(--primary-color)]'
+      ? 'border-[var(--primary-color)] text-[var(--primary-color)]'
       : 'border-xinuco-border text-xinuco-muted hover:text-xinuco-text',
   ].join(' ')
 }
@@ -41,16 +57,14 @@ export function AgendaFilters({ todayKey, staffOptions, showStaff }: AgendaFilte
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const rawDate = searchParams.get('date')
   const date = rawDate && DATE_RE.test(rawDate) ? rawDate : 'upcoming'
   const rawStatus = searchParams.get('status')
-  const status = STATUS_CHIPS.some((s) => s.value === rawStatus) ? (rawStatus as string) : 'all'
+  const status = STATUS_OPTIONS.some((s) => s.value === rawStatus) ? (rawStatus as string) : 'all'
   const rawStaff = searchParams.get('staff')
   const staff = rawStaff && staffOptions.some((s) => s.id === rawStaff) ? rawStaff : ''
-
-  const yesterdayKey = addDaysToDateKey(todayKey, -1)
-  const tomorrowKey = addDaysToDateKey(todayKey, 1)
 
   const hasFilters = date !== 'upcoming' || status !== 'all' || staff !== ''
 
@@ -71,94 +85,111 @@ export function AgendaFilters({ todayKey, staffOptions, showStaff }: AgendaFilte
     [router, pathname, searchParams],
   )
 
-  const dateChips: { value: string; label: string }[] = [
-    { value: 'upcoming', label: 'Próximas' },
-    { value: yesterdayKey, label: 'Ayer' },
-    { value: todayKey, label: 'Hoy' },
-    { value: tomorrowKey, label: 'Mañana' },
-  ]
-  const dateIsChip = dateChips.some((c) => c.value === date)
+  const isUpcoming = date === 'upcoming'
+  const base = isUpcoming ? todayKey : date
+  const prevKey = addDaysToDateKey(base, -1)
+  const nextKey = addDaysToDateKey(base, 1)
+
+  let dateText = 'Próximas'
+  if (!isUpcoming) {
+    const label = dayLabel(date, todayKey)
+    dateText = ['Hoy', 'Ayer', 'Mañana'].includes(label) ? `${label} · ${shortDate(date)}` : shortDate(date)
+  }
+
+  const openPicker = () => {
+    const el = inputRef.current
+    if (!el) return
+    if (typeof el.showPicker === 'function') {
+      try {
+        el.showPicker()
+        return
+      } catch {
+        /* cae al fallback */
+      }
+    }
+    el.focus()
+    el.click()
+  }
 
   return (
-    <div className="card !p-4 space-y-4" role="search" aria-label="Filtros de agenda">
-      {/* Fecha */}
-      <div className="space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-xinuco-muted">Fecha</p>
-        <div className="flex flex-wrap items-center gap-2">
-          {dateChips.map((chip) => (
-            <button
-              key={chip.value}
-              type="button"
-              onClick={() => update({ date: chip.value })}
-              className={chipClass(date === chip.value)}
-              aria-pressed={date === chip.value}
-            >
-              {chip.label}
-            </button>
-          ))}
-          <input
-            type="date"
-            aria-label="Elegir una fecha"
-            value={date !== 'upcoming' ? date : ''}
-            onChange={(e) => update({ date: e.target.value || 'upcoming' })}
-            className={`input-base !w-auto !py-1.5 !px-3 !text-xs ${
-              !dateIsChip ? '!border-[var(--primary-color)]' : ''
-            }`}
-          />
-        </div>
+    <div className="mb-4 flex flex-wrap items-center gap-2" role="search" aria-label="Filtros de agenda">
+      {/* Navegador de fecha */}
+      <div className="relative inline-flex items-center rounded-lg border border-xinuco-border bg-xinuco-surface overflow-hidden">
+        <button type="button" aria-label="Día anterior" onClick={() => update({ date: prevKey })} className={NAV_BTN}>
+          <ChevronLeft size={16} />
+        </button>
+        <button
+          type="button"
+          title="Alternar entre Próximas y un día"
+          onClick={() => update({ date: isUpcoming ? todayKey : 'upcoming' })}
+          className={`h-8 px-2 text-xs font-medium whitespace-nowrap transition-colors ${FOCUS_RING} focus-visible:ring-inset ${
+            isUpcoming ? 'text-xinuco-text' : 'text-[var(--primary-color)]'
+          }`}
+        >
+          {dateText}
+        </button>
+        <button type="button" aria-label="Día siguiente" onClick={() => update({ date: nextKey })} className={NAV_BTN}>
+          <ChevronRight size={16} />
+        </button>
+        <button
+          type="button"
+          aria-label="Elegir fecha"
+          onClick={openPicker}
+          className={`${NAV_BTN} border-l border-xinuco-border`}
+        >
+          <CalendarDays size={15} />
+        </button>
+        <input
+          ref={inputRef}
+          type="date"
+          tabIndex={-1}
+          aria-hidden="true"
+          value={isUpcoming ? '' : date}
+          onChange={(e) => update({ date: e.target.value || 'upcoming' })}
+          className="pointer-events-none absolute bottom-0 right-0 h-0 w-0 opacity-0"
+        />
       </div>
 
-      {/* Staff */}
+      {/* Barbero */}
       {showStaff && (
-        <div className="space-y-2">
-          <label
-            htmlFor="agenda-filter-staff"
-            className="block text-[10px] font-semibold uppercase tracking-widest text-xinuco-muted"
-          >
-            Staff
-          </label>
-          <select
-            id="agenda-filter-staff"
-            value={staff}
-            onChange={(e) => update({ staff: e.target.value })}
-            className="input-base !py-2 !text-xs sm:!w-64"
-          >
-            <option value="">Todos</option>
-            {staffOptions.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.full_name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <select
+          aria-label="Filtrar por barbero"
+          value={staff}
+          onChange={(e) => update({ staff: e.target.value })}
+          className={selectClass(staff !== '')}
+        >
+          <option value="">Barbero: Todos</option>
+          {staffOptions.map((s) => (
+            <option key={s.id} value={s.id}>
+              Barbero: {s.full_name}
+            </option>
+          ))}
+        </select>
       )}
 
       {/* Estado */}
-      <div className="space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-xinuco-muted">Estado</p>
-        <div className="flex flex-wrap gap-2">
-          {STATUS_CHIPS.map((chip) => (
-            <button
-              key={chip.value}
-              type="button"
-              onClick={() => update({ status: chip.value })}
-              className={chipClass(status === chip.value)}
-              aria-pressed={status === chip.value}
-            >
-              {chip.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <select
+        aria-label="Filtrar por estado"
+        value={status}
+        onChange={(e) => update({ status: e.target.value })}
+        className={selectClass(status !== 'all')}
+      >
+        {STATUS_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            Estado: {o.label}
+          </option>
+        ))}
+      </select>
 
       {hasFilters && (
         <button
           type="button"
+          aria-label="Limpiar filtros"
+          title="Limpiar filtros"
           onClick={() => router.push(pathname, { scroll: false })}
-          className="inline-flex items-center gap-1 text-xs text-xinuco-muted hover:text-xinuco-text underline underline-offset-2"
+          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text transition-colors ${FOCUS_RING}`}
         >
-          <X size={12} />
-          Limpiar filtros
+          <X size={14} />
         </button>
       )}
     </div>
