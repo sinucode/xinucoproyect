@@ -1,56 +1,356 @@
 'use server'
 
+// actions/staff.ts — Módulo "Equipo": profesionales, servicios que hace cada uno y horario semanal.
+//
+// Seguridad: la política RLS de `staff` es FOR ALL para cualquier usuario del negocio, así que
+// TODA mutación exige rol admin|super_admin aquí mismo, y el business_id sale SIEMPRE del
+// PERFIL del usuario autenticado (nunca se confía en el que envía el cliente).
+
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
-import type { Staff, StaffRole, StaffSchedule, Json } from '@xinuco/types'
+import type { Staff, StaffSchedule, ServiceAudienceOrAll, Json } from '@xinuco/types'
 import { logAction } from './audit'
+import { businessNowHHMM, businessTodayISODate } from '@/lib/agenda-time'
+import { validateWeeklySchedule } from '@/lib/team-utils'
+import type { StaffStatusNow } from '@/lib/walk-in-wait'
 
-// ── Tipo del resultado de las operaciones ────────────────────────────────────
+// ── Tipos ─────────────────────────────────────────────────────────────────────
+
 interface ActionResult {
   success?: boolean
   error?:   string
   data?:    Staff | Staff[] | StaffSchedule[]
 }
 
-/**
- * getStaff — Obtiene el personal de un negocio específico.
- * Cliente autenticado → RLS filtra por business_id automáticamente.
- */
-export async function getStaff(businessId: string): Promise<Staff[]> {
-  const supabase = await createClient()
-
-  const { data, error } = await supabase
-    .from('staff')
-    .select('*')
-    .eq('business_id', businessId)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data as Staff[]
+export interface TeamMember {
+  id:             string
+  full_name:      string
+  specialty_role: string
+  is_active:      boolean
+  created_at:     string
+  schedules:      { day_of_week: number; start_time: string; end_time: string }[]
+  /** true = sin filas en staff_services → hace TODOS los servicios. */
+  does_all_services: boolean
+  /** Filas explícitas de staff_services (vacío cuando does_all_services). */
+  service_ids:    string[]
+  /** Estado AHORA (null si está inactivo o si no se pudo calcular). */
+  status:         StaffStatusNow['status'] | null
+  busy_until:     string | null
+  customer_name:  string | null
+  month_completed: number
+  upcoming_count: number
+  next_appointment: string | null
 }
 
+export interface TeamOverview {
+  todayKey: string
+  members:  TeamMember[]
+  services: { id: string; name: string; audience: ServiceAudienceOrAll }[]
+}
+
+const NOT_ADMIN = 'Solo un administrador puede gestionar el equipo.'
+const DENIED = 'Autorización denegada.'
+const NOT_FOUND = 'Miembro del equipo no encontrado.'
+const SERVICES_REQUIRED = 'Elige al menos un servicio o "Todos los servicios".'
+const SERVICES_INVALID = 'Algún servicio elegido no es válido.'
+
+type Supabase = Awaited<ReturnType<typeof createClient>>
+
+interface AdminContext {
+  supabase:   Supabase
+  userId:     string
+  actorName:  string | null
+  businessId: string
+}
+
+// ── Guards ────────────────────────────────────────────────────────────────────
+
+/** Sesión + perfil admin/super_admin con business_id (el del PERFIL). */
+async function requireAdmin(): Promise<({ ok: true } & AdminContext) | { ok: false; error: string }> {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: NOT_ADMIN }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, business_id, full_name')
+    .eq('id', user.id)
+    .single()
+
+  const p = profile as { role?: string; business_id?: string | null; full_name?: string | null } | null
+  if (!p || (p.role !== 'admin' && p.role !== 'super_admin') || !p.business_id) {
+    return { ok: false, error: NOT_ADMIN }
+  }
+
+  return { ok: true, supabase, userId: user.id, actorName: p.full_name ?? null, businessId: p.business_id }
+}
+
+/** Anti-IDOR: el miembro debe ser del negocio del perfil. Devuelve su fila actual. */
+async function findOwnStaff(supabase: Supabase, staffId: string, businessId: string) {
+  if (!staffId || typeof staffId !== 'string') return null
+  const { data } = await supabase
+    .from('staff')
+    .select('id, full_name, specialty_role, is_active')
+    .eq('id', staffId)
+    .eq('business_id', businessId)
+    .maybeSingle()
+  return (data as { id: string; full_name: string; specialty_role: string; is_active: boolean } | null) ?? null
+}
+
+// ── Validación ────────────────────────────────────────────────────────────────
+
+function validateProfile(data: { full_name: unknown; specialty_role: unknown }):
+  { error: string } | { full_name: string; specialty_role: string } {
+  const full_name = typeof data.full_name === 'string' ? data.full_name.trim() : ''
+  const specialty_role = typeof data.specialty_role === 'string' ? data.specialty_role.trim() : ''
+  if (full_name.length < 2 || full_name.length > 80) {
+    return { error: 'El nombre debe tener entre 2 y 80 caracteres.' }
+  }
+  if (specialty_role.length < 2 || specialty_role.length > 40) {
+    return { error: 'El cargo debe tener entre 2 y 40 caracteres.' }
+  }
+  return { full_name, specialty_role }
+}
+
+/** Todos los ids deben ser servicios del negocio. Devuelve la lista sin duplicados. */
+async function validateServiceIds(
+  supabase: Supabase,
+  businessId: string,
+  raw: unknown,
+): Promise<{ error: string } | { ids: string[] }> {
+  if (!Array.isArray(raw) || raw.some(id => typeof id !== 'string' || !id)) {
+    return { error: SERVICES_INVALID }
+  }
+  const ids = Array.from(new Set(raw as string[]))
+  const { data, error } = await supabase
+    .from('services')
+    .select('id')
+    .eq('business_id', businessId)
+    .in('id', ids)
+  if (error) return { error: error.message }
+  if (((data ?? []) as { id: string }[]).length !== ids.length) return { error: SERVICES_INVALID }
+  return { ids }
+}
+
+async function audit(
+  ctx: AdminContext,
+  action: string,
+  entityId: string,
+  oldValue: Record<string, unknown> | null,
+  newValue: Record<string, unknown> | null,
+) {
+  try {
+    await logAction({
+      businessId: ctx.businessId,
+      actorId:    ctx.userId,
+      actorName:  ctx.actorName,
+      action,
+      entityType: 'staff',
+      entityId,
+      oldValue:   oldValue as unknown as Json,
+      newValue:   newValue as unknown as Json,
+    })
+  } catch {
+    // Un fallo de auditoría nunca bloquea la operación principal
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// getTeamOverview — datos completos de la página Equipo
+// ════════════════════════════════════════════════════════════════════════════════
+
+/** Rango [from, to) del mes actual, como hora local del negocio guardada "como UTC". */
+function currentMonthRange(): { from: string; to: string } {
+  const today = businessTodayISODate() // YYYY-MM-DD
+  const [y, m] = today.split('-').map(Number)
+  const ny = m === 12 ? y + 1 : y
+  const nm = m === 12 ? 1 : m + 1
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return {
+    from: `${y}-${pad(m)}-01T00:00:00Z`,
+    to:   `${ny}-${pad(nm)}-01T00:00:00Z`,
+  }
+}
+
+const PAGE_SIZE = 1000
+const MAX_PAGES = 20
+
+/** PostgREST limita a 1000 filas por consulta: pagina para que los conteos no se trunquen. */
+async function fetchAllRows<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>,
+): Promise<{ rows: T[]; error: string | null }> {
+  const rows: T[] = []
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { data, error } = await build(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1)
+    if (error) return { rows, error: error.message }
+    const batch = (data ?? []) as T[]
+    rows.push(...batch)
+    if (batch.length < PAGE_SIZE) break
+  }
+  return { rows, error: null }
+}
+
+export async function getTeamOverview(): Promise<TeamOverview | { error: string }> {
+  const auth = await requireAdmin()
+  if (!auth.ok) return { error: auth.error }
+  const { supabase, businessId } = auth
+
+  const todayKey = businessTodayISODate()
+  const nowIso = `${todayKey}T${businessNowHHMM()}:00Z`
+  const { from, to } = currentMonthRange()
+
+  const [staffRes, schedRes, ssRes, servicesRes, statusRes, completedRes, upcomingRes] = await Promise.all([
+    supabase.from('staff')
+      .select('id, full_name, specialty_role, is_active, created_at')
+      .eq('business_id', businessId)
+      .order('is_active', { ascending: false })
+      .order('full_name', { ascending: true }),
+    supabase.from('staff_schedules')
+      .select('staff_id, day_of_week, start_time, end_time')
+      .eq('business_id', businessId),
+    supabase.from('staff_services')
+      .select('staff_id, service_id')
+      .eq('business_id', businessId),
+    supabase.from('services')
+      .select('id, name, audience')
+      .eq('business_id', businessId)
+      .eq('is_active', true)
+      .order('name', { ascending: true }),
+    supabase.rpc('get_staff_status_now', { p_business_id: businessId }),
+    fetchAllRows<{ staff_id: string | null }>((a, b) =>
+      supabase.from('appointments')
+        .select('staff_id')
+        .eq('business_id', businessId)
+        .eq('status', 'completed')
+        .gte('start_time', from)
+        .lt('start_time', to)
+        .order('id', { ascending: true })
+        .range(a, b),
+    ),
+    fetchAllRows<{ staff_id: string | null; start_time: string }>((a, b) =>
+      supabase.from('appointments')
+        .select('staff_id, start_time')
+        .eq('business_id', businessId)
+        .in('status', ['scheduled', 'payment_pending'])
+        .gte('start_time', nowIso)
+        .order('start_time', { ascending: true })
+        .order('id', { ascending: true })
+        .range(a, b),
+    ),
+  ])
+
+  const firstError = [staffRes, schedRes, ssRes, servicesRes].find(r => r.error)?.error?.message
+    ?? completedRes.error ?? upcomingRes.error
+  if (firstError) return { error: firstError }
+
+  const staffRows = (staffRes.data ?? []) as
+    { id: string; full_name: string; specialty_role: string; is_active: boolean; created_at: string }[]
+  const schedRows = (schedRes.data ?? []) as
+    { staff_id: string; day_of_week: number; start_time: string; end_time: string }[]
+  const ssRows = (ssRes.data ?? []) as { staff_id: string; service_id: string }[]
+  const services = ((servicesRes.data ?? []) as { id: string; name: string; audience: ServiceAudienceOrAll | null }[])
+    .map(s => ({ id: s.id, name: s.name, audience: (s.audience ?? 'men') as ServiceAudienceOrAll }))
+
+  // El RPC solo devuelve activos; si falla, el estado queda en null (sin píldora).
+  const statusById = new Map<string, StaffStatusNow>()
+  if (!statusRes.error && Array.isArray(statusRes.data)) {
+    for (const s of statusRes.data as unknown as StaffStatusNow[]) statusById.set(s.id, s)
+  }
+
+  const schedulesByStaff = new Map<string, TeamMember['schedules']>()
+  for (const r of schedRows) {
+    const list = schedulesByStaff.get(r.staff_id) ?? []
+    list.push({ day_of_week: r.day_of_week, start_time: r.start_time, end_time: r.end_time })
+    schedulesByStaff.set(r.staff_id, list)
+  }
+
+  const servicesByStaff = new Map<string, string[]>()
+  for (const r of ssRows) {
+    const list = servicesByStaff.get(r.staff_id) ?? []
+    list.push(r.service_id)
+    servicesByStaff.set(r.staff_id, list)
+  }
+
+  const completedByStaff = new Map<string, number>()
+  for (const a of completedRes.rows) {
+    if (!a.staff_id) continue
+    completedByStaff.set(a.staff_id, (completedByStaff.get(a.staff_id) ?? 0) + 1)
+  }
+
+  // Ordenadas por start_time asc → la primera de cada staff es la próxima.
+  const upcomingByStaff = new Map<string, { count: number; next: string }>()
+  for (const a of upcomingRes.rows) {
+    if (!a.staff_id) continue
+    const cur = upcomingByStaff.get(a.staff_id)
+    if (cur) cur.count += 1
+    else upcomingByStaff.set(a.staff_id, { count: 1, next: a.start_time })
+  }
+
+  const members: TeamMember[] = staffRows.map(s => {
+    const explicit = servicesByStaff.get(s.id) ?? []
+    const st = s.is_active ? statusById.get(s.id) : undefined
+    const up = upcomingByStaff.get(s.id)
+    return {
+      id:               s.id,
+      full_name:        s.full_name,
+      specialty_role:   s.specialty_role,
+      is_active:        s.is_active,
+      created_at:       s.created_at,
+      schedules:        schedulesByStaff.get(s.id) ?? [],
+      does_all_services: explicit.length === 0,
+      service_ids:      explicit,
+      status:           st?.status ?? null,
+      busy_until:       st?.busy_until ?? null,
+      customer_name:    st?.customer_name ?? null,
+      month_completed:  completedByStaff.get(s.id) ?? 0,
+      upcoming_count:   up?.count ?? 0,
+      next_appointment: up?.next ?? null,
+    }
+  })
+
+  return { todayKey, members, services }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Alta / edición / activación
+// ════════════════════════════════════════════════════════════════════════════════
+
 /**
- * createStaffMember — Crea un nuevo miembro del personal.
- * El campo user_id (profile_id) es opcional: puede ser null
- * cuando el empleado no tiene cuenta de autenticación aún.
- * Cliente autenticado → RLS valida pertenencia al business_id.
+ * createStaffMember — Crea un profesional. `service_ids`: lista (los servicios que hace),
+ * 'all' o vacío/omitido (hace todos → sin filas en staff_services).
+ * El business_id sale del perfil; el argumento solo se contrasta contra él.
  */
 export async function createStaffMember(
   businessId: string,
   data: {
     full_name: string
     specialty_role: string
+    service_ids?: string[] | 'all'
   }
 ): Promise<ActionResult> {
-  const supabase = await createClient()
+  const auth = await requireAdmin()
+  if (!auth.ok) return { error: auth.error }
+  const { supabase } = auth
+  if (businessId !== auth.businessId) return { error: DENIED }
+
+  const parsed = validateProfile(data)
+  if ('error' in parsed) return { error: parsed.error }
+
+  let serviceIds: string[] = []
+  if (Array.isArray(data.service_ids) && data.service_ids.length > 0) {
+    const checked = await validateServiceIds(supabase, auth.businessId, data.service_ids)
+    if ('error' in checked) return { error: checked.error }
+    serviceIds = checked.ids
+  }
 
   const { data: result, error } = await supabase
     .from('staff')
     .insert({
-      business_id: businessId,
-      full_name:   data.full_name,
-      specialty_role: data.specialty_role,
-      is_active:   true,
+      business_id:    auth.businessId,
+      full_name:      parsed.full_name,
+      specialty_role: parsed.specialty_role,
+      is_active:      true,
     })
     .select()
     .single()
@@ -62,78 +362,153 @@ export async function createStaffMember(
     return { error: error.message }
   }
 
-  // ── Audit log ────────────────────────────────────────────────────────────────
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    const { data: profile } = user
-      ? await supabase.from('profiles').select('full_name').eq('id', user.id).single()
-      : { data: null }
+  const created = result as Staff
 
-    await logAction({
-      businessId:  businessId,
-      actorId:     user?.id ?? null,
-      actorName:   profile?.full_name ?? null,
-      action:      'staff.created',
-      entityType:  'staff',
-      entityId:    (result as Staff).id,
-      newValue:    { full_name: data.full_name, specialty_role: data.specialty_role } as unknown as Json,
-    })
-  } catch {
-    // Silenciar
+  if (serviceIds.length > 0) {
+    const { error: ssError } = await supabase
+      .from('staff_services')
+      .insert(serviceIds.map(service_id => ({
+        business_id: auth.businessId,
+        staff_id:    created.id,
+        service_id,
+      })))
+    if (ssError) {
+      // Sin filas significaría "hace todo": mejor deshacer el alta que dejarlo mal configurado.
+      await supabase.from('staff').delete().eq('id', created.id).eq('business_id', auth.businessId)
+      return { error: `No se pudieron asignar los servicios: ${ssError.message}` }
+    }
   }
 
+  await audit(auth, 'staff.created', created.id, null,
+    { full_name: parsed.full_name, specialty_role: parsed.specialty_role })
+
   revalidatePath('/[slug]/dashboard/staff', 'page')
-  return { success: true, data: result as Staff }
+  revalidatePath('/[slug]/dashboard/services', 'page')
+  revalidatePath('/[slug]/book', 'page')
+  revalidatePath('/[slug]', 'page')
+  return { success: true, data: created }
 }
 
 /**
- * toggleStaffStatus — Activa o desactiva un miembro del staff.
- * El .eq('id') es obligatorio para evitar mutación masiva.
+ * updateStaffMember — Edita nombre, cargo y servicios de un profesional.
+ * `service_ids`: 'all' → borra sus filas (hace todo); lista → debe ser no vacía y de servicios del negocio.
+ */
+export async function updateStaffMember(
+  staffId: string,
+  data: {
+    full_name: string
+    specialty_role: string
+    service_ids: string[] | 'all'
+  }
+): Promise<ActionResult> {
+  const auth = await requireAdmin()
+  if (!auth.ok) return { error: auth.error }
+  const { supabase, businessId } = auth
+
+  const existing = await findOwnStaff(supabase, staffId, businessId)
+  if (!existing) return { error: NOT_FOUND }
+
+  const parsed = validateProfile(data)
+  if ('error' in parsed) return { error: parsed.error }
+
+  // Validar TODO antes de escribir, para no dejar cambios a medias.
+  let targetIds: string[] | 'all'
+  if (data.service_ids === 'all') {
+    targetIds = 'all'
+  } else {
+    if (!Array.isArray(data.service_ids) || data.service_ids.length === 0) return { error: SERVICES_REQUIRED }
+    const checked = await validateServiceIds(supabase, businessId, data.service_ids)
+    if ('error' in checked) return { error: checked.error }
+    targetIds = checked.ids
+  }
+
+  const { error: updError } = await supabase
+    .from('staff')
+    .update({ full_name: parsed.full_name, specialty_role: parsed.specialty_role })
+    .eq('id', staffId)
+    .eq('business_id', businessId)
+  if (updError) return { error: updError.message }
+
+  if (targetIds === 'all') {
+    const { error } = await supabase
+      .from('staff_services')
+      .delete()
+      .eq('staff_id', staffId)
+      .eq('business_id', businessId)
+    if (error) return { error: error.message }
+  } else {
+    // Insertar primero los que faltan y borrar después los sobrantes: nunca queda en cero filas
+    // (sin filas = "hace todo") en mitad del cambio.
+    const { data: currentRows, error: curError } = await supabase
+      .from('staff_services')
+      .select('service_id')
+      .eq('staff_id', staffId)
+      .eq('business_id', businessId)
+    if (curError) return { error: curError.message }
+
+    const current = new Set(((currentRows ?? []) as { service_id: string }[]).map(r => r.service_id))
+    const wanted = new Set(targetIds)
+    const toInsert = targetIds.filter(id => !current.has(id))
+    const toDelete = Array.from(current).filter(id => !wanted.has(id))
+
+    if (toInsert.length > 0) {
+      const { error } = await supabase
+        .from('staff_services')
+        .insert(toInsert.map(service_id => ({ business_id: businessId, staff_id: staffId, service_id })))
+      if (error) return { error: error.message }
+    }
+    if (toDelete.length > 0) {
+      const { error } = await supabase
+        .from('staff_services')
+        .delete()
+        .eq('staff_id', staffId)
+        .eq('business_id', businessId)
+        .in('service_id', toDelete)
+      if (error) return { error: error.message }
+    }
+  }
+
+  await audit(auth, 'staff.updated', staffId,
+    { full_name: existing.full_name, specialty_role: existing.specialty_role },
+    { full_name: parsed.full_name,   specialty_role: parsed.specialty_role })
+
+  revalidatePath('/[slug]/dashboard/staff', 'page')
+  revalidatePath('/[slug]/dashboard/services', 'page')
+  revalidatePath('/[slug]/book', 'page')
+  revalidatePath('/[slug]', 'page')
+  return { success: true }
+}
+
+/**
+ * toggleStaffStatus — Activa o desactiva un profesional.
+ * Filtra por id Y business_id (evita mutación masiva y cruce entre negocios).
  */
 export async function toggleStaffStatus(
   staffId: string,
   isActive: boolean
 ): Promise<ActionResult> {
-  const supabase = await createClient()
+  const auth = await requireAdmin()
+  if (!auth.ok) return { error: auth.error }
+  const { supabase, businessId } = auth
 
-  // Obtener business_id antes de actualizar (necesario para el audit log)
-  const { data: existing } = await supabase
-    .from('staff')
-    .select('business_id, full_name, is_active')
-    .eq('id', staffId)
-    .single()
+  const existing = await findOwnStaff(supabase, staffId, businessId)
+  if (!existing) return { error: NOT_FOUND }
 
   const { error } = await supabase
     .from('staff')
     .update({ is_active: isActive })
     .eq('id', staffId)
+    .eq('business_id', businessId)
 
   if (error) return { error: error.message }
 
-  // ── Audit log ────────────────────────────────────────────────────────────────
-  if (existing?.business_id) {
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      const { data: profile } = user
-        ? await supabase.from('profiles').select('full_name').eq('id', user.id).single()
-        : { data: null }
-
-      await logAction({
-        businessId:  existing.business_id,
-        actorId:     user?.id ?? null,
-        actorName:   profile?.full_name ?? null,
-        action:      isActive ? 'staff.activated' : 'staff.deactivated',
-        entityType:  'staff',
-        entityId:    staffId,
-        oldValue:    { is_active: existing.is_active, full_name: existing.full_name } as unknown as Json,
-        newValue:    { is_active: isActive,            full_name: existing.full_name } as unknown as Json,
-      })
-    } catch {
-      // Silenciar
-    }
-  }
+  await audit(auth, isActive ? 'staff.activated' : 'staff.deactivated', staffId,
+    { is_active: existing.is_active, full_name: existing.full_name },
+    { is_active: isActive,           full_name: existing.full_name })
 
   revalidatePath('/[slug]/dashboard/staff', 'page')
+  revalidatePath('/[slug]/book', 'page')
+  revalidatePath('/[slug]/dashboard/walk-ins', 'page')
   return { success: true }
 }
 
@@ -142,16 +517,28 @@ export async function toggleStaffStatus(
 // ════════════════════════════════════════════════════════════════════════════════
 
 /**
- * getStaffSchedules — Obtiene los bloques de horario de un miembro del staff.
+ * getStaffSchedules — Obtiene los bloques de horario de un miembro del equipo.
  * day_of_week: 0 = Domingo, 1 = Lunes … 6 = Sábado
+ * Lectura acotada por RLS y, además, por el negocio del perfil del usuario.
  */
 export async function getStaffSchedules(staffId: string): Promise<StaffSchedule[]> {
   const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('business_id')
+    .eq('id', user.id)
+    .single()
+  const businessId = (profile as { business_id?: string | null } | null)?.business_id
+  if (!businessId) return []
 
   const { data, error } = await supabase
     .from('staff_schedules')
     .select('*')
     .eq('staff_id', staffId)
+    .eq('business_id', businessId)
     .order('day_of_week', { ascending: true })
 
   if (error) throw error
@@ -159,121 +546,67 @@ export async function getStaffSchedules(staffId: string): Promise<StaffSchedule[
 }
 
 /**
- * upsertStaffSchedule — Crea o actualiza el horario de un empleado para un día.
- * Si ya existe un registro para ese staff_id + day_of_week, lo actualiza.
- * Si no existe, lo crea.
- * Cliente autenticado → RLS valida pertenencia al business_id.
- */
-export async function upsertStaffSchedule(
-  businessId: string,
-  staffId: string,
-  schedule: {
-    day_of_week: number
-    start_time:  string
-    end_time:    string
-  }
-): Promise<ActionResult> {
-  const supabase = await createClient()
-
-  // Verificar si ya existe un horario para ese día
-  const { data: existing } = await supabase
-    .from('staff_schedules')
-    .select('id')
-    .eq('staff_id', staffId)
-    .eq('day_of_week', schedule.day_of_week)
-    .single()
-
-  if (existing) {
-    // UPDATE — ya existe, actualizamos los horarios
-    const { error } = await supabase
-      .from('staff_schedules')
-      .update({
-        start_time: schedule.start_time,
-        end_time:   schedule.end_time,
-      })
-      .eq('id', existing.id)
-
-    if (error) return { error: error.message }
-  } else {
-    // INSERT — no existe, creamos un nuevo bloque
-    const { error } = await supabase
-      .from('staff_schedules')
-      .insert({
-        business_id: businessId,
-        staff_id:    staffId,
-        day_of_week: schedule.day_of_week,
-        start_time:  schedule.start_time,
-        end_time:    schedule.end_time,
-      })
-
-    if (error) return { error: error.message }
-  }
-
-  revalidatePath('/[slug]/dashboard/staff', 'page')
-  return { success: true }
-}
-
-/**
- * deleteStaffSchedule — Elimina un bloque de horario específico.
- * El .eq('id') garantiza eliminación atómica.
- */
-export async function deleteStaffSchedule(scheduleId: string): Promise<ActionResult> {
-  const supabase = await createClient()
-
-  const { error } = await supabase
-    .from('staff_schedules')
-    .delete()
-    .eq('id', scheduleId)
-
-  if (error) return { error: error.message }
-
-  revalidatePath('/[slug]/dashboard/staff', 'page')
-  return { success: true }
-}
-
-/**
- * saveStaffSchedulesBatch — Actualización masiva del horario semanal de un empleado.
- * Estrategia: Elimina todos los registros actuales y hace un insert masivo (Batch) de los nuevos.
- * Cliente autenticado → RLS valida pertenencia al business_id.
+ * saveStaffSchedulesBatch — Reemplaza el horario semanal de un profesional.
+ * Reemplazo SEGURO: guarda una copia del horario actual; si el insert falla, la restaura
+ * (así un error nunca deja a la persona sin horario).
  */
 export async function saveStaffSchedulesBatch(
   businessId: string,
   staffId: string,
-  schedules: Omit<StaffSchedule, 'id' | 'created_at' | 'updated_at' | 'business_id' | 'staff_id'>[]
+  schedules: { day_of_week: number; start_time: string; end_time: string }[]
 ): Promise<ActionResult> {
-  const supabase = await createClient()
+  const auth = await requireAdmin()
+  if (!auth.ok) return { error: auth.error }
+  const { supabase } = auth
+  if (businessId !== auth.businessId) return { error: DENIED }
 
-  // PASO 1: Limpiar el calendario actual del empleado en este negocio
+  const existing = await findOwnStaff(supabase, staffId, auth.businessId)
+  if (!existing) return { error: NOT_FOUND }
+
+  const validation = validateWeeklySchedule(schedules)
+  if (validation) return { error: validation }
+
+  // Solo los campos esperados; los ids los fija el servidor.
+  const toInsert = schedules.map(s => ({
+    business_id: auth.businessId,
+    staff_id:    staffId,
+    day_of_week: s.day_of_week,
+    start_time:  s.start_time,
+    end_time:    s.end_time,
+  }))
+
+  // PASO 1: copia del horario actual
+  const { data: snapshot, error: snapError } = await supabase
+    .from('staff_schedules')
+    .select('day_of_week, start_time, end_time')
+    .eq('staff_id', staffId)
+    .eq('business_id', auth.businessId)
+  if (snapError) return { error: `No se pudo leer el horario actual: ${snapError.message}` }
+
+  // PASO 2: borrar
   const { error: deleteError } = await supabase
     .from('staff_schedules')
     .delete()
     .eq('staff_id', staffId)
-    .eq('business_id', businessId)
+    .eq('business_id', auth.businessId)
+  if (deleteError) return { error: `Error al limpiar horarios: ${deleteError.message}` }
 
-  if (deleteError) {
-    return { error: `Error al limpiar horarios: ${deleteError.message}` }
-  }
-
-  // PASO 2: Insertar masivamente si hay horarios activos
-  if (schedules.length > 0) {
-    // 🛡️ Blindaje de seguridad: Forzamos los IDs en el servidor
-    const safeSchedulesToInsert = schedules.map(schedule => ({
-      ...schedule,
-      business_id: businessId,
-      staff_id: staffId
-    }))
-
-    const { error: insertError } = await supabase
-      .from('staff_schedules')
-      .insert(safeSchedulesToInsert)
-
+  // PASO 3: insertar el nuevo; si falla, restaurar la copia
+  if (toInsert.length > 0) {
+    const { error: insertError } = await supabase.from('staff_schedules').insert(toInsert)
     if (insertError) {
-      return { error: `Error al guardar horarios: ${insertError.message}` }
+      const previous = ((snapshot ?? []) as { day_of_week: number; start_time: string; end_time: string }[])
+        .map(s => ({ ...s, business_id: auth.businessId, staff_id: staffId }))
+      if (previous.length > 0) {
+        await supabase.from('staff_schedules').insert(previous)
+      }
+      return { error: 'No se pudo guardar el horario; se mantuvo el anterior.' }
     }
   }
 
-  // PASO 3: Refrescar la caché de Next.js
   revalidatePath('/[slug]/dashboard/staff', 'page')
+  revalidatePath('/[slug]/dashboard/appointments', 'page')
+  revalidatePath('/[slug]/book', 'page')
   return { success: true }
 }
 

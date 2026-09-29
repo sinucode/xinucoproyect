@@ -36,7 +36,7 @@ function buildLinks(slug: string, features: BusinessFeatures): NavLink[] {
     { href: `/${slug}/dashboard/walk-ins`,     icon: UserPlus,     label: 'Fila de espera',   feature: 'walk_ins',         adminOnly: false },
     { href: `/${slug}/dashboard/crm`,          icon: BookUser,     label: 'Clientes',        feature: 'crm',              adminOnly: false },
     { href: `/${slug}/dashboard/services`,     icon: Scissors,     label: 'Servicios',      feature: null,               adminOnly: true },
-    { href: `/${slug}/dashboard/staff`,        icon: Users,        label: 'Staff',           feature: null,               adminOnly: true },
+    { href: `/${slug}/dashboard/staff`,        icon: Users,        label: 'Equipo',          feature: null,               adminOnly: true },
     { href: `/${slug}/dashboard/commissions`,  icon: Percent,      label: 'Comisiones',     feature: 'commissions',      adminOnly: true },
     { href: `/${slug}/dashboard/expenses`,     icon: Receipt,      label: 'Gastos',          feature: 'expenses_pgl',     adminOnly: true },
     { href: `/${slug}/dashboard/ledger`,       icon: Wallet,       label: 'Ledger',          feature: 'staff_ledger',     adminOnly: true },

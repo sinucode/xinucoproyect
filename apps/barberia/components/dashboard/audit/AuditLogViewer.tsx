@@ -155,7 +155,7 @@ function AuditLogRow({ log }: { log: AuditLog }) {
 const ENTITY_FILTER_OPTIONS: { value: EntityTypeFilter; label: string }[] = [
   { value: 'all',         label: 'Todos'       },
   { value: 'appointment', label: 'Citas'        },
-  { value: 'staff',       label: 'Staff'        },
+  { value: 'staff',       label: 'Equipo'       },
   { value: 'service',     label: 'Servicios'    },
   { value: 'shift',       label: 'Turnos'       },
   { value: 'sale',        label: 'Ventas'       },

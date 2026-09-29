@@ -9,6 +9,7 @@
 
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { businessTodayISODate } from '@/lib/agenda-time'
 
 type ActionResult = { success: true } | { error: string }
 
@@ -69,6 +70,50 @@ function validateRange(startTime: string, endTime: string): string | null {
   return null
 }
 
+// ── Lectura (página Equipo) ──────────────────────────────────────────────────
+
+export interface StaffAvailability {
+  breaks: { id: string; day_of_week: number; start_time: string; end_time: string; label: string }[]
+  timeOff: { id: string; starts_at: string; ends_at: string; kind: string; reason: string | null }[]
+}
+
+/**
+ * getStaffAvailability — Pausas recurrentes y permisos vigentes/futuros de un miembro del equipo.
+ * Los permisos ya terminados (ends_at antes de hoy 00:00, hora local del negocio) no se listan.
+ */
+export async function getStaffAvailability(staffId: string): Promise<StaffAvailability | { error: string }> {
+  const auth = await requireAdmin()
+  if (!auth.ok) return { error: auth.error }
+  const { supabase, businessId } = auth
+
+  const ownership = await requireOwnStaff(supabase, staffId, businessId)
+  if (ownership) return ownership
+
+  const todayStart = `${businessTodayISODate()}T00:00:00Z`
+
+  const [breaksRes, offRes] = await Promise.all([
+    supabase.from('staff_breaks')
+      .select('id, day_of_week, start_time, end_time, label')
+      .eq('staff_id', staffId)
+      .eq('business_id', businessId)
+      .order('day_of_week', { ascending: true })
+      .order('start_time', { ascending: true }),
+    supabase.from('staff_time_off')
+      .select('id, starts_at, ends_at, kind, reason')
+      .eq('staff_id', staffId)
+      .eq('business_id', businessId)
+      .gte('ends_at', todayStart)
+      .order('starts_at', { ascending: true }),
+  ])
+  if (breaksRes.error) return { error: breaksRes.error.message }
+  if (offRes.error) return { error: offRes.error.message }
+
+  return {
+    breaks: (breaksRes.data ?? []) as StaffAvailability['breaks'],
+    timeOff: (offRes.data ?? []) as StaffAvailability['timeOff'],
+  }
+}
+
 // ── Pausas recurrentes ───────────────────────────────────────────────────────
 
 export async function createStaffBreaks(input: {
@@ -108,6 +153,7 @@ export async function createStaffBreaks(input: {
   if (error) return { error: error.message }
 
   revalidatePath('/[slug]/dashboard/appointments', 'page')
+  revalidatePath('/[slug]/dashboard/staff', 'page')
   return { success: true }
 }
 
@@ -124,6 +170,7 @@ export async function deleteStaffBreak(breakId: string): Promise<ActionResult> {
   if (error) return { error: error.message }
 
   revalidatePath('/[slug]/dashboard/appointments', 'page')
+  revalidatePath('/[slug]/dashboard/staff', 'page')
   return { success: true }
 }
 
@@ -164,6 +211,7 @@ export async function createStaffTimeOff(input: {
   if (error) return { error: error.message }
 
   revalidatePath('/[slug]/dashboard/appointments', 'page')
+  revalidatePath('/[slug]/dashboard/staff', 'page')
   return { success: true }
 }
 
@@ -180,5 +228,6 @@ export async function deleteStaffTimeOff(timeOffId: string): Promise<ActionResul
   if (error) return { error: error.message }
 
   revalidatePath('/[slug]/dashboard/appointments', 'page')
+  revalidatePath('/[slug]/dashboard/staff', 'page')
   return { success: true }
 }

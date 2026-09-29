@@ -2,15 +2,15 @@ import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { getStaff } from '@/actions/staff'
+import { getTeamOverview } from '@/actions/staff'
 import { StaffManager } from '@/components/dashboard/staff/StaffManager'
 import { getBusinessBySlug } from '@/actions/businesses'
 import { notFound } from 'next/navigation'
 import type { Profile } from '@xinuco/types'
 
 export const metadata: Metadata = {
-  title: 'El Ejército — Xinuco',
-  description: 'Gestión del staff',
+  title: 'Equipo — Xinuco',
+  description: 'Profesionales, horarios y servicios',
 }
 
 export default async function StaffPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -36,20 +36,26 @@ export default async function StaffPage({ params }: { params: Promise<{ slug: st
   const business = await getBusinessBySlug(slug)
   if (!business) notFound()
 
-  // 2. Obtener el staff
-  const staff = await getStaff(business.id)
+  // 2. Obtener el equipo (profesionales + horarios + servicios + estado ahora)
+  const overview = await getTeamOverview()
+  if ('error' in overview) redirect(`/${slug}/dashboard`)
 
   return (
-    <div className="flex flex-col gap-6 max-w-6xl mx-auto pb-24">
+    <div className="flex flex-col gap-6 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
       <Suspense fallback={<StaffSkeleton />}>
-        <StaffManager initialStaff={staff} businessId={business.id} />
+        <StaffManager
+          businessId={business.id}
+          members={overview.members}
+          services={overview.services}
+          todayKey={overview.todayKey}
+        />
       </Suspense>
     </div>
   )
 }
 
 /**
- * Skeleton de carga elegante para la sección de Staff.
+ * Skeleton de carga elegante para la sección de Equipo.
  * Simula el layout del Header y el Grid de tarjetas.
  */
 function StaffSkeleton() {

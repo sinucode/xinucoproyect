@@ -1,99 +1,171 @@
 'use client'
 
-import { useState, useTransition, useCallback, useEffect, useRef } from 'react'
-import { 
-  Plus, X, Loader2, User, Users, ShieldAlert, Scissors, 
-  Sparkles, Calendar, CalendarDays 
+// StaffManager — Página "Equipo": tarjetas de profesionales con estado ahora, horario,
+// servicios, actividad del mes y próxima cita. Alta/edición en un sheet; horario, descansos
+// y permisos en StaffScheduleSheet.
+
+import { useState, useTransition, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
+import {
+  Plus, X, Loader2, Users, Scissors, Clock, CalendarCheck, CalendarClock,
+  Pencil, CalendarDays, AlertTriangle,
 } from 'lucide-react'
-import { createStaffMember, toggleStaffStatus } from '@/actions/staff'
-import type { Staff, StaffRole } from '@xinuco/types'
+import { createStaffMember, updateStaffMember, toggleStaffStatus } from '@/actions/staff'
+import type { TeamMember, TeamOverview } from '@/actions/staff'
 import { StaffScheduleSheet } from './StaffScheduleSheet'
 import { AdminPageHeader } from '@xinuco/ui'
 import { AdminEmptyState } from '@xinuco/ui'
+import { formatApptTime, apptDateKey, dayLabel } from '@/lib/agenda-time'
+import { AUDIENCE_LABELS } from '@/lib/service-audience'
+import {
+  SPECIALTY_OPTIONS,
+  STAFF_STATUS_LABELS,
+  specialtyLabel,
+  summarizeSchedule,
+} from '@/lib/team-utils'
 
-// Eliminado ROLES_CONFIG para permitir roles personalizados según la base de datos
+type TeamService = TeamOverview['services'][number]
 
 // ════════════════════════════════════════════════════════════════════════════════
 // COMPONENTE PRINCIPAL — StaffManager
 // ════════════════════════════════════════════════════════════════════════════════
 
 interface StaffManagerProps {
-  initialStaff: Staff[]
   businessId: string
+  members: TeamMember[]
+  services: TeamService[]
+  todayKey: string
 }
 
-export function StaffManager({ initialStaff, businessId }: StaffManagerProps) {
-  const [staffList, setStaffList] = useState<Staff[]>(initialStaff)
-  const [sheetOpen, setSheetOpen] = useState(false)
-  
-  // Estado para controlar a qué empleado le estamos viendo el horario
-  const [scheduleStaff, setScheduleStaff] = useState<{ id: string, name: string } | null>(null)
+type SheetState = { mode: 'create' } | { mode: 'edit'; memberId: string } | null
 
-  const handleCreateSuccess = useCallback((newStaff: Staff) => {
-    setStaffList(prev => [newStaff, ...prev])
-    setSheetOpen(false)
-  }, [])
+export function StaffManager({ businessId, members, services, todayKey }: StaffManagerProps) {
+  const router = useRouter()
+  const [list, setList] = useState<TeamMember[]>(members)
+  const [sheet, setSheet] = useState<SheetState>(null)
+  const [scheduleMemberId, setScheduleMemberId] = useState<string | null>(null)
+  const [confirmMember, setConfirmMember] = useState<TeamMember | null>(null)
+  const [pendingId, setPendingId] = useState<string | null>(null)
+  const [toggleErrors, setToggleErrors] = useState<Record<string, string>>({})
+
+  // Tras router.refresh() llegan datos frescos del servidor
+  useEffect(() => { setList(members) }, [members])
+
+  const scheduleMember = scheduleMemberId ? list.find(m => m.id === scheduleMemberId) ?? null : null
+  const editMember = sheet?.mode === 'edit' ? list.find(m => m.id === sheet.memberId) ?? null : null
+
+  // Activar/desactivar con UI optimista y rollback si falla
+  async function applyToggle(member: TeamMember, next: boolean) {
+    setToggleErrors(prev => { const { [member.id]: _omit, ...rest } = prev; return rest })
+    setPendingId(member.id)
+    setList(prev => prev.map(m => (m.id === member.id ? { ...m, is_active: next, status: next ? m.status : null } : m)))
+
+    try {
+      const result = await toggleStaffStatus(member.id, next)
+      if (result.error) {
+        setList(prev => prev.map(m => (m.id === member.id ? { ...m, is_active: member.is_active, status: member.status } : m)))
+        setToggleErrors(prev => ({ ...prev, [member.id]: result.error as string }))
+      } else {
+        router.refresh()
+      }
+    } catch {
+      setList(prev => prev.map(m => (m.id === member.id ? { ...m, is_active: member.is_active, status: member.status } : m)))
+      setToggleErrors(prev => ({ ...prev, [member.id]: 'No se pudo actualizar. Intenta de nuevo.' }))
+    } finally {
+      setPendingId(null)
+    }
+  }
+
+  function requestToggle(member: TeamMember) {
+    const next = !member.is_active
+    // Desactivar a alguien con citas próximas pide confirmación
+    if (!next && member.upcoming_count > 0) {
+      setConfirmMember(member)
+      return
+    }
+    void applyToggle(member, next)
+  }
 
   return (
     <>
       <AdminPageHeader
-        title="Tu Ejército"
-        subtitle="Gestiona tu staff de barberos profesionales"
-        hasData={staffList.length > 0}
+        title="Tu equipo"
+        subtitle="Profesionales, horarios y lo que hace cada uno"
+        hasData={list.length > 0}
         actionButton={
-          <button 
-            onClick={() => setSheetOpen(true)}
+          <button
+            onClick={() => setSheet({ mode: 'create' })}
             className="btn-primary flex items-center justify-center gap-2"
           >
             <Plus size={16} strokeWidth={2.5} />
-            <span className="hidden sm:inline">Añadir Barbero</span>
+            <span className="hidden sm:inline">Añadir profesional</span>
             <span className="sm:hidden">Añadir</span>
           </button>
         }
       />
 
-      {/* Grid de Empleados */}
-      <section aria-label="Lista de staff" className="mt-6">
-        {staffList.length === 0 ? (
-          <AdminEmptyState 
-            icon={Users} 
-            title="Sin staff registrado" 
-            description="Añade a tu primer barbero para comenzar a asignar turnos y servicios." 
-            actionLabel="Añadir Barbero" 
-            onAction={() => setSheetOpen(true)} 
+      <section aria-label="Lista del equipo" className="mt-6">
+        {list.length === 0 ? (
+          <AdminEmptyState
+            icon={Users}
+            title="Aún no tienes a nadie en tu equipo"
+            description="Añade a tu primer profesional para asignarle horarios y servicios."
+            actionLabel="Añadir profesional"
+            onAction={() => setSheet({ mode: 'create' })}
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-            {staffList.map((member) => (
-              <StaffCard 
-                key={member.id} 
-                member={member} 
-                onToggle={(updated) => 
-                  setStaffList(prev => prev.map(m => m.id === updated.id ? updated : m))
-                } 
-                onOpenSchedule={() => setScheduleStaff({ id: member.id, name: member.full_name })}
+            {list.map((member) => (
+              <StaffCard
+                key={member.id}
+                member={member}
+                services={services}
+                todayKey={todayKey}
+                isPending={pendingId === member.id}
+                error={toggleErrors[member.id] ?? null}
+                onToggle={() => requestToggle(member)}
+                onEdit={() => setSheet({ mode: 'edit', memberId: member.id })}
+                onOpenSchedule={() => setScheduleMemberId(member.id)}
               />
             ))}
           </div>
         )}
       </section>
 
-      {/* Sheet de Creación */}
-      {sheetOpen && (
-        <StaffSheet 
-          businessId={businessId} 
-          onClose={() => setSheetOpen(false)} 
-          onSuccess={handleCreateSuccess} 
+      {/* Sheet de alta / edición */}
+      {sheet && (sheet.mode === 'create' || editMember) && (
+        <StaffSheet
+          mode={sheet.mode}
+          businessId={businessId}
+          member={editMember}
+          services={services}
+          onClose={() => setSheet(null)}
+          onDone={() => { setSheet(null); router.refresh() }}
         />
       )}
 
-      {/* Sheet de Horarios */}
-      {scheduleStaff && (
+      {/* Sheet de horario, descansos y permisos */}
+      {scheduleMember && (
         <StaffScheduleSheet
           businessId={businessId}
-          staffId={scheduleStaff.id}
-          staffName={scheduleStaff.name}
-          onClose={() => setScheduleStaff(null)}
+          staffId={scheduleMember.id}
+          staffName={scheduleMember.full_name}
+          schedules={scheduleMember.schedules}
+          todayKey={todayKey}
+          onClose={() => setScheduleMemberId(null)}
+        />
+      )}
+
+      {/* Confirmación al desactivar con citas próximas */}
+      {confirmMember && (
+        <ConfirmDeactivate
+          member={confirmMember}
+          onCancel={() => setConfirmMember(null)}
+          onConfirm={() => {
+            const m = confirmMember
+            setConfirmMember(null)
+            void applyToggle(m, false)
+          }}
         />
       )}
     </>
@@ -101,88 +173,113 @@ export function StaffManager({ initialStaff, businessId }: StaffManagerProps) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// TARJETA DE EMPLEADO (StaffCard)
+// TARJETA DE PROFESIONAL (StaffCard)
 // ════════════════════════════════════════════════════════════════════════════════
 
-function StaffCard({ 
-  member, 
+const STATUS_STYLES: Record<NonNullable<TeamMember['status']>, string> = {
+  free:     'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  busy:     'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  break:    'bg-sky-500/15 text-sky-400 border-sky-500/30',
+  time_off: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
+  off:      'bg-white/5 text-xinuco-muted border-white/10',
+}
+
+function StatusPill({ member }: { member: TeamMember }) {
+  const base = 'inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border w-fit'
+
+  if (!member.is_active) {
+    return <span className={`${base} ${STATUS_STYLES.off}`}>Inactivo</span>
+  }
+  if (!member.status) return null
+
+  let text: string = STAFF_STATUS_LABELS[member.status]
+  if (member.status === 'busy' && member.busy_until) {
+    text = `${text} · hasta ${formatApptTime(member.busy_until)}`
+  }
+  const title = member.status === 'busy' && member.customer_name ? `Con ${member.customer_name}` : undefined
+
+  return <span className={`${base} ${STATUS_STYLES[member.status]}`} title={title}>{text}</span>
+}
+
+function StaffCard({
+  member,
+  services,
+  todayKey,
+  isPending,
+  error,
   onToggle,
-  onOpenSchedule
-}: { 
-  member: Staff
-  onToggle: (updated: Staff) => void 
+  onEdit,
+  onOpenSchedule,
+}: {
+  member: TeamMember
+  services: TeamService[]
+  todayKey: string
+  isPending: boolean
+  error: string | null
+  onToggle: () => void
+  onEdit: () => void
   onOpenSchedule: () => void
 }) {
-  const [isPending, startTransition] = useTransition()
-
-  // Extraer iniciales para el avatar
   const initials = member.full_name
     .split(' ')
+    .filter(Boolean)
     .map(n => n[0])
     .join('')
     .substring(0, 2)
     .toUpperCase()
 
-  // Optimistic UI Toggle
-  const handleToggle = () => {
-    const newStatus = !member.is_active
-    
-    // 1. Actualizar localmente de inmediato
-    onToggle({ ...member, is_active: newStatus })
+  // Solo cuentan los servicios activos del negocio
+  const activeIds = new Set(services.map(s => s.id))
+  const serviceCount = member.service_ids.filter(id => activeIds.has(id)).length
+  const servicesText = member.does_all_services
+    ? 'Todos los servicios'
+    : `${serviceCount} ${serviceCount === 1 ? 'servicio' : 'servicios'}`
 
-    // 2. Ejecutar mutación en background
-    startTransition(async () => {
-      const result = await toggleStaffStatus(member.id, newStatus)
-      if (result.error) {
-        // 3. Rollback si falla
-        onToggle({ ...member, is_active: !newStatus })
-      }
-    })
-  }
+  const monthText = `Este mes: ${member.month_completed} ${member.month_completed === 1 ? 'cita' : 'citas'}`
+  const nextText = member.next_appointment
+    ? `Próxima: ${dayLabel(apptDateKey(member.next_appointment), todayKey)} ${formatApptTime(member.next_appointment)}`
+    : 'Sin citas próximas'
 
   return (
-    <div 
-      className={`card flex flex-col gap-5 transition-all duration-300 ${!member.is_active ? 'opacity-50 grayscale' : ''} ${isPending ? 'cursor-wait opacity-70' : ''}`}
+    <div
+      className={`card flex flex-col gap-4 transition-all duration-300 ${!member.is_active ? 'opacity-60' : ''} ${isPending ? 'cursor-wait' : ''}`}
     >
-      {/* Top: Avatar, Nombre y Switch */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3.5">
-          {/* Avatar (Letras) */}
-          <div 
+      {/* Top: avatar, nombre, cargo y switch */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3.5 min-w-0">
+          <div
             className="w-12 h-12 rounded-full flex items-center justify-center shrink-0 font-bold text-sm tracking-widest shadow-inner"
-            style={{ 
+            style={{
               background: 'color-mix(in srgb, var(--primary-color) 15%, transparent)',
-              color: 'var(--primary-color)' 
+              color: 'var(--primary-color)',
             }}
           >
             {initials}
           </div>
 
-          <div className="flex flex-col">
-            <h3 className="font-bold text-xinuco-text text-base leading-tight line-clamp-1" title={member.full_name}>
+          <div className="flex flex-col min-w-0">
+            <h3 className="font-bold text-xinuco-text text-base leading-tight break-words">
               {member.full_name}
             </h3>
-            
-            {/* Badge de Rol */}
-            <span className={`inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider border bg-white/5 border-white/10 text-xinuco-muted w-fit`}>
+            <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider border bg-white/5 border-white/10 text-xinuco-muted w-fit">
               <Scissors size={10} />
-              {member.specialty_role || 'Empleado'}
+              {specialtyLabel(member.specialty_role)}
             </span>
           </div>
         </div>
 
-        {/* Switch Optimista */}
         <button
           type="button"
           role="switch"
           aria-checked={member.is_active}
-          onClick={handleToggle}
+          aria-label={member.is_active ? `Desactivar a ${member.full_name}` : `Activar a ${member.full_name}`}
+          onClick={onToggle}
           disabled={isPending}
           className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed"
           style={{
             backgroundColor: member.is_active ? 'var(--primary-color)' : 'var(--surface-color, #333)',
           }}
-          title={member.is_active ? 'Desactivar empleado' : 'Activar empleado'}
+          title={member.is_active ? 'Desactivar profesional' : 'Activar profesional'}
         >
           <span
             className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
@@ -197,41 +294,176 @@ function StaffCard({
         </button>
       </div>
 
+      <StatusPill member={member} />
+
+      {error && (
+        <p role="alert" className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+          {error}
+        </p>
+      )}
+
+      {/* Información */}
+      <ul className="flex flex-col gap-2 text-xs text-xinuco-muted">
+        <InfoLine icon={<Clock size={13} />} text={summarizeSchedule(member.schedules)} />
+        <InfoLine icon={<Scissors size={13} />} text={servicesText} />
+        <InfoLine icon={<CalendarCheck size={13} />} text={monthText} />
+        <InfoLine icon={<CalendarClock size={13} />} text={nextText} />
+      </ul>
+
       <div className="h-px w-full" style={{ background: 'var(--border-color)' }} />
 
-      {/* Acciones Secundarias */}
+      {/* Acciones */}
       <div className="flex items-center gap-2">
-        <button 
+        <button
+          type="button"
+          className="flex-1 btn-ghost !py-2 !px-3 text-xs flex items-center justify-center gap-2"
+          onClick={onEdit}
+        >
+          <Pencil size={14} />
+          Editar
+        </button>
+        <button
+          type="button"
           className="flex-1 btn-ghost !py-2 !px-3 text-xs flex items-center justify-center gap-2"
           onClick={onOpenSchedule}
         >
           <CalendarDays size={14} />
-          Ver Horario
+          Horario
         </button>
       </div>
     </div>
   )
 }
 
+function InfoLine({ icon, text }: { icon: React.ReactNode; text: string }) {
+  return (
+    <li className="flex items-start gap-2">
+      <span className="mt-px shrink-0" aria-hidden="true">{icon}</span>
+      <span className="min-w-0 break-words">{text}</span>
+    </li>
+  )
+}
+
 // ════════════════════════════════════════════════════════════════════════════════
-// SHEET PANEL — CREAR EMPLEADO
+// DIÁLOGO — confirmar desactivación
 // ════════════════════════════════════════════════════════════════════════════════
 
-function StaffSheet({ 
-  businessId, 
-  onClose, 
-  onSuccess 
-}: { 
+function ConfirmDeactivate({
+  member,
+  onCancel,
+  onConfirm,
+}: {
+  member: TeamMember
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const n = member.upcoming_count
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onCancel])
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel() }}
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="deactivate-title"
+        aria-describedby="deactivate-desc"
+        className="w-full max-w-md rounded-2xl p-6 flex flex-col gap-4 animate-fade-in"
+        style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}
+      >
+        <div className="flex items-start gap-3">
+          <span className="p-2 rounded-full bg-red-500/10 text-red-400 shrink-0">
+            <AlertTriangle size={18} />
+          </span>
+          <div className="flex flex-col gap-2">
+            <h2 id="deactivate-title" className="text-lg font-bold text-xinuco-text">
+              ¿Desactivar a {member.full_name}?
+            </h2>
+            <p id="deactivate-desc" className="text-sm text-xinuco-muted">
+              Tiene {n} {n === 1 ? 'cita próxima' : 'citas próximas'}. Desactivarlo no {n === 1 ? 'la cancela' : 'las cancela'}:
+              reasígnalas o cancélalas desde la Agenda. Tampoco aparecerá en la reserva en línea ni en la Fila de espera.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex gap-3 pt-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            autoFocus
+            className="flex-1 py-2.5 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
+            style={{ borderColor: 'var(--border-color)' }}
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-500 transition-colors"
+          >
+            Desactivar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// SHEET PANEL — CREAR / EDITAR PROFESIONAL
+// ════════════════════════════════════════════════════════════════════════════════
+
+const ROLE_OTHER = '__other__'
+
+function initialRoleState(member: TeamMember | null): { choice: string; other: string } {
+  if (!member) return { choice: '', other: '' }
+  const label = specialtyLabel(member.specialty_role)
+  if ((SPECIALTY_OPTIONS as readonly string[]).includes(label)) return { choice: label, other: '' }
+  return { choice: ROLE_OTHER, other: member.specialty_role?.trim() ?? '' }
+}
+
+function StaffSheet({
+  mode,
+  businessId,
+  member,
+  services,
+  onClose,
+  onDone,
+}: {
+  mode: 'create' | 'edit'
   businessId: string
+  member: TeamMember | null
+  services: TeamService[]
   onClose: () => void
-  onSuccess: (newStaff: Staff) => void
+  onDone: () => void
 }) {
   const backdropRef = useRef<HTMLDivElement>(null)
-  
-  const [name, setName] = useState('')
-  const [specialtyRole, setSpecialtyRole] = useState('')
+
+  const initialRole = initialRoleState(member)
+  const activeIds = new Set(services.map(s => s.id))
+
+  const [name, setName] = useState(member?.full_name ?? '')
+  const [roleChoice, setRoleChoice] = useState(initialRole.choice)
+  const [roleOther, setRoleOther] = useState(initialRole.other)
+  const [servicesMode, setServicesMode] = useState<'all' | 'some'>(
+    member && !member.does_all_services ? 'some' : 'all',
+  )
+  const [selected, setSelected] = useState<Set<string>>(
+    new Set((member?.service_ids ?? []).filter(id => activeIds.has(id))),
+  )
   const [formError, setFormError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+
+  // Etiqueta de público solo si hay más de uno entre los servicios
+  const showAudience = new Set(services.map(s => s.audience)).size > 1
 
   // Cerrar con ESC
   useEffect(() => {
@@ -246,33 +478,49 @@ function StaffSheet({
     return () => { document.body.style.overflow = '' }
   }, [])
 
-  async function handleSubmit(e: React.FormEvent) {
+  function toggleService(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setFormError(null)
 
-    if (!name.trim()) return setFormError('El nombre es obligatorio.')
-    if (!specialtyRole.trim()) return setFormError('El rol/especialidad es obligatorio.')
+    const fullName = name.trim()
+    const role = (roleChoice === ROLE_OTHER ? roleOther : roleChoice).trim()
+
+    if (fullName.length < 2 || fullName.length > 80) return setFormError('El nombre debe tener entre 2 y 80 caracteres.')
+    if (!roleChoice) return setFormError('Elige un cargo.')
+    if (role.length < 2 || role.length > 40) return setFormError('El cargo debe tener entre 2 y 40 caracteres.')
+    if (servicesMode === 'some' && selected.size === 0) {
+      return setFormError('Elige al menos un servicio o "Todos los servicios".')
+    }
+
+    const serviceIds: string[] | 'all' = servicesMode === 'all' ? 'all' : Array.from(selected)
 
     startTransition(async () => {
       try {
-        const result = await createStaffMember(businessId, {
-          full_name: name.trim(),
-          specialty_role: specialtyRole.trim()
-        })
+        const result = mode === 'edit' && member
+          ? await updateStaffMember(member.id, { full_name: fullName, specialty_role: role, service_ids: serviceIds })
+          : await createStaffMember(businessId, { full_name: fullName, specialty_role: role, service_ids: serviceIds })
 
         if (result.error) {
           setFormError(result.error)
           return
         }
-
-        if (result.data && !Array.isArray(result.data)) {
-          onSuccess(result.data as Staff)
-        }
-      } catch (err: any) {
-        setFormError(err?.message ?? 'Error inesperado al crear el empleado.')
+        onDone()
+      } catch (err: unknown) {
+        setFormError(err instanceof Error ? err.message : 'Error inesperado al guardar.')
       }
     })
   }
+
+  const title = mode === 'edit' ? 'Editar profesional' : 'Añadir profesional'
 
   return (
     <div
@@ -281,31 +529,33 @@ function StaffSheet({
       style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
       onClick={(e) => { if (e.target === backdropRef.current) onClose() }}
     >
-      <div 
+      <div
         className="h-full overflow-y-auto animate-slide-in-right w-[95vw] sm:w-[450px]"
-        style={{ 
-          background: 'var(--bg-color)', 
-          borderLeft: '1px solid var(--border-color)' 
-        }}
+        style={{ background: 'var(--bg-color)', borderLeft: '1px solid var(--border-color)' }}
       >
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-5" style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-color)' }}>
           <div>
-            <h2 className="text-lg font-bold text-xinuco-text">Añadir Empleado</h2>
-            <p className="text-xs text-xinuco-muted mt-0.5">Registra a un nuevo colaborador en tu negocio.</p>
+            <h2 className="text-lg font-bold text-xinuco-text">{title}</h2>
+            <p className="text-xs text-xinuco-muted mt-0.5">
+              {mode === 'edit' ? 'Actualiza sus datos y lo que hace.' : 'Registra a una nueva persona en tu equipo.'}
+            </p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+          >
             <X size={20} />
           </button>
         </div>
 
-        {/* Formulario */}
         <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-6">
-          
           {/* Nombre */}
           <div className="flex flex-col gap-2">
             <label htmlFor="staff-name" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-              Nombre Completo *
+              Nombre completo *
             </label>
             <input
               id="staff-name"
@@ -313,28 +563,101 @@ function StaffSheet({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Ej: Carlos Ramírez"
+              maxLength={80}
               required
               autoFocus
               className="input-base"
             />
           </div>
 
-          {/* Rol (Input Texto) */}
+          {/* Cargo */}
           <div className="flex flex-col gap-2">
             <label htmlFor="staff-role" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-              Especialidad / Rol *
+              Cargo *
             </label>
-            <input 
+            <select
               id="staff-role"
-              type="text"
-              name="specialty_role"
-              placeholder="Ej: Master Barber, Colorista..."
-              className="input-base"
-              value={specialtyRole}
-              onChange={(e) => setSpecialtyRole(e.target.value)}
+              value={roleChoice}
+              onChange={(e) => setRoleChoice(e.target.value)}
               required
-            />
+              className="input-base"
+            >
+              <option value="" disabled>Selecciona un cargo…</option>
+              {SPECIALTY_OPTIONS.map(opt => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+              <option value={ROLE_OTHER}>Otro…</option>
+            </select>
+            {roleChoice === ROLE_OTHER && (
+              <input
+                id="staff-role-other"
+                type="text"
+                value={roleOther}
+                onChange={(e) => setRoleOther(e.target.value)}
+                placeholder="Ej: Maquilladora"
+                maxLength={40}
+                aria-label="Otro cargo"
+                className="input-base"
+              />
+            )}
           </div>
+
+          {/* Servicios */}
+          <fieldset className="flex flex-col gap-3">
+            <legend className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider mb-1">
+              ¿Qué servicios hace?
+            </legend>
+
+            <label className="flex items-center gap-2 text-sm text-xinuco-text cursor-pointer">
+              <input
+                type="radio"
+                name="services-mode"
+                checked={servicesMode === 'all'}
+                onChange={() => setServicesMode('all')}
+              />
+              Todos los servicios
+            </label>
+            <label className="flex items-center gap-2 text-sm text-xinuco-text cursor-pointer">
+              <input
+                type="radio"
+                name="services-mode"
+                checked={servicesMode === 'some'}
+                onChange={() => setServicesMode('some')}
+              />
+              Solo algunos
+            </label>
+
+            {servicesMode === 'some' && (
+              services.length === 0 ? (
+                <p className="text-xs text-xinuco-muted">Aún no tienes servicios activos.</p>
+              ) : (
+                <div
+                  className="flex flex-col rounded-xl overflow-hidden max-h-64 overflow-y-auto"
+                  style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+                >
+                  {services.map((svc, idx) => (
+                    <label
+                      key={svc.id}
+                      className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-xinuco-text cursor-pointer hover:bg-white/[0.03]"
+                      style={{ borderBottom: idx === services.length - 1 ? 'none' : '1px solid var(--border-color)' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected.has(svc.id)}
+                        onChange={() => toggleService(svc.id)}
+                      />
+                      <span className="flex-1 min-w-0 break-words">{svc.name}</span>
+                      {showAudience && (
+                        <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold border bg-white/5 border-white/10 text-xinuco-muted">
+                          {svc.audience === 'all' ? 'Unisex' : AUDIENCE_LABELS[svc.audience].singular}
+                        </span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              )
+            )}
+          </fieldset>
 
           {formError && (
             <p role="alert" className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2.5 animate-fade-in">
@@ -362,11 +685,10 @@ function StaffSheet({
                   Guardando…
                 </>
               ) : (
-                'Crear Empleado'
+                'Guardar'
               )}
             </button>
           </div>
-
         </form>
       </div>
     </div>

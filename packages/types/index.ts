@@ -16,6 +16,7 @@ export type {
   ServiceAudienceOrAll,
   Staff,
   StaffRole,
+  StaffSchedule,
   StaffBreak,
   StaffTimeOff,
   StaffTimeOffKind,
