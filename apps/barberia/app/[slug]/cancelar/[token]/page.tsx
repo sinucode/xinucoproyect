@@ -80,9 +80,11 @@ export default async function CancelAppointmentPage({
   // Un token de otro negocio se trata igual que uno inexistente (no filtrar datos).
   if (error || !appt || appt.slug !== slug) return notFoundMsg
 
-  const date = new Date(appt.start_time).toLocaleDateString('es-CO', {
+  const rawDate = new Date(appt.start_time).toLocaleDateString('es-CO', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
   })
+  // Solo la primera letra en mayúscula ("Jueves, 1 de octubre de 2026"); `capitalize` de CSS ponía "De".
+  const date = rawDate.charAt(0).toUpperCase() + rawDate.slice(1)
   const time = formatApptTime(appt.start_time)
   const products = appt.products ?? []
 
@@ -98,7 +100,7 @@ export default async function CancelAppointmentPage({
         {appt.business_name}
       </p>
       <h1 className="text-xl font-bold text-xinuco-text mb-1">
-        {appt.can_cancel ? '¿Cancelar tu cita?' : 'Tu cita'}
+        {appt.can_cancel ? '¿Cancelar tu cita?' : appt.status === 'cancelled' ? 'Cita cancelada' : 'Tu cita'}
       </h1>
       {appt.customer_name && (
         <p className="text-sm text-xinuco-muted mb-5">Hola {appt.customer_name}</p>
@@ -115,7 +117,7 @@ export default async function CancelAppointmentPage({
         </div>
         <div className="flex justify-between gap-3">
           <dt className="text-xinuco-muted">Fecha</dt>
-          <dd className="font-semibold text-xinuco-text text-right capitalize">{date}</dd>
+          <dd className="font-semibold text-xinuco-text text-right">{date}</dd>
         </div>
         <div className="flex justify-between gap-3">
           <dt className="text-xinuco-muted">Hora</dt>
@@ -138,9 +140,20 @@ export default async function CancelAppointmentPage({
       {appt.can_cancel ? (
         <CancelButton token={token} slug={slug} />
       ) : (
-        <p className="text-sm text-xinuco-muted leading-relaxed">
-          {notCancellableReason(appt, startedOrPast)}
-        </p>
+        <div className="flex flex-col items-center gap-4">
+          <p className="text-sm text-xinuco-muted leading-relaxed">
+            {notCancellableReason(appt, startedOrPast)}
+          </p>
+          {appt.status === 'cancelled' && (
+            <a
+              href={`/${slug}/book`}
+              className="inline-flex items-center justify-center rounded-xl px-6 py-3 text-sm font-bold text-white"
+              style={{ background: 'var(--primary-color)' }}
+            >
+              Reservar otra cita
+            </a>
+          )}
+        </div>
       )}
     </Shell>
   )
