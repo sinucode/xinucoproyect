@@ -8,6 +8,7 @@ import {
   appointmentConfirmationEmail,
   appointmentReminderEmail,
   appointmentCancellationEmail,
+  type EmailBrand,
 } from './templates'
 
 // ── Tipo de cliente Supabase tipado con el esquema de Xinuco ─────────────────
@@ -57,6 +58,40 @@ async function loadAppointmentData(supabase: XinucoSupabase, appointmentId: stri
     .single()
 
   return data
+}
+
+// Base pública de las reservas (el correo siempre enlaza a producción).
+const PUBLIC_SITE_URL = 'https://www.xinuco.com'
+
+/**
+ * Nombre + marca del negocio para los correos: logo y color principal de
+ * brand_config (fuente de verdad) con respaldo en branding.
+ */
+async function loadBusinessBrand(
+  supabase: XinucoSupabase,
+  businessId: string,
+): Promise<{ business: { name: string } | null; brand: EmailBrand | undefined }> {
+  const { data } = await (supabase as any)
+    .rpc('get_public_business', { p_id: businessId })
+    .maybeSingle() as {
+      data: {
+        name: string
+        slug: string
+        branding: { logo_url?: string | null; primary_color?: string | null } | null
+        brand_config: { logoUrl?: string | null; primaryColor?: string | null } | null
+      } | null
+    }
+  if (!data) return { business: null, brand: undefined }
+
+  return {
+    business: { name: data.name },
+    brand: {
+      name:         data.name,
+      logoUrl:      data.brand_config?.logoUrl ?? data.branding?.logo_url ?? null,
+      primaryColor: data.brand_config?.primaryColor ?? data.branding?.primary_color ?? null,
+      bookingUrl:   `${PUBLIC_SITE_URL}/${data.slug}/book`,
+    },
+  }
 }
 
 /**
@@ -135,10 +170,8 @@ export async function sendBookingConfirmation(params: {
 
   if (!customer?.email) return
 
-  // 3. Cargar nombre del negocio
-  const { data: business } = await (supabase as any)
-    .rpc('get_public_business', { p_id: businessId })
-    .maybeSingle() as { data: { name: string } | null }
+  // 3. Cargar nombre y marca del negocio
+  const { business, brand } = await loadBusinessBrand(supabase, businessId)
 
   // 3b. Productos apartados al reservar
   const reservedProducts = await loadReservedProducts(supabase, appointmentId)
@@ -153,6 +186,7 @@ export async function sendBookingConfirmation(params: {
     durationMinutes: service.duration_minutes,
     priceCop:        service.price_cop,
     reservedProducts,
+    brand,
   })
 
   const result = await sendEmail({
@@ -194,10 +228,8 @@ export async function sendBookingReminder(params: {
 
   if (!customer?.email) return
 
-  // 3. Cargar nombre del negocio
-  const { data: business } = await (supabase as any)
-    .rpc('get_public_business', { p_id: businessId })
-    .maybeSingle() as { data: { name: string } | null }
+  // 3. Cargar nombre y marca del negocio
+  const { business, brand } = await loadBusinessBrand(supabase, businessId)
 
   // 4. Construir y enviar el correo
   const html = appointmentReminderEmail({
@@ -207,6 +239,7 @@ export async function sendBookingReminder(params: {
     staffName:     staff?.full_name ?? null,
     startTime:     appt.start_time ?? new Date().toISOString(),
     reservedProducts: await loadReservedProducts(supabase, appointmentId),
+    brand,
   })
 
   const result = await sendEmail({
@@ -248,10 +281,8 @@ export async function sendCancellationNotice(params: {
 
   if (!customer?.email) return
 
-  // 3. Cargar nombre del negocio
-  const { data: business } = await (supabase as any)
-    .rpc('get_public_business', { p_id: businessId })
-    .maybeSingle() as { data: { name: string } | null }
+  // 3. Cargar nombre y marca del negocio
+  const { business, brand } = await loadBusinessBrand(supabase, businessId)
 
   // 4. Construir y enviar el correo
   const html = appointmentCancellationEmail({
@@ -260,6 +291,7 @@ export async function sendCancellationNotice(params: {
     serviceName:  service.name,
     startTime:    appt.start_time ?? new Date().toISOString(),
     reason,
+    brand,
   })
 
   const result = await sendEmail({
