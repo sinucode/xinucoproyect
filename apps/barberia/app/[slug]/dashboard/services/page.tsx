@@ -2,11 +2,9 @@ import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { getServices } from '@/actions/services'
+import { getServicesOverview } from '@/actions/services'
 import { ServiceManager } from '@/components/dashboard/services/ServiceManager'
 import { Loader2 } from 'lucide-react'
-import { getBusinessBySlug } from '@/actions/businesses'
-import { notFound } from 'next/navigation'
 import type { Profile } from '@xinuco/types'
 
 export const metadata: Metadata = {
@@ -33,21 +31,14 @@ export default async function ServicesPage({ params }: { params: Promise<{ slug:
     redirect(`/${slug}/dashboard`)
   }
 
-  // 1. Obtener negocio por slug
-  const business = await getBusinessBySlug(slug)
-  if (!business) notFound()
-
-  // 2. Obtener servicios del negocio
-  const services = await getServices(business.id)
+  // Servicios + barberos + estaciones + métricas del mes (business_id sale del perfil)
+  const overview = await getServicesOverview()
+  if ('error' in overview) redirect(`/${slug}/dashboard`)
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto pb-24">
-      <Suspense 
-        fallback={
-          <ServicesSkeleton />
-        }
-      >
-        <ServiceManager initialServices={services} businessId={business.id} />
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
+      <Suspense fallback={<ServicesSkeleton />}>
+        <ServiceManager overview={overview} />
       </Suspense>
     </div>
   )
