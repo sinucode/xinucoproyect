@@ -442,6 +442,7 @@ export function CheckoutModal({
                         <button
                           type="button"
                           onClick={() => handleChangeQuantity(idx, -1)}
+                          aria-label={`Quitar una unidad de ${item.description}`}
                           disabled={item.quantity <= 1}
                           className="p-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
                           title="Quitar una unidad"
@@ -452,6 +453,7 @@ export function CheckoutModal({
                         <button
                           type="button"
                           onClick={() => handleChangeQuantity(idx, 1)}
+                          aria-label={`Agregar una unidad de ${item.description}`}
                           className="p-1 text-zinc-400 hover:text-zinc-100"
                           title="Agregar una unidad"
                         >
