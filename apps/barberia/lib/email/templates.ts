@@ -66,7 +66,7 @@ function emailLayout(contentHtml: string): string {
             <td align="center" style="padding-top:24px;">
               <p style="margin:0;font-size:12px;color:#666666;line-height:1.6;">
                 Este correo fue enviado automáticamente. No respondas a este mensaje.<br>
-                <span style="color:#C5A059;">noreply@xinuco.app</span>
+                <span style="color:#C5A059;">noreply@xinuco.com</span>
               </p>
             </td>
           </tr>

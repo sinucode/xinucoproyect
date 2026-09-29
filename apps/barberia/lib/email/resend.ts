@@ -30,7 +30,7 @@ export async function sendEmail(
   try {
     const resend = getResend()
     await resend.emails.send({
-      from:    payload.from ?? 'Xinuco <noreply@xinuco.app>',
+      from:    payload.from ?? 'Xinuco <noreply@xinuco.com>',
       to:      payload.to,
       subject: payload.subject,
       html:    payload.html,

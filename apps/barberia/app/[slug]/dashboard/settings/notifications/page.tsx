@@ -168,7 +168,7 @@ export default async function NotificationsSettingsPage({
 
           <StatusCard title="Remitente">
             <span style={{ fontSize: '14px', fontWeight: 600, color: '#C5A059' }}>
-              noreply@xinuco.app
+              noreply@xinuco.com
             </span>
             <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: '#666', lineHeight: '1.5' }}>
               Configurable en <code style={{ color: '#C5A059' }}>lib/email/resend.ts</code>.
