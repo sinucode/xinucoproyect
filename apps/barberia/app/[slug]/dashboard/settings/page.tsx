@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { Clock, Bell, Palette, Users, CreditCard, ChevronRight, type LucideIcon } from 'lucide-react'
+import { Clock, Bell, Palette, Users, CreditCard, ShoppingBag, ChevronRight, type LucideIcon } from 'lucide-react'
 import { detectCurrentPlan, PLAN_BUNDLES } from '@xinuco/billing-catalog'
 import type { Business, BusinessFeatures, Profile } from '@xinuco/types'
 
@@ -137,6 +137,12 @@ export default async function SettingsPage({
       description: 'Configura los días y horas de operación',
       href:        './availability',
       icon:        Clock,
+    },
+    {
+      label:       'Reservas en línea',
+      description: 'Productos apartados y límites por cita',
+      href:        './booking',
+      icon:        ShoppingBag,
     },
     {
       label:       'Notificaciones',

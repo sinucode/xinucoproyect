@@ -14,6 +14,8 @@ import {
   Loader2,
   MoreVertical,
   ChevronDown,
+  Globe,
+  CalendarClock,
 } from 'lucide-react'
 import {
   createInventoryItem,
@@ -26,6 +28,8 @@ import type {
   InventoryCategory,
   MovementType,
 } from '@xinuco/types'
+import { formatApptTime, apptDateKey, dayLabel, businessTodayISODate } from '@/lib/agenda-time'
+import { reservedByItem, reservationsForItem, type InventoryReservation } from '@/lib/inventory-reservations'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -48,8 +52,14 @@ const ALL_CATEGORIES: InventoryCategory[] = ['general', 'hair', 'skincare', 'too
 interface InventoryManagerProps {
   items:          InventoryItem[]
   lowStockItems:  InventoryItem[]
+  reservations:   InventoryReservation[]
   businessId:     string
   slug:           string
+}
+
+/** "Hoy 10:30 a. m." — hora del negocio (start_time guarda hora local como UTC). */
+function reservationWhen(iso: string): string {
+  return `${dayLabel(apptDateKey(iso), businessTodayISODate())} ${formatApptTime(iso)}`
 }
 
 // ── Stock Gauge ───────────────────────────────────────────────────────────────
@@ -255,6 +265,7 @@ function MovementForm({ item, direction, businessId, slug, onClose, onSuccess }:
 
 interface ItemRowProps {
   item:             InventoryItem
+  reservations:     InventoryReservation[]
   businessId:       string
   slug:             string
   onEdit:           (item: InventoryItem) => void
@@ -262,13 +273,18 @@ interface ItemRowProps {
   isDeactivating:   boolean
 }
 
-function ItemRow({ item, businessId, slug, onEdit, onDeactivate, isDeactivating }: ItemRowProps) {
+function ItemRow({ item, reservations, businessId, slug, onEdit, onDeactivate, isDeactivating }: ItemRowProps) {
   const router                            = useRouter()
   const [menuOpen, setMenuOpen]           = useState(false)
   const [confirmDrop, setConfirmDrop]     = useState(false)
   const [movement, setMovement]           = useState<'in' | 'out' | null>(null)
+  const [showReserved, setShowReserved]   = useState(false)
 
   const isLow = item.current_stock < item.min_stock
+  const reservedQty = reservations.reduce((sum, r) => sum + r.quantity, 0)
+  const reservedTooltip = reservations
+    .map((r) => `${r.customer_name ?? 'Cliente'} — ${reservationWhen(r.start_time)} (${r.quantity})`)
+    .join('\n')
 
   return (
     <div
@@ -301,10 +317,33 @@ function ItemRow({ item, businessId, slug, onEdit, onDeactivate, isDeactivating 
               </span>
             )}
             <CategoryBadge category={item.category} />
+            {item.bookable_online && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full text-sky-400 border border-sky-500/25 bg-sky-500/10"
+                title="Disponible para reserva en línea"
+              >
+                <Globe size={10} />
+                En línea
+              </span>
+            )}
           </div>
-          {item.unit_price && (
-            <span className="text-[11px] text-zinc-500">{formatCOP(item.unit_price)}</span>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {item.unit_price && (
+              <span className="text-[11px] text-zinc-500">{formatCOP(item.unit_price)}</span>
+            )}
+            {reservedQty > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowReserved((v) => !v)}
+                title={reservedTooltip}
+                aria-expanded={showReserved}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full text-amber-400 border border-amber-500/25 bg-amber-500/10 hover:bg-amber-500/20 transition-colors"
+              >
+                <CalendarClock size={10} />
+                Apartado: {reservedQty}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Stock gauge */}
@@ -368,6 +407,26 @@ function ItemRow({ item, businessId, slug, onEdit, onDeactivate, isDeactivating 
         <StockGauge item={item} />
       </div>
 
+      {/* Lista de apartados (cliente + fecha/hora) */}
+      {showReserved && reservedQty > 0 && (
+        <ul
+          className="mx-4 mb-3 flex flex-col divide-y rounded-lg border text-xs"
+          style={{ borderColor: 'var(--border-color)' }}
+        >
+          {reservations.map((r) => (
+            <li key={r.appointment_id} className="flex items-center justify-between gap-3 px-3 py-2">
+              <span className="min-w-0 truncate text-zinc-200">
+                {r.customer_name ?? 'Cliente'}
+                {r.customer_phone && <span className="text-zinc-500"> · {r.customer_phone}</span>}
+              </span>
+              <span className="shrink-0 text-zinc-400 tabular-nums">
+                {reservationWhen(r.start_time)} · {r.quantity} {r.quantity === 1 ? 'ud.' : 'uds.'}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
       {/* Movement form */}
       {movement && (
         <div className="px-4 pb-4">
@@ -429,6 +488,7 @@ interface ItemFormState {
   min_stock:     string
   unit_price:    string
   unit_cost:     string
+  bookable_online: boolean
 }
 
 const EMPTY_FORM: ItemFormState = {
@@ -440,6 +500,7 @@ const EMPTY_FORM: ItemFormState = {
   min_stock:     '0',
   unit_price:    '',
   unit_cost:     '',
+  bookable_online: false,
 }
 
 function itemToFormState(item: InventoryItem): ItemFormState {
@@ -452,6 +513,7 @@ function itemToFormState(item: InventoryItem): ItemFormState {
     min_stock:     String(item.min_stock),
     unit_price:    item.unit_price !== null ? String(item.unit_price) : '',
     unit_cost:     item.unit_cost  !== null ? String(item.unit_cost)  : '',
+    bookable_online: item.bookable_online ?? false,
   }
 }
 
@@ -513,6 +575,7 @@ function ItemSheet({ businessId, slug, editItem, onClose, onSuccess }: ItemSheet
         min_stock,
         unit_price,
         unit_cost,
+        bookable_online: form.bookable_online,
       }
 
       let result: { success?: boolean; error?: string }
@@ -706,6 +769,26 @@ function ItemSheet({ businessId, slug, editItem, onClose, onSuccess }: ItemSheet
             </div>
           </div>
 
+          {/* Reserva en línea */}
+          <label
+            className="flex items-start justify-between gap-4 rounded-xl border px-3 py-3 cursor-pointer"
+            style={{ borderColor: 'var(--border-color)' }}
+          >
+            <span className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium text-zinc-200">Disponible para reserva en línea</span>
+              <span className="text-[11px] text-zinc-500">
+                El cliente podrá apartarlo al reservar (requiere precio de venta). Se paga en el local.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              checked={form.bookable_online}
+              onChange={(e) => setForm((p) => ({ ...p, bookable_online: e.target.checked }))}
+              className="mt-0.5 h-5 w-5 shrink-0 rounded accent-[var(--primary-color)]"
+            />
+          </label>
+
           {error && (
             <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
           )}
@@ -749,6 +832,7 @@ function ItemSheet({ businessId, slug, editItem, onClose, onSuccess }: ItemSheet
 export function InventoryManager({
   items: initialItems,
   lowStockItems,
+  reservations,
   businessId,
   slug,
 }: InventoryManagerProps) {
@@ -772,6 +856,10 @@ export function InventoryManager({
     }
     return sum
   }, 0)
+
+  // Apartados por ítem y alertas (apartado > existencias)
+  const reservedMap = reservedByItem(reservations)
+  const oversoldItems = items.filter((i) => (reservedMap[i.id] ?? 0) > i.current_stock)
 
   // Filtered items
   const filteredItems = items.filter((item) => {
@@ -910,6 +998,36 @@ export function InventoryManager({
         )}
       </div>
 
+      {/* Apartado sin existencias */}
+      {oversoldItems.length > 0 && (
+        <div
+          role="alert"
+          className="rounded-xl px-4 py-3 flex flex-col gap-2 border"
+          style={{ backgroundColor: 'rgba(239,68,68,0.06)', borderColor: 'rgba(239,68,68,0.35)' }}
+        >
+          {oversoldItems.map((item) => {
+            const itemRes  = reservationsForItem(reservations, item.id)
+            const customers = Array.from(
+              new Set(
+                itemRes.map((r) =>
+                  r.customer_phone
+                    ? `${r.customer_name ?? 'Cliente'} (${r.customer_phone})`
+                    : (r.customer_name ?? 'Cliente')
+                )
+              )
+            ).join(', ')
+            return (
+              <div key={item.id} className="flex items-start gap-2">
+                <AlertTriangle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
+                <span className="text-xs font-semibold text-red-400">
+                  Apartado sin existencias: {item.name} — {reservedMap[item.id]} apartadas, {item.current_stock} en inventario. Contacta a: {customers}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* Low stock alert banner */}
       {lowStockItems.length > 0 && (
         <div
@@ -1017,6 +1135,7 @@ export function InventoryManager({
             <ItemRow
               key={item.id}
               item={item}
+              reservations={reservationsForItem(reservations, item.id)}
               businessId={businessId}
               slug={slug}
               onEdit={handleEdit}

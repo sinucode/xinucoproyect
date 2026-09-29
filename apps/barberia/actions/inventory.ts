@@ -4,6 +4,7 @@
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { logAction } from '@/actions/audit'
+import { parseReservations, type InventoryReservation } from '@/lib/inventory-reservations'
 import type {
   InventoryItem,
   InventoryMovement,
@@ -28,6 +29,7 @@ export interface CreateInventoryItemInput {
   min_stock:     number   // INTEGER
   unit_price?:   number | null  // INTEGER COP
   unit_cost?:    number | null  // INTEGER COP
+  bookable_online?: boolean     // ofrecible para apartar en la reserva en línea
   created_by?:   string | null
 }
 
@@ -57,6 +59,29 @@ export async function getInventoryItems(
 
   if (error) return { data: null, error: error.message }
   return { data: (data ?? []) as InventoryItem[], error: null }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// getInventoryReservations
+// Productos apartados en citas abiertas (RPC tenant get_inventory_reservations).
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function getInventoryReservations(
+  businessId: string
+): Promise<{ data: InventoryReservation[] | null; error: string | null }> {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { data: null, error: 'No autenticado.' }
+
+  const { data, error } = await supabase.rpc('get_inventory_reservations', {
+    p_business_id: businessId,
+  })
+
+  if (error) return { data: null, error: error.message }
+  return { data: parseReservations(data), error: null }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -139,6 +164,7 @@ export async function createInventoryItem(
       min_stock:     input.min_stock,
       unit_price:    input.unit_price    ?? null,
       unit_cost:     input.unit_cost     ?? null,
+      bookable_online: input.bookable_online ?? false,
       is_active:     true,
       created_by:    input.created_by ?? user.id,
     })
@@ -223,6 +249,7 @@ export async function updateInventoryItem(
   if (input.min_stock     !== undefined) payload.min_stock     = input.min_stock
   if (input.unit_price    !== undefined) payload.unit_price    = input.unit_price
   if (input.unit_cost     !== undefined) payload.unit_cost     = input.unit_cost
+  if (input.bookable_online !== undefined) payload.bookable_online = input.bookable_online
 
   const { error } = await supabase
     .from('inventory_items')

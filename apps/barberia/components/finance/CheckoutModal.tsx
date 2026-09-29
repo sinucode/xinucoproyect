@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import { Plus, Minus, Trash, CreditCard, Banknote, Landmark, X, Loader2, DollarSign, Percent, QrCode } from 'lucide-react'
-import { checkoutAppointment, type CheckoutItemInput } from '@/actions/finance'
-import { getInventoryItems } from '@/actions/inventory'
+import { checkoutAppointment, getAppointmentProducts, type CheckoutItemInput } from '@/actions/finance'
+import { getInventoryItems, getInventoryReservations } from '@/actions/inventory'
+import { reservedByItem, type InventoryReservation } from '@/lib/inventory-reservations'
 import type { PaymentMethod, InventoryItem } from '@xinuco/types'
 import { MPPaymentPanel } from '@/components/pos/MPPaymentPanel'
 
@@ -50,6 +51,11 @@ export function CheckoutModal({
   const [inventoryError, setInventoryError] = useState<string | null>(null)
   const [inventoryLoaded, setInventoryLoaded] = useState(false)
   const [inventoryFilter, setInventoryFilter] = useState('')
+  // Apartados de citas abiertas (se restan del stock ofrecido, salvo los de ESTA cita)
+  const [reservations, setReservations] = useState<InventoryReservation[]>([])
+
+  // Productos que el cliente apartó al reservar en línea: se precargan en el ticket
+  const [prefillLoading, setPrefillLoading] = useState(true)
 
   // Estado para añadir nuevos productos manualmente
   const [newProdName, setNewProdName] = useState('')
@@ -79,9 +85,42 @@ export function CheckoutModal({
   const finalReceived = Number(receivedAmount) || 0
   const changeAmount = paymentMethod === 'cash' && finalReceived > totalAmount ? finalReceived - totalAmount : 0
 
-  // Stock conocido por ítem de inventario (para topar el stepper)
+  // Apartados por OTRAS citas (los de esta cita son del propio cliente y se pueden cobrar)
+  const reservedOthers = reservedByItem(reservations, appointment.id)
+
+  // Stock disponible por ítem de inventario = existencias − apartado por otras citas
+  // (para topar el stepper)
   const stockById: Record<string, number> = {}
-  for (const inv of inventory ?? []) stockById[inv.id] = inv.current_stock
+  for (const inv of inventory ?? []) {
+    stockById[inv.id] = Math.max(0, inv.current_stock - (reservedOthers[inv.id] ?? 0))
+  }
+
+  // Precargar los productos apartados de esta cita (el cajero puede quitarlos/ajustarlos)
+  useEffect(() => {
+    let cancelled = false
+    getAppointmentProducts(appointment.id)
+      .then(({ data }) => {
+        if (cancelled || data.length === 0) return
+        setItems((prev) => {
+          const existing = new Set(prev.map((it) => it.inventoryItemId).filter(Boolean))
+          const toAdd: CheckoutItemInput[] = data
+            .filter((p) => !existing.has(p.itemId))
+            .map((p) => ({
+              description: p.name,
+              quantity: p.quantity,
+              unitPrice: p.unitPrice,
+              itemType: 'product' as const,
+              staffId: appointment.staff_id || null,
+              inventoryItemId: p.itemId,
+            }))
+          return toAdd.length > 0 ? [...prev, ...toAdd] : prev
+        })
+      })
+      .catch(() => { /* sin precarga: el cajero puede agregarlos a mano */ })
+      .finally(() => { if (!cancelled) setPrefillLoading(false) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointment.id])
 
   // Abrir el panel de productos y cargar el inventario la primera vez
   const handleOpenAddProduct = async () => {
@@ -91,11 +130,15 @@ export function CheckoutModal({
     setInventoryLoading(true)
     setInventoryError(null)
     try {
-      const { data, error } = await getInventoryItems(businessId)
+      const [{ data, error }, resResult] = await Promise.all([
+        getInventoryItems(businessId),
+        getInventoryReservations(businessId),
+      ])
       if (error || !data) {
         setInventoryError(error || 'No se pudo cargar el inventario.')
       } else {
         setInventory(data)
+        setReservations(resResult.data ?? [])
         setInventoryLoaded(true)
       }
     } catch {
@@ -108,8 +151,9 @@ export function CheckoutModal({
   // Agregar un producto del inventario (o incrementar su cantidad)
   const handleAddInventoryItem = (inv: InventoryItem) => {
     const existingIdx = items.findIndex((it) => it.inventoryItemId === inv.id)
+    const available = stockById[inv.id] ?? inv.current_stock
     if (existingIdx >= 0) {
-      if (items[existingIdx].quantity + 1 > inv.current_stock) {
+      if (items[existingIdx].quantity + 1 > available) {
         setValidationError(`No hay más unidades de ${inv.name} en inventario.`)
         return
       }
@@ -186,6 +230,10 @@ export function CheckoutModal({
 
   // Confirmar cobro
   const handleConfirmCheckout = () => {
+    if (prefillLoading) {
+      setValidationError('Cargando productos apartados de la cita… intenta de nuevo en un momento.')
+      return
+    }
     if (!paymentMethod) {
       setValidationError('Debes seleccionar un método de pago.')
       return
@@ -330,7 +378,9 @@ export function CheckoutModal({
                         ) : (
                           <ul className="max-h-48 overflow-y-auto grid grid-cols-1 gap-1.5">
                             {visibleInventory.map((inv) => {
-                              const outOfStock = inv.current_stock <= 0
+                              const reservedM = reservedOthers[inv.id] ?? 0
+                              const available = Math.max(0, inv.current_stock - reservedM)
+                              const outOfStock = available <= 0
                               const noPrice = !inv.unit_price
                               const disabled = outOfStock || noPrice
                               return (
@@ -354,7 +404,8 @@ export function CheckoutModal({
                                           : 'text-zinc-300 border-zinc-800 bg-zinc-900'
                                       }`}
                                     >
-                                      {outOfStock ? 'Agotado' : `Quedan ${inv.current_stock}`}
+                                      {outOfStock ? 'Agotado' : `Quedan ${available}`}
+                                      {reservedM > 0 && ` (${reservedM} apartadas)`}
                                     </span>
                                   </button>
                                 </li>

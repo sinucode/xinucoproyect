@@ -5,6 +5,8 @@ import { revalidatePath } from 'next/cache'
 import type { PaymentMethod, CashRegisterShift, Sale, SaleItem, Payment, Json } from '@xinuco/types'
 import { logAction } from './audit'
 import { earnPoints } from '@/actions/loyalty'
+import { businessTodayISODate, apptDateKey, dayLabel, formatApptTime } from '@/lib/agenda-time'
+import { parseReservations, type InventoryReservation } from '@/lib/inventory-reservations'
 
 /**
  * getActiveShift — Obtiene el turno de caja abierto actualmente para un negocio.
@@ -222,6 +224,51 @@ export interface CheckoutAppointmentParams {
 }
 
 /**
+ * getAppointmentProducts — Productos que el cliente apartó al reservar en línea.
+ * Cliente tenant (RLS): solo devuelve filas del negocio del usuario autenticado.
+ * Se usa para pre-cargar el ticket del cobro; el cajero puede quitarlos/ajustarlos.
+ */
+export interface AppointmentProductLine {
+  itemId:    string
+  name:      string
+  quantity:  number
+  unitPrice: number
+}
+
+export async function getAppointmentProducts(
+  appointmentId: string
+): Promise<{ data: AppointmentProductLine[]; error: string | null }> {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { data: [], error: 'No autenticado.' }
+
+  const { data, error } = await supabase
+    .from('appointment_products')
+    .select('item_id, quantity, unit_price, inventory_items(name)')
+    .eq('appointment_id', appointmentId)
+
+  if (error) return { data: [], error: error.message }
+
+  type Row = {
+    item_id: string
+    quantity: number
+    unit_price: number
+    inventory_items: { name: string } | { name: string }[] | null
+  }
+  const lines = ((data ?? []) as Row[]).map((row) => {
+    const inv = Array.isArray(row.inventory_items) ? row.inventory_items[0] : row.inventory_items
+    return {
+      itemId:    row.item_id,
+      name:      inv?.name ?? 'Producto',
+      quantity:  row.quantity,
+      unitPrice: row.unit_price,
+    }
+  })
+  return { data: lines, error: null }
+}
+
+/**
  * checkoutAppointment — Proceso de cobro atómico via RPC de PostgreSQL.
  *
  * Reemplaza el flujo anterior de 4 operaciones secuenciales (INSERT sales →
@@ -278,16 +325,52 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
       return { error: 'db_error', message: 'No se pudo verificar el inventario. Intenta de nuevo.' }
     }
 
+    // Apartados por OTRAS citas: el stock físico incluye lo apartado por otros clientes.
+    // Best-effort: si el RPC falla no se bloquea el cobro (solo se ignora el apartado).
+    const reservedOthers = new Map<string, InventoryReservation[]>()
+    try {
+      const { data: resData, error: resError } = (await supabase.rpc('get_inventory_reservations', {
+        p_business_id: businessId,
+      })) ?? { data: null, error: null }
+      if (resError) {
+        console.error('[checkout] reservations lookup failed', resError)
+      } else {
+        for (const r of parseReservations(resData)) {
+          if (r.appointment_id === appointmentId) continue
+          const list = reservedOthers.get(r.item_id) ?? []
+          list.push(r)
+          reservedOthers.set(r.item_id, list)
+        }
+      }
+    } catch (resErr) {
+      console.error('[checkout] reservations lookup failed', resErr)
+    }
+
     const stockById = new Map((stockRows ?? []).map((row) => [row.id as string, row]))
     for (const [itemId, qty] of inventoryQty) {
       const row = stockById.get(itemId)
       if (!row || row.business_id !== businessId || row.is_active === false) {
         return { error: 'validation_error', message: 'Un producto del ticket no existe o no está disponible en el inventario.' }
       }
-      if ((row.current_stock ?? 0) < qty) {
+      const stock    = row.current_stock ?? 0
+      const others   = reservedOthers.get(itemId) ?? []
+      const reserved = others.reduce((sum, r) => sum + r.quantity, 0)
+      if (stock - reserved < qty) {
+        if (reserved === 0) {
+          return {
+            error: 'validation_error',
+            message: `Stock insuficiente de ${row.name} (quedan ${stock}).`,
+          }
+        }
+        const today = businessTodayISODate()
+        const who = [...others]
+          .sort((a, b) => a.start_time.localeCompare(b.start_time))
+          .slice(0, 2)
+          .map((r) => `${r.customer_name ?? 'Cliente'} ${dayLabel(apptDateKey(r.start_time), today)} ${formatApptTime(r.start_time)}`)
+          .join(', ')
         return {
           error: 'validation_error',
-          message: `Stock insuficiente de ${row.name} (quedan ${row.current_stock ?? 0}).`,
+          message: `Stock insuficiente de ${row.name}: ${stock} en inventario, ${reserved} apartada(s) para otras citas (${who}).`,
         }
       }
     }

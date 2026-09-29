@@ -83,6 +83,7 @@ describe('Bookings Server Actions', () => {
         p_phone: '1234567890',
         p_email: 'john@example.com',
         p_status: 'scheduled',
+        p_products: [],
       })
       expect(result).toEqual({ success: true, appointment_id: 'apt1', customer_id: 'cust1' })
       // El correo se envía con el cliente service-role (anon no puede leer bajo RLS)
@@ -131,6 +132,46 @@ describe('Bookings Server Actions', () => {
 
       expect(result.error).toBe('slot_unavailable')
       expect(result.message).toBe('Ese horario ya no está disponible. Elige otro.')
+      expect(sendBookingConfirmation).not.toHaveBeenCalled()
+    })
+
+    it('forwards reserved products as p_products', async () => {
+      mockSupabase.rpc.mockResolvedValueOnce({
+        data: { appointment_id: 'apt1', customer_id: 'cust1', staff_id: 'st1' },
+        error: null,
+      })
+
+      const result = await createBooking({
+        full_name: 'John Doe',
+        phone: '1234567890',
+        service_id: 's1',
+        staff_id: 'st1',
+        start_time: '2023-10-10T10:00:00Z',
+        business_id: 'b1',
+        products: [{ item_id: 'inv1', quantity: 2 }],
+      })
+
+      expect(result.success).toBe(true)
+      expect(mockSupabase.rpc).toHaveBeenCalledWith('create_public_booking', expect.objectContaining({
+        p_products: [{ item_id: 'inv1', quantity: 2 }],
+      }))
+    })
+
+    it('maps product_unavailable to a friendly message', async () => {
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'product_unavailable' } })
+
+      const result = await createBooking({
+        full_name: 'John Doe',
+        phone: '1234567890',
+        service_id: 's1',
+        staff_id: 'st1',
+        start_time: '2023-10-10T10:00:00Z',
+        business_id: 'b1',
+        products: [{ item_id: 'inv1', quantity: 1 }],
+      })
+
+      expect(result.error).toBe('product_unavailable')
+      expect(result.message).toBe('Uno de los productos ya no está disponible. Quítalo o elige otro.')
       expect(sendBookingConfirmation).not.toHaveBeenCalled()
     })
 

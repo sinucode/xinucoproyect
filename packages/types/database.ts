@@ -91,6 +91,10 @@ export interface Business {
   // ── Programa de lealtad ──────────────────────────────────────────────────
   loyalty_point_value_cop?: number       // COP que equivale 1 punto (ej: 1000 = $1.000 COP)
   loyalty_expiry_months?:   number       // Meses de vigencia de los puntos
+  // ── Productos apartados en la reserva en línea ───────────────────────────
+  booking_products_enabled?:                 boolean  // permite apartar productos al reservar
+  booking_max_product_units?:                number   // 0–50 — unidades máx. por cita (0 = desactivado)
+  booking_max_open_with_products_per_phone?: number   // 0–50 — citas abiertas con productos por teléfono (0 = sin límite)
   // ── SaaS Billing (RF23) — columnas pendientes de migración ───────────────
   stripe_customer_id?:      string | null
   subscription_status?:     'active' | 'past_due' | 'canceled' | 'trialing' | null
@@ -324,6 +328,11 @@ export interface Database {
         Row:    InventoryItem
         Insert: Omit<InventoryItem, 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Omit<InventoryItem, 'id' | 'created_at' | 'business_id'>>
+      }
+      appointment_products: {
+        Row:    AppointmentProduct
+        Insert: Omit<AppointmentProduct, 'id' | 'created_at'>
+        Update: never
       }
       inventory_movements: {
         Row:    InventoryMovement
@@ -823,9 +832,21 @@ export interface InventoryItem {
   unit_price:    number | null  // INTEGER COP — selling price
   unit_cost:     number | null  // INTEGER COP — purchase cost
   is_active:     boolean
+  bookable_online: boolean // ofrecible para apartar en la reserva en línea
   created_by:    string | null
   created_at:    string
   updated_at:    string
+}
+
+// Producto apartado por el cliente al reservar (no descuenta stock hasta el cobro)
+export interface AppointmentProduct {
+  id:             string
+  business_id:    string
+  appointment_id: string
+  item_id:        string
+  quantity:       number    // INTEGER > 0
+  unit_price:     number    // INTEGER COP — precio congelado al apartar
+  created_at:     string
 }
 
 export interface InventoryMovement {

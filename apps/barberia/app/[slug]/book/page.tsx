@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { BookingWizard } from '@/components/booking/BookingWizard'
+import { BookingWizard, type BookableProducts } from '@/components/booking/BookingWizard'
 import type { Service, Staff } from '@xinuco/types'
 
 interface BookPageProps {
@@ -29,6 +29,15 @@ export default async function BookPage({ params }: BookPageProps) {
     supabase.from('services').select('*').eq('business_id', business.id).eq('is_active', true).order('name'),
     supabase.from('staff').select('id, full_name, specialty_role, is_active').eq('business_id', business.id).eq('is_active', true).order('full_name'),
   ])
+
+  // 3. Productos que el cliente puede apartar al reservar (error → deshabilitado)
+  const { data: productsData, error: productsError } = await supabase.rpc('get_bookable_products', {
+    p_business_id: business.id,
+  })
+  const bookableProducts: BookableProducts =
+    !productsError && productsData && (productsData as BookableProducts).enabled
+      ? (productsData as BookableProducts)
+      : { enabled: false, max_units: 0, items: [] }
 
   const services = (servicesRes.data ?? []) as Service[]
   const staff = (staffRes.data ?? []) as Staff[]
@@ -66,6 +75,7 @@ export default async function BookPage({ params }: BookPageProps) {
             services={services}
             staff={staff}
             mpBookingEnabled={mpBookingEnabled}
+            bookableProducts={bookableProducts}
           />
         </Suspense>
       </div>

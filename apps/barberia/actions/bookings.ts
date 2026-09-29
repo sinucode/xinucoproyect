@@ -16,6 +16,8 @@ export interface BookingData {
   staff_id:    string | null
   start_time:  string
   business_id: string
+  /** Productos apartados (no descuentan stock; se cobran en el local). */
+  products?:   { item_id: string; quantity: number }[]
 }
 
 // ── RPC create_public_booking (SECURITY DEFINER) ─────────────────────────────
@@ -33,6 +35,11 @@ const RPC_ERROR_MESSAGES: Record<string, string> = {
   service_not_found:  'El servicio no está disponible.',
   business_not_found: 'La barbería no está disponible.',
   missing_fields:     'Faltan datos obligatorios.',
+  product_unavailable:     'Uno de los productos ya no está disponible. Quítalo o elige otro.',
+  products_limit_exceeded: 'Superaste el máximo de productos por cita.',
+  products_open_limit:     'Ya tienes una cita con productos apartados. Retíralos antes de apartar más.',
+  products_disabled:       'Esta barbería no permite apartar productos en línea.',
+  invalid_products:        'Productos inválidos.',
 }
 
 async function callCreatePublicBooking(
@@ -52,6 +59,7 @@ async function callCreatePublicBooking(
     p_phone:       data.phone,
     p_email:       data.email || null,
     p_status:      status,
+    p_products:    data.products ?? [],
   })
 
   if (error) {

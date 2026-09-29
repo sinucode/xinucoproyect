@@ -3,7 +3,7 @@
 import { useReducer, useTransition, useState, useMemo, useEffect } from 'react'
 import {
   Check, ChevronLeft, AlertCircle, Loader2,
-  Calendar, Clock, Scissors, User, Sparkles, Phone, QrCode,
+  Calendar, Clock, Scissors, User, Sparkles, Phone, QrCode, Package, Minus, Plus,
 } from 'lucide-react'
 import type { Service, Staff } from '@xinuco/types'
 import { createBooking } from '@/actions/bookings'
@@ -119,14 +119,30 @@ function getUpcomingDates(count: number, offsetDays: number = 0): { dateStr: str
 // COMPONENTE PRINCIPAL — BookingWizard
 // ════════════════════════════════════════════════════════════════════════════════
 
+/** Producto que el cliente puede apartar al reservar (RPC get_bookable_products). */
+export interface BookableProduct {
+  id:          string
+  name:        string
+  description: string | null
+  unit_price:  number
+  available:   number
+}
+
+export interface BookableProducts {
+  enabled:   boolean
+  max_units: number
+  items:     BookableProduct[]
+}
+
 interface BookingWizardProps {
   businessId:       string
   services:         Service[]
   staff:            Staff[]
   mpBookingEnabled?: boolean
+  bookableProducts?: BookableProducts
 }
 
-export function BookingWizard({ businessId, services, staff, mpBookingEnabled = false }: BookingWizardProps) {
+export function BookingWizard({ businessId, services, staff, mpBookingEnabled = false, bookableProducts }: BookingWizardProps) {
   const [state, dispatch] = useReducer(wizardReducer, initialState)
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -134,6 +150,8 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
   const [weekOffset, setWeekOffset] = useState(0)
   // 'form' = mostrar formulario normal | 'mp_payment' = mostrar paso de pago MP
   const [paymentStep, setPaymentStep] = useState<'form' | 'mp_payment'>('form')
+  // Productos apartados: item_id → cantidad (0 = no apartar)
+  const [productQty, setProductQty] = useState<Record<string, number>>({})
 
   useEffect(() => {
     // Breve timeout para mostrar el esqueleto (Zero-Flicker UX effect)
@@ -148,6 +166,26 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
   const selectedStaff = state.staffId === 'any'
     ? null
     : staff.find(s => s.id === state.staffId)
+
+  // ── Productos apartables ─────────────────────────────────────────────────
+  const productsEnabled = !!bookableProducts?.enabled && (bookableProducts?.items.length ?? 0) > 0
+  const maxUnits = bookableProducts?.max_units ?? 0
+  const productItems = productsEnabled ? bookableProducts!.items : []
+  const totalUnits = productItems.reduce((sum, p) => sum + (productQty[p.id] ?? 0), 0)
+  const selectedProducts = productItems
+    .filter((p) => (productQty[p.id] ?? 0) > 0)
+    .map((p) => ({ item_id: p.id, name: p.name, unit_price: p.unit_price, quantity: productQty[p.id] }))
+  const productsTotal = selectedProducts.reduce((sum, p) => sum + p.unit_price * p.quantity, 0)
+
+  const changeProductQty = (item: BookableProduct, delta: number) => {
+    setProductQty((prev) => {
+      const current = prev[item.id] ?? 0
+      const next = current + delta
+      if (next < 0 || next > item.available) return prev
+      if (delta > 0 && totalUnits + delta > maxUnits) return prev
+      return { ...prev, [item.id]: next }
+    })
+  }
 
   // ── Cargar slots al elegir fecha ─────────────────────────────────────────
   const handleDateSelect = async (selectedDate: string) => {
@@ -197,6 +235,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
           full_name: state.userData.name,
           phone: state.userData.phone,
           email: (state.userData.email || '').trim() ? state.userData.email : null,
+          products: selectedProducts.map(({ item_id, quantity }) => ({ item_id, quantity })),
         })
 
         if (res.error) {
@@ -559,6 +598,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
               staffId={state.staffId === 'any' ? null : state.staffId}
               startTime={`${state.date}T${state.time}:00`}
               userData={state.userData}
+              products={selectedProducts}
               onPaymentApproved={() => dispatch({ type: 'CONFIRMED' })}
               onBack={() => setPaymentStep('form')}
             />
@@ -590,13 +630,92 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
                 <span className="text-xinuco-muted">Hora</span>
                 <span className="font-semibold" style={{ color: 'var(--primary-color)' }}>{state.time}</span>
               </div>
+              {selectedProducts.map((p) => (
+                <div key={p.item_id} className="flex justify-between">
+                  <span className="text-xinuco-muted">Producto apartado</span>
+                  <span className="font-semibold text-xinuco-text">
+                    {p.quantity} × {p.name} · {formatCOP(p.unit_price * p.quantity)}
+                  </span>
+                </div>
+              ))}
               {selectedService && (
                 <div className="flex justify-between pt-1 mt-1" style={{ borderTop: '1px solid color-mix(in srgb, var(--primary-color) 15%, transparent)' }}>
                   <span className="text-xinuco-muted">Total</span>
-                  <span className="font-bold" style={{ color: 'var(--primary-color)' }}>{formatCOP(selectedService.price_cop)}</span>
+                  <span className="font-bold" style={{ color: 'var(--primary-color)' }}>{formatCOP(selectedService.price_cop + productsTotal)}</span>
                 </div>
               )}
             </div>
+
+            {/* ── Productos apartados (opcional) ───────────────────────── */}
+            {productsEnabled && (
+              <div
+                className="flex flex-col gap-3 p-4 rounded-2xl border"
+                style={{
+                  background: 'var(--surface-color, rgba(255,255,255,0.03))',
+                  borderColor: 'var(--border-color)',
+                }}
+              >
+                <div className="flex items-start gap-2.5">
+                  <Package size={16} className="mt-0.5 shrink-0" style={{ color: 'var(--primary-color)' }} />
+                  <div className="flex flex-col">
+                    <h3 className="text-sm font-semibold text-xinuco-text">¿Quieres apartar algún producto?</h3>
+                    <p className="text-xs text-xinuco-muted mt-0.5">
+                      Lo pagas en el local. Máximo {maxUnits} {maxUnits === 1 ? 'unidad' : 'unidades'} por cita.
+                    </p>
+                  </div>
+                </div>
+
+                <ul className="flex flex-col gap-2">
+                  {productItems.map((item) => {
+                    const qty = productQty[item.id] ?? 0
+                    const canAdd = qty < item.available && totalUnits < maxUnits
+                    return (
+                      <li
+                        key={item.id}
+                        className="flex items-center justify-between gap-3 py-2 border-t first:border-t-0"
+                        style={{ borderColor: 'color-mix(in srgb, var(--border-color) 50%, transparent)' }}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-xinuco-text truncate">{item.name}</p>
+                          <p className="text-xs text-xinuco-muted flex items-center gap-2">
+                            <span className="tabular-nums">{formatCOP(item.unit_price)}</span>
+                            {item.available <= 2 && (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                Quedan pocas
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                        <div
+                          className="flex items-center gap-1 rounded-xl border shrink-0"
+                          style={{ borderColor: 'var(--border-color)' }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => changeProductQty(item, -1)}
+                            disabled={qty <= 0}
+                            aria-label={`Quitar una unidad de ${item.name}`}
+                            className="p-2 text-xinuco-muted hover:text-xinuco-text disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            <Minus size={14} />
+                          </button>
+                          <span className="min-w-[1.5rem] text-center text-sm font-bold tabular-nums text-xinuco-text">{qty}</span>
+                          <button
+                            type="button"
+                            onClick={() => changeProductQty(item, 1)}
+                            disabled={!canAdd}
+                            aria-label={`Agregar una unidad de ${item.name}`}
+                            className="p-2 text-xinuco-muted hover:text-xinuco-text disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
 
             {/* Formulario */}
             <div className="flex flex-col gap-3">

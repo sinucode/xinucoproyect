@@ -32,6 +32,8 @@ interface BookingPaymentStepProps {
   staffId:          string | null
   startTime:        string
   userData:         { name: string; phone: string; email: string }
+  /** Productos apartados: se pagan en el local, NO se cobran por MercadoPago. */
+  products?:        { item_id: string; name: string; quantity: number; unit_price: number }[]
   onPaymentApproved: () => void
   onBack:            () => void
 }
@@ -45,7 +47,7 @@ const fmtCOP = (n: number) =>
 
 export function BookingPaymentStep({
   businessId, serviceId, serviceName, servicePriceCop,
-  staffId, startTime, userData,
+  staffId, startTime, userData, products = [],
   onPaymentApproved, onBack,
 }: BookingPaymentStepProps) {
 
@@ -100,6 +102,7 @@ export function BookingPaymentStep({
       email:             userData.email || null,
       service_name:      serviceName,
       service_price_cop: servicePriceCop,
+      products:          products.map(({ item_id, quantity }) => ({ item_id, quantity })),
     })
 
     if ('error' in res) {
@@ -137,9 +140,18 @@ export function BookingPaymentStep({
               <span className="text-zinc-500">Servicio</span>
               <span className="font-semibold text-zinc-200">{serviceName}</span>
             </div>
+            {products.map((p) => (
+              <div key={p.item_id} className="flex justify-between">
+                <span className="text-zinc-500">Producto apartado</span>
+                <span className="font-semibold text-zinc-200">{p.quantity} × {p.name}</span>
+              </div>
+            ))}
+            {products.length > 0 && (
+              <p className="text-xs text-zinc-500">Productos: se pagan en el local.</p>
+            )}
             <div className="flex justify-between border-t pt-2 mt-1"
               style={{ borderColor: 'color-mix(in srgb, var(--primary-color) 15%, transparent)' }}>
-              <span className="text-zinc-500">Total</span>
+              <span className="text-zinc-500">{products.length > 0 ? 'Total a pagar ahora' : 'Total'}</span>
               <span className="font-bold" style={{ color: 'var(--primary-color)' }}>
                 {fmtCOP(servicePriceCop)}
               </span>

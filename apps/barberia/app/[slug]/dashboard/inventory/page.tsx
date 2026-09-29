@@ -2,7 +2,7 @@ import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { getInventoryItems, getLowStockItems } from '@/actions/inventory'
+import { getInventoryItems, getLowStockItems, getInventoryReservations } from '@/actions/inventory'
 import { InventoryManager } from '@/components/dashboard/inventory/InventoryManager'
 import { FeatureGate } from '@/components/dashboard/FeatureGate'
 import type { Profile } from '@xinuco/types'
@@ -45,13 +45,15 @@ export default async function InventoryPage({
   const businessId = profile.business_id
 
   // 3. Cargar ítems y alertas de stock bajo en paralelo
-  const [itemsResult, lowStockResult] = await Promise.all([
+  const [itemsResult, lowStockResult, reservationsResult] = await Promise.all([
     getInventoryItems(businessId),
     getLowStockItems(businessId),
+    getInventoryReservations(businessId),
   ])
 
   const items        = itemsResult.data    ?? []
   const lowStockItems = lowStockResult.data ?? []
+  const reservations  = reservationsResult.data ?? []
 
   return (
     <div className="flex flex-col gap-6 max-w-5xl mx-auto pb-24">
@@ -60,6 +62,7 @@ export default async function InventoryPage({
           <InventoryManager
             items={items}
             lowStockItems={lowStockItems}
+            reservations={reservations}
             businessId={businessId}
             slug={slug}
           />

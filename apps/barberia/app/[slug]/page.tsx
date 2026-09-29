@@ -2,7 +2,7 @@ import { createClient } from '@xinuco/supabase/server'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import type { Service, Staff } from '@xinuco/types'
-import { BookingWizard } from '@/components/booking/BookingWizard'
+import { BookingWizard, type BookableProducts } from '@/components/booking/BookingWizard'
 
 // Fila devuelta por la RPC pública get_public_business (solo campos seguros)
 interface PublicBusinessRow {
@@ -60,6 +60,15 @@ export default async function PublicBookingPage({ params }: PublicBookingPagePro
       .eq('is_active', true)
       .order('full_name'),
   ])
+
+  // 3. Productos que el cliente puede apartar al reservar (error → deshabilitado)
+  const { data: productsData, error: productsError } = await supabase.rpc('get_bookable_products', {
+    p_business_id: business.id,
+  })
+  const bookableProducts: BookableProducts =
+    !productsError && productsData && (productsData as BookableProducts).enabled
+      ? (productsData as BookableProducts)
+      : { enabled: false, max_units: 0, items: [] }
 
   const services = (servicesRes.data ?? []) as Service[]
   const staff = (staffRes.data ?? []) as Staff[]
@@ -124,6 +133,7 @@ export default async function PublicBookingPage({ params }: PublicBookingPagePro
           businessId={business.id}
           services={services}
           staff={staff}
+          bookableProducts={bookableProducts}
         />
       </main>
     </div>

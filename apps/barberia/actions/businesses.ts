@@ -243,3 +243,71 @@ export async function updateBusinessInfo(
   return { success: true }
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════════
+// updateBookingSettings — Límites de productos apartados en la reserva en línea
+// (Los límites se hacen cumplir en la BD: create_public_booking / get_bookable_products.)
+// ════════════════════════════════════════════════════════════════════════════════
+
+export interface BookingSettingsInput {
+  booking_products_enabled:                 boolean
+  booking_max_product_units:                number   // 0–50 (0 desactiva la función)
+  booking_max_open_with_products_per_phone: number   // 0–50 (0 = sin límite)
+}
+
+export async function updateBookingSettings(
+  businessId: string,
+  settings:   BookingSettingsInput,
+): Promise<ActionResult> {
+  const supabase = await createClient()
+
+  // 1. Verificar sesión
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado. Inicia sesión para continuar.' }
+
+  // 2. Solo un admin de ESTE negocio (Anti-IDOR)
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('business_id, role')
+    .eq('id', user.id)
+    .single()
+
+  if (
+    !profile ||
+    profile.business_id !== businessId ||
+    (profile.role !== 'admin' && profile.role !== 'super_admin')
+  ) {
+    return { error: 'Autorización denegada.' }
+  }
+
+  // 3. Validar
+  if (typeof settings.booking_products_enabled !== 'boolean') {
+    return { error: 'Valor inválido para permitir productos.' }
+  }
+  const limits = [
+    ['Máximo de unidades por cita', settings.booking_max_product_units],
+    ['Máximo de citas abiertas con productos', settings.booking_max_open_with_products_per_phone],
+  ] as const
+  for (const [label, value] of limits) {
+    if (!Number.isInteger(value) || value < 0 || value > 50) {
+      return { error: `${label} debe ser un entero entre 0 y 50.` }
+    }
+  }
+
+  // 4. Persistir (RLS tenant: solo su propio negocio)
+  const { error: updateError } = await supabase
+    .from('businesses')
+    .update({
+      booking_products_enabled:                 settings.booking_products_enabled,
+      booking_max_product_units:                settings.booking_max_product_units,
+      booking_max_open_with_products_per_phone: settings.booking_max_open_with_products_per_phone,
+    })
+    .eq('id', businessId)
+
+  if (updateError) return { error: updateError.message }
+
+  revalidatePath('/[slug]/dashboard/settings/booking', 'page')
+  revalidatePath('/[slug]/book', 'page')
+  revalidatePath('/[slug]', 'page')
+  return { success: true }
+}
