@@ -17,6 +17,7 @@ import {
   Banknote,
   Flag,
   AlertTriangle,
+  Sparkles,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -27,14 +28,17 @@ import {
   addWalkIn,
   startWalkIn,
   updateWalkInStatus,
-  assignStaff,
+  reserveWalkIn,
+  releaseWalkIn,
+  setWalkInService,
+  getWalkInSuggestions,
   removeFromQueue,
 } from '@/actions/walk-ins'
-import type { WalkInWithRelations } from '@/actions/walk-ins'
+import type { WalkInWithRelations, WalkInSuggestion } from '@/actions/walk-ins'
 import { updateAppointmentStatus } from '@/actions/appointments'
 import { CheckoutModal } from '@/components/finance/CheckoutModal'
 import { formatApptTime } from '@/lib/agenda-time'
-import { estimateWaits, businessNowAsUtcMs } from '@/lib/walk-in-wait'
+import { estimateWaits, businessNowAsUtcMs, isReservedTurn } from '@/lib/walk-in-wait'
 import type { StaffStatusNow } from '@/lib/walk-in-wait'
 import type { Staff, Service } from '@xinuco/types'
 
@@ -44,6 +48,8 @@ interface WalkInQueueProps {
   initialQueue:       WalkInWithRelations[]
   initialHistory:     WalkInWithRelations[]
   initialStaffStatus: StaffStatusNow[]
+  /** Barberos recomendados por turno en espera sin apartar (walkInId → lista) */
+  initialSuggestions: Record<string, WalkInSuggestion[]>
   staffList:          Pick<Staff, 'id' | 'full_name'>[]
   serviceList:        Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
   businessId:         string
@@ -165,6 +171,10 @@ function AttendPanel({ entry, staffStatus, staffList, serviceList, onClose, onDo
       : staffList.map((s) => ({ id: s.id, full_name: s.full_name, status: 'unknown' as const, busy_until: null }))
 
   const initialStaff = (() => {
+    // Turno apartado: preseleccionar a su barbero para reutilizar la reserva
+    if (isReservedTurn(entry) && entry.staff_id && options.some((o) => o.id === entry.staff_id)) {
+      return entry.staff_id
+    }
     const pre = options.find((o) => o.id === entry.staff_id && o.status === 'free')
     if (pre) return pre.id
     const firstFree = options.find((o) => o.status === 'free')
@@ -290,6 +300,191 @@ function AttendPanel({ entry, staffStatus, staffList, serviceList, onClose, onDo
   )
 }
 
+// ── Apartar turno (turnos en espera) ─────────────────────────────────────────
+
+type RunAction = (fn: () => Promise<{ error?: string } | void>) => void
+
+const selectStyle = {
+  backgroundColor: 'var(--bg-color)',
+  borderColor:     'var(--border-color)',
+  color:           'var(--text-color, #F4F4F4)',
+}
+
+interface ReservationSectionProps {
+  entry:        WalkInWithRelations
+  staffList:    Pick<Staff, 'id' | 'full_name'>[]
+  serviceList:  Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
+  /** undefined = aún no cargadas (fuera del tope de 10 turnos) */
+  suggestions?: WalkInSuggestion[]
+  disabled:     boolean
+  run:          RunAction
+}
+
+function ReservationSection({ entry, staffList, serviceList, suggestions, disabled, run }: ReservationSectionProps) {
+  const [changing, setChanging] = useState(false)
+  const reserved = isReservedTurn(entry)
+
+  const btnPrimary = 'flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-50'
+  const selectCls  = 'text-[11px] rounded-lg px-2 py-1 border outline-none cursor-pointer transition-colors disabled:opacity-50'
+
+  // 1) Apartado: pill + cambiar barbero / liberar
+  if (reserved && entry.appointment) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span
+            className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border"
+            style={{
+              color:           'var(--primary-color)',
+              backgroundColor: 'color-mix(in srgb, var(--primary-color) 12%, transparent)',
+              borderColor:     'color-mix(in srgb, var(--primary-color) 25%, transparent)',
+            }}
+          >
+            <UserCheck size={10} />
+            Apartado con {entry.staff?.full_name ?? 'barbero'} · {formatApptTime(entry.appointment.start_time)}
+          </span>
+          {!changing && (
+            <>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => setChanging(true)}
+                className="text-[11px] font-medium text-xinuco-muted hover:text-xinuco-text underline-offset-2 hover:underline disabled:opacity-50"
+              >
+                Cambiar barbero
+              </button>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => run(() => releaseWalkIn(entry.id))}
+                className="text-[11px] font-medium text-xinuco-muted hover:text-red-400 underline-offset-2 hover:underline disabled:opacity-50"
+              >
+                Liberar
+              </button>
+            </>
+          )}
+        </div>
+        {changing && (
+          <div className="flex items-center gap-2">
+            <select
+              value=""
+              disabled={disabled}
+              onChange={(e) => {
+                const id = e.target.value
+                if (!id) return
+                setChanging(false)
+                run(() => reserveWalkIn(entry.id, id))
+              }}
+              className={selectCls}
+              style={selectStyle}
+            >
+              <option value="">Elige el barbero…</option>
+              {staffList.map((s) => (
+                <option key={s.id} value={s.id} disabled={s.id === entry.staff_id}>{s.full_name}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setChanging(false)}
+              className="text-[11px] text-xinuco-muted hover:text-xinuco-text"
+            >
+              Cancelar
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // 2) Sin servicio: la reserva lo requiere
+  if (!entry.service_id) {
+    return (
+      <div className="flex flex-col gap-1">
+        <label className="text-[11px] text-xinuco-muted">Elige el servicio para apartar el turno</label>
+        <select
+          value=""
+          disabled={disabled}
+          onChange={(e) => {
+            const id = e.target.value
+            if (id) run(() => setWalkInService(entry.id, id))
+          }}
+          className={`${selectCls} w-full`}
+          style={selectStyle}
+        >
+          <option value="">Servicio…</option>
+          {serviceList.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+    )
+  }
+
+  // 3) Sin apartar, con recomendación
+  if (suggestions === undefined) {
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => run(() => reserveWalkIn(entry.id, null))}
+          className={btnPrimary}
+          style={{ backgroundColor: 'var(--primary-color)', color: '#080808' }}
+        >
+          Apartar
+        </button>
+        <span className="text-[11px] text-xinuco-muted">con el barbero que se libere primero</span>
+      </div>
+    )
+  }
+
+  if (suggestions.length === 0) {
+    return <p className="text-[11px] text-xinuco-muted">Ningún barbero tiene espacio hoy</p>
+  }
+
+  const [first, ...others] = suggestions
+  const when = (x: WalkInSuggestion) => (x.minutes_from_now === 0 ? 'disponible ahora' : formatApptTime(x.next_slot))
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="flex items-center gap-1.5 text-[11px] text-xinuco-text min-w-0">
+          <Sparkles size={11} className="flex-shrink-0" style={{ color: 'var(--primary-color)' }} />
+          <span suppressHydrationWarning className="truncate">
+            Recomendado: {first.full_name} · {when(first)}
+          </span>
+        </span>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => run(() => reserveWalkIn(entry.id, first.staff_id))}
+          className={btnPrimary}
+          style={{ backgroundColor: 'var(--primary-color)', color: '#080808' }}
+        >
+          Apartar
+        </button>
+      </div>
+      {others.length > 0 && (
+        <select
+          value=""
+          disabled={disabled}
+          onChange={(e) => {
+            const id = e.target.value
+            if (id) run(() => reserveWalkIn(entry.id, id))
+          }}
+          className={`${selectCls} w-full`}
+          style={selectStyle}
+        >
+          <option value="">Otro barbero…</option>
+          {others.map((o) => (
+            <option key={o.staff_id} value={o.staff_id}>{o.full_name} · {when(o)}</option>
+          ))}
+        </select>
+      )}
+    </div>
+  )
+}
+
 // ── Turno (card) ─────────────────────────────────────────────────────────────
 
 interface WalkInCardProps {
@@ -297,6 +492,7 @@ interface WalkInCardProps {
   staffList:    Pick<Staff, 'id' | 'full_name'>[]
   serviceList:  Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
   staffStatus:  StaffStatusNow[]
+  suggestions?: WalkInSuggestion[]
   /** Minutos estimados hasta ser atendido (solo turnos en espera); null si no hay barberos */
   waitMinutes?: number | null
   noStaffNow?:  boolean
@@ -305,7 +501,7 @@ interface WalkInCardProps {
 }
 
 function WalkInCard({
-  entry, staffList, serviceList, staffStatus, waitMinutes, noStaffNow, onRefresh, onCharge,
+  entry, staffList, serviceList, staffStatus, suggestions, waitMinutes, noStaffNow, onRefresh, onCharge,
 }: WalkInCardProps) {
   const [isPending, startTransition]      = useTransition()
   const [showConfirmCancel, setShowConfirm] = useState(false)
@@ -338,9 +534,12 @@ function WalkInCard({
     })
   }
 
-  const handleAssign = (staffId: string | null) => {
+  // Ejecuta una acción del turno (apartar/liberar/servicio), muestra su error y refresca
+  const runAction: RunAction = (fn) => {
+    setActionError(null)
     startTransition(async () => {
-      await assignStaff(entry.id, staffId)
+      const result = await fn()
+      if (result && result.error) setActionError(result.error)
       onRefresh()
     })
   }
@@ -361,8 +560,10 @@ function WalkInCard({
   }
 
   const isWaiting = entry.status === 'waiting'
+  const isReserved = isReservedTurn(entry)
   const waitLabel =
-    noStaffNow ? 'Sin barberos disponibles'
+    isReserved ? (waitMinutes == null ? null : waitMinutes <= 0 ? 'Le toca ya' : `En ~${waitMinutes} min`)
+    : noStaffNow ? 'Sin barberos disponibles'
     : waitMinutes == null ? null
     : waitMinutes <= 0 ? 'Le toca ya'
     : `Espera ~${waitMinutes} min`
@@ -406,7 +607,7 @@ function WalkInCard({
           {isWaiting && waitLabel && (
             <span
               suppressHydrationWarning
-              className={`text-[10px] font-semibold whitespace-nowrap ${noStaffNow ? 'text-zinc-500' : 'text-xinuco-text'}`}
+              className={`text-[10px] font-semibold whitespace-nowrap ${noStaffNow && !isReserved ? 'text-zinc-500' : 'text-xinuco-text'}`}
             >
               {waitLabel}
             </span>
@@ -422,7 +623,7 @@ function WalkInCard({
             {entry.service.name}
           </span>
         )}
-        <StaffChip name={entry.staff?.full_name} />
+        {!isReserved && <StaffChip name={entry.staff?.full_name} />}
         {hasAppointment && entry.appointment?.start_time && (
           <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border text-zinc-400 bg-zinc-500/10 border-zinc-500/25">
             <Clock size={9} />
@@ -442,6 +643,18 @@ function WalkInCard({
         <p className="text-[11px] text-xinuco-muted italic border-l-2 pl-2" style={{ borderColor: 'var(--border-color)' }}>
           {entry.notes}
         </p>
+      )}
+
+      {/* Apartar turno en la agenda */}
+      {isWaiting && !showAttend && (
+        <ReservationSection
+          entry={entry}
+          staffList={staffList}
+          serviceList={serviceList}
+          suggestions={suggestions}
+          disabled={isPending}
+          run={runAction}
+        />
       )}
 
       {/* Panel Atender */}
@@ -508,32 +721,11 @@ function WalkInCard({
               </button>
             )}
 
-            {/* Staff selector (no aplica si ya hay cita: el barbero quedó fijo) */}
-            {!hasAppointment && (
-              <select
-                value={entry.staff_id ?? ''}
-                onChange={(e) => handleAssign(e.target.value || null)}
-                className="ml-auto text-[11px] rounded-lg px-2 py-1 border outline-none cursor-pointer transition-colors"
-                style={{
-                  backgroundColor: 'var(--bg-color)',
-                  borderColor:     'var(--border-color)',
-                  color:           'var(--text-color, #F4F4F4)',
-                }}
-              >
-                <option value="">Asignar barbero</option>
-                {staffList.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.full_name}
-                  </option>
-                ))}
-              </select>
-            )}
-
             {/* Quitar */}
             {!showConfirmCancel ? (
               <button
                 onClick={() => setShowConfirm(true)}
-                className={`p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-all ${hasAppointment ? 'ml-auto' : ''}`}
+                className="ml-auto p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-all"
                 title={hasAppointment ? 'Cancelar la cita y quitar de la fila' : 'Quitar de la fila'}
               >
                 <X size={13} />
@@ -821,6 +1013,7 @@ export function WalkInQueue({
   initialQueue,
   initialHistory,
   initialStaffStatus,
+  initialSuggestions,
   staffList,
   serviceList,
   businessId,
@@ -829,6 +1022,7 @@ export function WalkInQueue({
   const [queue, setQueue]           = useState<WalkInWithRelations[]>(initialQueue)
   const [history, setHistory]       = useState<WalkInWithRelations[]>(initialHistory)
   const [staffStatus, setStaffStatus] = useState<StaffStatusNow[]>(initialStaffStatus)
+  const [suggestions, setSuggestions] = useState<Record<string, WalkInSuggestion[]>>(initialSuggestions)
   const [showAddSheet, setShowAdd]  = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [checkoutEntry, setCheckoutEntry] = useState<WalkInWithRelations | null>(null)
@@ -844,7 +1038,8 @@ export function WalkInQueue({
     waiting.map((w) => ({
       id:               w.id,
       staff_id:         w.staff_id,
-      duration_minutes: w.service?.duration_minutes ?? null,
+      duration_minutes: w.service?.duration_minutes ?? w.appointment?.services?.duration_minutes ?? null,
+      reserved_start:   isReservedTurn(w) ? w.appointment?.start_time ?? null : null,
     })),
     staffStatus,
     businessNowAsUtcMs(),
@@ -859,9 +1054,16 @@ export function WalkInQueue({
           getStaffStatusNow(businessId),
           getWalkInHistory(businessId, 10),
         ])
+        // Recomendaciones de los primeros 10 turnos en espera sin apartar
+        const needSuggestions = fresh
+          .filter((w) => w.status === 'waiting' && !isReservedTurn(w))
+          .slice(0, 10)
+          .map((w) => w.id)
+        const fresher = needSuggestions.length > 0 ? await getWalkInSuggestions(needSuggestions) : {}
         setQueue(fresh)
         setStaffStatus(status)
         setHistory(hist)
+        setSuggestions(fresher)
       } catch {
         // silent refresh failure — stale data is acceptable
       }
@@ -925,6 +1127,7 @@ export function WalkInQueue({
       staffList={staffList}
       serviceList={serviceList}
       staffStatus={staffStatus}
+      suggestions={suggestions[entry.id]}
       waitMinutes={estimate.minutesById[entry.id] ?? null}
       noStaffNow={entry.status === 'waiting' && !estimate.available}
       onRefresh={refresh}

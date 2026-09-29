@@ -1,7 +1,8 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { getWalkInQueue, getWalkInHistory, getStaffStatusNow } from '@/actions/walk-ins'
+import { getWalkInQueue, getWalkInHistory, getStaffStatusNow, getWalkInSuggestions } from '@/actions/walk-ins'
+import { isReservedTurn } from '@/lib/walk-in-wait'
 import { getActiveShiftDetails } from '@/actions/finance'
 import { WalkInQueue } from '@/components/dashboard/walk-ins/WalkInQueue'
 import type { BusinessFeatures, Staff, Service } from '@xinuco/types'
@@ -64,6 +65,13 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
       .order('name'),
   ])
 
+  // 5. Recomendación de barbero para los primeros 10 turnos en espera sin apartar
+  const needSuggestions = queue
+    .filter((w) => w.status === 'waiting' && !isReservedTurn(w))
+    .slice(0, 10)
+    .map((w) => w.id)
+  const suggestions = needSuggestions.length > 0 ? await getWalkInSuggestions(needSuggestions) : {}
+
   const staffList    = (staffRows.data ?? []) as Pick<Staff, 'id' | 'full_name'>[]
   const serviceList  = (serviceRows.data ?? []) as Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
 
@@ -73,6 +81,7 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
         initialQueue={queue}
         initialHistory={history}
         initialStaffStatus={staffStatus}
+        initialSuggestions={suggestions}
         staffList={staffList}
         serviceList={serviceList}
         businessId={profile.business_id}

@@ -51,6 +51,18 @@ interface ActionResult {
   error?:   string
 }
 
+export interface WalkInSuggestion {
+  staff_id:         string
+  full_name:        string
+  /** Hora LOCAL del negocio guardada como UTC (formatear con formatApptTime) */
+  next_slot:        string
+  minutes_from_now: number
+}
+
+export type ReserveWalkInResult =
+  | { success: true; staffId: string; startTime: string; error?: undefined }
+  | { error: string; success?: undefined; staffId?: undefined; startTime?: undefined }
+
 export type StartWalkInResult =
   | { success: true; appointmentId: string; error?: undefined }
   | { error: string; success?: undefined; appointmentId?: undefined }
@@ -208,20 +220,110 @@ export async function updateWalkInStatus(
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// assignStaff
-// Asigna o reasigna un barbero a un walk-in existente.
+// reserveWalkIn
+// Aparta el próximo hueco libre de HOY del barbero (o del mejor, si staffId es
+// null) como cita 'scheduled' ligada al turno (RPC reserve_walk_in). Libera
+// antes cualquier reserva previa del turno.
 // ════════════════════════════════════════════════════════════════════════════
 
-export async function assignStaff(
+const RESERVE_WALK_IN_ERRORS: Record<string, string> = {
+  service_required:    'Elige el servicio para apartar el turno.',
+  walk_in_not_found:   'Este turno ya no está en espera.',
+  walk_in_not_waiting: 'Este turno ya no está en espera.',
+  staff_not_found:     'Elige un barbero válido.',
+}
+
+export async function reserveWalkIn(
   walkInId: string,
-  staffId:  string | null
+  staffId:  string | null,
+): Promise<ReserveWalkInResult> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase.rpc('reserve_walk_in', {
+    p_walk_in_id: walkInId,
+    p_staff_id:   staffId,
+  })
+
+  if (error) {
+    if (error.message?.includes('no_availability_today')) {
+      return { error: staffId ? 'Ese barbero no tiene espacio libre hoy.' : 'Ningún barbero tiene espacio libre hoy.' }
+    }
+    const key = Object.keys(RESERVE_WALK_IN_ERRORS).find((k) => error.message?.includes(k))
+    return { error: key ? RESERVE_WALK_IN_ERRORS[key] : 'No se pudo apartar el turno. Intenta de nuevo.' }
+  }
+
+  const res = data as { staff_id?: string; start_time?: string } | null
+  if (!res?.staff_id || !res?.start_time) return { error: 'No se pudo apartar el turno. Intenta de nuevo.' }
+
+  revalidatePath('/[slug]/dashboard/walk-ins', 'page')
+  revalidatePath('/[slug]/dashboard/appointments', 'page')
+  return { success: true, staffId: res.staff_id, startTime: res.start_time }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// releaseWalkIn
+// Libera el hueco apartado (cancela la cita programada) y quita el barbero.
+// Con cancel=true también cancela el turno (sale de la fila).
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function releaseWalkIn(walkInId: string, cancel = false): Promise<ActionResult> {
+  const supabase = await createClient()
+
+  const { error } = await supabase.rpc('release_walk_in', {
+    p_walk_in_id: walkInId,
+    p_cancel:     cancel,
+  })
+
+  if (error) {
+    if (error.message?.includes('walk_in_not_waiting') || error.message?.includes('walk_in_not_found')) {
+      return { error: 'Este turno ya no está en espera.' }
+    }
+    return { error: 'No se pudo liberar el turno. Intenta de nuevo.' }
+  }
+
+  revalidatePath('/[slug]/dashboard/walk-ins', 'page')
+  revalidatePath('/[slug]/dashboard/appointments', 'page')
+  return { success: true }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// suggestWalkInStaff / getWalkInSuggestions
+// Barberos con espacio libre hoy, el que quede libre primero va de primero.
+// Si falla devuelve [].
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function suggestWalkInStaff(walkInId: string): Promise<WalkInSuggestion[]> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.rpc('suggest_walk_in_staff', { p_walk_in_id: walkInId })
+  if (error || !Array.isArray(data)) return []
+  return data as unknown as WalkInSuggestion[]
+}
+
+/** Sugerencias de varios turnos a la vez (máx. 10) → { walkInId: sugerencias } */
+export async function getWalkInSuggestions(
+  walkInIds: string[],
+): Promise<Record<string, WalkInSuggestion[]>> {
+  const ids = walkInIds.slice(0, 10)
+  const lists = await Promise.all(ids.map((id) => suggestWalkInStaff(id)))
+  return Object.fromEntries(ids.map((id, i) => [id, lists[i]]))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// setWalkInService
+// Define el servicio de un turno EN ESPERA (necesario para apartar el hueco).
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function setWalkInService(
+  walkInId:  string,
+  serviceId: string | null,
 ): Promise<ActionResult> {
   const supabase = await createClient()
 
   const { error } = await supabase
     .from('walk_ins')
-    .update({ staff_id: staffId })
+    .update({ service_id: serviceId })
     .eq('id', walkInId)
+    .eq('status', 'waiting')
 
   if (error) return { error: error.message }
 
@@ -231,20 +333,33 @@ export async function assignStaff(
 
 // ════════════════════════════════════════════════════════════════════════════
 // removeFromQueue
-// Cancela un walk-in (soft delete — cambia status a 'cancelled').
+// Saca un turno de la fila (soft delete — status 'cancelled').
+// Un turno EN ESPERA pasa por release_walk_in(p_cancel=true) para liberar el
+// hueco apartado; otros estados (legacy sin cita) solo cambian de status.
 // ════════════════════════════════════════════════════════════════════════════
 
 export async function removeFromQueue(walkInId: string): Promise<ActionResult> {
   const supabase = await createClient()
 
-  const { error } = await supabase
-    .from('walk_ins')
-    .update({ status: 'cancelled' })
-    .eq('id', walkInId)
+  const { error: rpcError } = await supabase.rpc('release_walk_in', {
+    p_walk_in_id: walkInId,
+    p_cancel:     true,
+  })
 
-  if (error) return { error: error.message }
+  if (rpcError) {
+    // No estaba en espera (p. ej. turno legacy en atención sin cita): cancelar directo
+    if (!rpcError.message?.includes('walk_in_not_waiting')) {
+      return { error: 'No se pudo quitar el turno. Intenta de nuevo.' }
+    }
+    const { error } = await supabase
+      .from('walk_ins')
+      .update({ status: 'cancelled' })
+      .eq('id', walkInId)
+    if (error) return { error: error.message }
+  }
 
   revalidatePath('/[slug]/dashboard/walk-ins', 'page')
+  revalidatePath('/[slug]/dashboard/appointments', 'page')
   return { success: true }
 }
 
