@@ -3,8 +3,9 @@
 import { randomUUID } from 'crypto'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
-import type { Service } from '@xinuco/types'
+import type { Service, ServiceAudience, ServiceAudienceOrAll } from '@xinuco/types'
 import { businessTodayISODate } from '@/lib/agenda-time'
+import { AUDIENCE_ORDER, normalizeAudiences } from '@/lib/service-audience'
 import {
   diffStaffServices,
   resolveServiceStaffIds,
@@ -28,6 +29,8 @@ export interface ServiceInput {
   duration_minutes:    number
   buffer_time_minutes: number
   price_cop:           number
+  /** Público del servicio; 'all' = unisex (aparece en todos los públicos). */
+  audience:            ServiceAudienceOrAll
   /** 'all' = todos los barberos; o la lista de los que SÍ lo hacen. */
   staff_ids:           string[] | 'all'
   workstation_ids:     string[]
@@ -44,6 +47,8 @@ export interface ServicesOverview {
   services:     ServiceOverviewItem[]
   staff:        { id: string; full_name: string }[]
   workstations: { id: string; name: string }[]
+  /** Públicos que atiende el negocio (siempre al menos uno). */
+  audiences:    ServiceAudience[]
 }
 
 const NOT_ADMIN = 'Solo un administrador puede modificar servicios.'
@@ -102,6 +107,9 @@ function validateInput(input: ServiceInput): string | null {
   }
   if (Array.isArray(input.staff_ids) && input.staff_ids.length === 0) {
     return 'Elige al menos un barbero o selecciona "Todos los barberos".'
+  }
+  if (input.audience !== 'all' && !(AUDIENCE_ORDER as string[]).includes(input.audience)) {
+    return 'Público inválido.'
   }
   if (!Array.isArray(input.workstation_ids)) {
     return 'Selección de estaciones inválida.'
@@ -292,7 +300,7 @@ export async function getServicesOverview(): Promise<ServicesOverview | { error:
   if ('error' in auth) return auth
   const { supabase, businessId } = auth
 
-  const [servicesRes, staffRes, wsRes, ssRes, swRes] = await Promise.all([
+  const [servicesRes, staffRes, wsRes, ssRes, swRes, bizRes] = await Promise.all([
     supabase.from('services').select('*').eq('business_id', businessId)
       .order('is_active', { ascending: false }).order('name', { ascending: true }),
     supabase.from('staff').select('id, full_name').eq('business_id', businessId)
@@ -301,8 +309,9 @@ export async function getServicesOverview(): Promise<ServicesOverview | { error:
       .eq('is_active', true).order('name', { ascending: true }),
     supabase.from('staff_services').select('staff_id, service_id').eq('business_id', businessId),
     supabase.from('service_workstations').select('service_id, workstation_id').eq('business_id', businessId),
+    supabase.from('businesses').select('service_audiences').eq('id', businessId).maybeSingle(),
   ])
-  const firstError = [servicesRes, staffRes, wsRes, ssRes, swRes].find(r => r.error)
+  const firstError = [servicesRes, staffRes, wsRes, ssRes, swRes, bizRes].find(r => r.error)
   if (firstError?.error) return { error: firstError.error.message }
 
   const services = (servicesRes.data ?? []) as Service[]
@@ -372,7 +381,11 @@ export async function getServicesOverview(): Promise<ServicesOverview | { error:
     month_revenue:   stats.get(svc.id)?.revenue ?? 0,
   }))
 
-  return { services: items, staff, workstations }
+  const audiences = normalizeAudiences(
+    (bizRes.data as { service_audiences?: unknown } | null)?.service_audiences,
+  )
+
+  return { services: items, staff, workstations, audiences }
 }
 
 // ── Escrituras ────────────────────────────────────────────────────────────────
@@ -408,6 +421,7 @@ export async function createService(input: ServiceInput): Promise<ActionResult> 
       duration_minutes:    input.duration_minutes,
       buffer_time_minutes: input.buffer_time_minutes,
       price_cop:           input.price_cop,
+      audience:            input.audience,
       is_active:           true,
     })
     .select()
@@ -461,6 +475,7 @@ export async function updateService(serviceId: string, input: ServiceInput): Pro
       duration_minutes:    input.duration_minutes,
       buffer_time_minutes: input.buffer_time_minutes,
       price_cop:           input.price_cop,
+      audience:            input.audience,
     })
     .eq('id', serviceId)
     .eq('business_id', businessId)
@@ -477,6 +492,35 @@ export async function updateService(serviceId: string, input: ServiceInput): Pro
   }
 
   revalidatePath(REVALIDATE, 'page')
+  return { success: true }
+}
+
+/**
+ * setServiceAudiences — Define los públicos que atiende el negocio.
+ * Desactivar un público oculta sus servicios (reservas y walk-ins), no los borra.
+ */
+export async function setServiceAudiences(audiences: string[]): Promise<ActionResult> {
+  const auth = await requireAdmin()
+  if ('error' in auth) return auth
+  const { supabase, businessId } = auth
+
+  if (!Array.isArray(audiences) || audiences.some(a => !(AUDIENCE_ORDER as string[]).includes(a))) {
+    return { error: 'Público inválido.' }
+  }
+  if (audiences.length === 0) return { error: 'Debes atender al menos un público.' }
+
+  const ordered = normalizeAudiences(audiences)
+
+  const { error } = await supabase
+    .from('businesses')
+    .update({ service_audiences: ordered })
+    .eq('id', businessId)
+  if (error) return { error: error.message }
+
+  revalidatePath(REVALIDATE, 'page')
+  revalidatePath('/[slug]/book', 'page')
+  revalidatePath('/[slug]', 'page')
+  revalidatePath('/[slug]/dashboard/walk-ins', 'page')
   return { success: true }
 }
 

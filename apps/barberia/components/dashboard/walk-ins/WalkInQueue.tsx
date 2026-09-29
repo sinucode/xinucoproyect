@@ -40,7 +40,8 @@ import { CheckoutModal } from '@/components/finance/CheckoutModal'
 import { formatApptTime } from '@/lib/agenda-time'
 import { estimateWaits, businessNowAsUtcMs, isReservedTurn } from '@/lib/walk-in-wait'
 import type { StaffStatusNow } from '@/lib/walk-in-wait'
-import type { Staff, Service } from '@xinuco/types'
+import type { Staff, Service, ServiceAudience } from '@xinuco/types'
+import { groupServicesForSelect } from '@/lib/service-audience'
 
 // ── Tipos de props ────────────────────────────────────────────────────────────
 
@@ -51,7 +52,8 @@ interface WalkInQueueProps {
   /** Barberos recomendados por turno en espera sin apartar (walkInId → lista) */
   initialSuggestions: Record<string, WalkInSuggestion[]>
   staffList:          Pick<Staff, 'id' | 'full_name'>[]
-  serviceList:        Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
+  serviceList:        Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes' | 'audience'>[]
+  serviceAudiences:   ServiceAudience[]
   businessId:         string
   slug:               string
   activeShiftId:      string | null
@@ -149,18 +151,50 @@ function StaffChip({ name }: { name?: string }) {
   )
 }
 
+// ── Opciones de servicio (agrupadas por público si el negocio atiende varios) ─
+
+function ServiceOptions({
+  services, audiences,
+}: {
+  services:  Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes' | 'audience'>[]
+  audiences: ServiceAudience[]
+}) {
+  const groups = groupServicesForSelect(services, audiences)
+  if (audiences.length <= 1) {
+    return (
+      <>
+        {(groups[0]?.items ?? []).map((s) => (
+          <option key={s.id} value={s.id}>{s.name}</option>
+        ))}
+      </>
+    )
+  }
+  return (
+    <>
+      {groups.map((g) => (
+        <optgroup key={g.key} label={g.label}>
+          {g.items.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </optgroup>
+      ))}
+    </>
+  )
+}
+
 // ── Panel "Atender" ──────────────────────────────────────────────────────────
 
 interface AttendPanelProps {
   entry:       WalkInWithRelations
   staffStatus: StaffStatusNow[]
   staffList:   Pick<Staff, 'id' | 'full_name'>[]
-  serviceList: Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
+  serviceList: Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes' | 'audience'>[]
+  serviceAudiences: ServiceAudience[]
   onClose:     () => void
   onDone:      () => void
 }
 
-function AttendPanel({ entry, staffStatus, staffList, serviceList, onClose, onDone }: AttendPanelProps) {
+function AttendPanel({ entry, staffStatus, staffList, serviceList, serviceAudiences, onClose, onDone }: AttendPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [error, setError]            = useState<string | null>(null)
 
@@ -266,9 +300,7 @@ function AttendPanel({ entry, staffStatus, staffList, serviceList, onClose, onDo
             }}
           >
             <option value="">Elige el servicio…</option>
-            {serviceList.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
+            <ServiceOptions services={serviceList} audiences={serviceAudiences} />
           </select>
         </div>
       )}
@@ -313,14 +345,15 @@ const selectStyle = {
 interface ReservationSectionProps {
   entry:        WalkInWithRelations
   staffList:    Pick<Staff, 'id' | 'full_name'>[]
-  serviceList:  Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
+  serviceList:  Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes' | 'audience'>[]
+  serviceAudiences: ServiceAudience[]
   /** undefined = aún no cargadas (fuera del tope de 10 turnos) */
   suggestions?: WalkInSuggestion[]
   disabled:     boolean
   run:          RunAction
 }
 
-function ReservationSection({ entry, staffList, serviceList, suggestions, disabled, run }: ReservationSectionProps) {
+function ReservationSection({ entry, staffList, serviceList, serviceAudiences, suggestions, disabled, run }: ReservationSectionProps) {
   const [changing, setChanging] = useState(false)
   const reserved = isReservedTurn(entry)
 
@@ -412,9 +445,7 @@ function ReservationSection({ entry, staffList, serviceList, suggestions, disabl
           style={selectStyle}
         >
           <option value="">Servicio…</option>
-          {serviceList.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
+          <ServiceOptions services={serviceList} audiences={serviceAudiences} />
         </select>
       </div>
     )
@@ -490,7 +521,8 @@ function ReservationSection({ entry, staffList, serviceList, suggestions, disabl
 interface WalkInCardProps {
   entry:        WalkInWithRelations
   staffList:    Pick<Staff, 'id' | 'full_name'>[]
-  serviceList:  Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
+  serviceList:  Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes' | 'audience'>[]
+  serviceAudiences: ServiceAudience[]
   staffStatus:  StaffStatusNow[]
   suggestions?: WalkInSuggestion[]
   /** Minutos estimados hasta ser atendido (solo turnos en espera); null si no hay barberos */
@@ -501,7 +533,7 @@ interface WalkInCardProps {
 }
 
 function WalkInCard({
-  entry, staffList, serviceList, staffStatus, suggestions, waitMinutes, noStaffNow, onRefresh, onCharge,
+  entry, staffList, serviceList, serviceAudiences, staffStatus, suggestions, waitMinutes, noStaffNow, onRefresh, onCharge,
 }: WalkInCardProps) {
   const [isPending, startTransition]      = useTransition()
   const [showConfirmCancel, setShowConfirm] = useState(false)
@@ -651,6 +683,7 @@ function WalkInCard({
           entry={entry}
           staffList={staffList}
           serviceList={serviceList}
+          serviceAudiences={serviceAudiences}
           suggestions={suggestions}
           disabled={isPending}
           run={runAction}
@@ -664,6 +697,7 @@ function WalkInCard({
           staffStatus={staffStatus}
           staffList={staffList}
           serviceList={serviceList}
+          serviceAudiences={serviceAudiences}
           onClose={() => setShowAttend(false)}
           onDone={() => { setShowAttend(false); onRefresh() }}
         />
@@ -761,12 +795,13 @@ function WalkInCard({
 interface AddWalkInSheetProps {
   businessId:  string
   staffList:   Pick<Staff, 'id' | 'full_name'>[]
-  serviceList: Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
+  serviceList: Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes' | 'audience'>[]
+  serviceAudiences: ServiceAudience[]
   onClose:     () => void
   onSuccess:   () => void
 }
 
-function AddWalkInSheet({ businessId, staffList, serviceList, onClose, onSuccess }: AddWalkInSheetProps) {
+function AddWalkInSheet({ businessId, staffList, serviceList, serviceAudiences, onClose, onSuccess }: AddWalkInSheetProps) {
   const [isPending, startTransition] = useTransition()
   const [error, setError]            = useState<string | null>(null)
   const formRef                      = React.useRef<HTMLFormElement>(null)
@@ -894,11 +929,7 @@ function AddWalkInSheet({ businessId, staffList, serviceList, onClose, onSuccess
               onChange={(e) => setForm((p) => ({ ...p, service_id: e.target.value }))}
             >
               <option value="">Sin definir</option>
-              {serviceList.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
+              <ServiceOptions services={serviceList} audiences={serviceAudiences} />
             </select>
           </div>
 
@@ -1016,6 +1047,7 @@ export function WalkInQueue({
   initialSuggestions,
   staffList,
   serviceList,
+  serviceAudiences,
   businessId,
   activeShiftId,
 }: WalkInQueueProps) {
@@ -1126,6 +1158,7 @@ export function WalkInQueue({
       entry={entry}
       staffList={staffList}
       serviceList={serviceList}
+      serviceAudiences={serviceAudiences}
       staffStatus={staffStatus}
       suggestions={suggestions[entry.id]}
       waitMinutes={estimate.minutesById[entry.id] ?? null}
@@ -1295,6 +1328,7 @@ export function WalkInQueue({
           businessId={businessId}
           staffList={staffList}
           serviceList={serviceList}
+          serviceAudiences={serviceAudiences}
           onClose={() => setShowAdd(false)}
           onSuccess={refresh}
         />

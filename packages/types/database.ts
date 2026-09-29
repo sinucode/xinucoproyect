@@ -88,6 +88,7 @@ export interface Business {
   workstations_count?: number          // INT — deprecado: usar tabla workstations
   // ── Configuración operativa ──────────────────────────────────────────────
   appointment_interval_minutes?: number  // 15 | 30 — granularidad de slots en el calendario
+  service_audiences?: ServiceAudience[]  // TEXT[] — públicos que atiende ('men' | 'women' | 'kids'); por defecto ['men']
   // ── Programa de lealtad ──────────────────────────────────────────────────
   loyalty_point_value_cop?: number       // COP que equivale 1 punto (ej: 1000 = $1.000 COP)
   loyalty_expiry_months?:   number       // Meses de vigencia de los puntos
@@ -178,6 +179,11 @@ export interface Appointment {
 }
 
 // ---------- Tabla: services ----------
+/** Público al que se dirige un servicio. */
+export type ServiceAudience = 'men' | 'women' | 'kids'
+/** Igual que ServiceAudience, más 'all' (unisex: aparece en todos los públicos). */
+export type ServiceAudienceOrAll = ServiceAudience | 'all'
+
 export interface Service {
   id:                   string
   business_id:          string
@@ -186,6 +192,7 @@ export interface Service {
   duration_minutes:     number
   buffer_time_minutes:  number   // Tiempo de limpieza/preparación post-servicio (sumado a duration para calcular slots)
   price_cop:            number   // Precio en COP como INTEGER (sin decimales)
+  audience?:            ServiceAudienceOrAll  // Público del servicio; 'all' = unisex. Por defecto 'men'
   is_active:            boolean
   created_at:           string
   updated_at:           string

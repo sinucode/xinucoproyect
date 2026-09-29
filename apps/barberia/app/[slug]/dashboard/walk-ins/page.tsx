@@ -6,6 +6,7 @@ import { isReservedTurn } from '@/lib/walk-in-wait'
 import { getActiveShiftDetails } from '@/actions/finance'
 import { WalkInQueue } from '@/components/dashboard/walk-ins/WalkInQueue'
 import type { BusinessFeatures, Staff, Service } from '@xinuco/types'
+import { normalizeAudiences } from '@/lib/service-audience'
 
 export const metadata: Metadata = {
   title: 'Fila de espera — Xinuco',
@@ -47,7 +48,7 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
   }
 
   // 4. Carga paralela: cola activa + historial + estado de barberos + staff + servicios
-  const [queue, history, staffStatus, staffRows, serviceRows] = await Promise.all([
+  const [queue, history, staffStatus, staffRows, serviceRows, audienceRow] = await Promise.all([
     getWalkInQueue(profile.business_id),
     getWalkInHistory(profile.business_id, 10),
     getStaffStatusNow(profile.business_id),
@@ -59,10 +60,15 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
       .order('full_name'),
     supabase
       .from('services')
-      .select('id, name, price_cop, duration_minutes')
+      .select('id, name, price_cop, duration_minutes, audience')
       .eq('business_id', profile.business_id)
       .eq('is_active', true)
       .order('name'),
+    supabase
+      .from('businesses')
+      .select('service_audiences')
+      .eq('id', profile.business_id)
+      .maybeSingle(),
   ])
 
   // 5. Recomendación de barbero para los primeros 10 turnos en espera sin apartar
@@ -73,7 +79,10 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
   const suggestions = needSuggestions.length > 0 ? await getWalkInSuggestions(needSuggestions) : {}
 
   const staffList    = (staffRows.data ?? []) as Pick<Staff, 'id' | 'full_name'>[]
-  const serviceList  = (serviceRows.data ?? []) as Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
+  const serviceList  = (serviceRows.data ?? []) as Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes' | 'audience'>[]
+  const serviceAudiences = normalizeAudiences(
+    (audienceRow.data as { service_audiences?: unknown } | null)?.service_audiences,
+  )
 
   return (
     <div className="flex flex-col gap-6 max-w-6xl mx-auto pb-24 px-4 sm:px-6">
@@ -84,6 +93,7 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
         initialSuggestions={suggestions}
         staffList={staffList}
         serviceList={serviceList}
+        serviceAudiences={serviceAudiences}
         businessId={profile.business_id}
         activeShiftId={activeShiftId}
         slug={slug}

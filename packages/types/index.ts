@@ -12,6 +12,8 @@ export type {
   Profile,
   UserRole,
   Service,
+  ServiceAudience,
+  ServiceAudienceOrAll,
   Staff,
   StaffRole,
   StaffBreak,

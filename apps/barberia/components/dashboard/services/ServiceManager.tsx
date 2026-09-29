@@ -4,12 +4,16 @@ import { useState, useTransition, useCallback, useRef, useEffect, useMemo } from
 import { useRouter } from 'next/navigation'
 import {
   Plus, X, Loader2, Clock, Scissors,
-  MoreVertical, Pencil, Power, Trash2, Save, CheckCircle2, AlertCircle,
+  MoreVertical, Pencil, Power, Trash2, Save, CheckCircle2, AlertCircle, Copy,
 } from 'lucide-react'
 import {
-  createService, updateService, setServiceActive, deleteService,
+  createService, updateService, setServiceActive, deleteService, setServiceAudiences,
   type ServiceOverviewItem, type ServicesOverview,
 } from '@/actions/services'
+import type { ServiceAudience, ServiceAudienceOrAll } from '@xinuco/types'
+import {
+  AUDIENCE_ORDER, AUDIENCE_LABELS, serviceAudienceOf, isServiceVisible, servicesForAudience,
+} from '@/lib/service-audience'
 import { AdminPageHeader } from '@xinuco/ui'
 import { AdminEmptyState } from '@xinuco/ui'
 
@@ -62,6 +66,28 @@ function initials(name: string): string {
 
 type Notice = { type: 'success' | 'error' | 'info'; text: string }
 
+/** Datos con los que se prellena el formulario de "Nuevo servicio" (al duplicar). */
+interface ServiceDraft {
+  name:                string
+  description:         string | null
+  duration_minutes:    number
+  buffer_time_minutes: number
+  price_cop:           number
+  staff_ids:           string[]
+  workstation_ids:     string[]
+  audience:            ServiceAudienceOrAll
+}
+
+/** Etiqueta corta del público en badges — 'all' → "Unisex". */
+function audienceBadgeLabel(a: ServiceAudienceOrAll): string {
+  return a === 'all' ? 'Unisex' : AUDIENCE_LABELS[a].singular
+}
+
+/** Público destino al duplicar: el primer activo distinto del origen ('all' → el primero activo). */
+function duplicateTarget(source: ServiceAudienceOrAll, active: ServiceAudience[]): ServiceAudience {
+  return active.find(a => a !== source) ?? active[0]
+}
+
 // ════════════════════════════════════════════════════════════════════════════════
 // COMPONENTE PRINCIPAL — ServiceManager (Client Island)
 // ════════════════════════════════════════════════════════════════════════════════
@@ -75,11 +101,18 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
   const [services, setServices] = useState<ServiceOverviewItem[]>(overview.services)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editingService, setEditingService] = useState<ServiceOverviewItem | null>(null)
+  const [draft, setDraft] = useState<ServiceDraft | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const { staff, workstations } = overview
+  const [audiences, setAudiences] = useState<ServiceAudience[]>(overview.audiences)
+  const [tabState, setTabState] = useState<'all' | ServiceAudience>('all')
+  const multi = audiences.length > 1
+  // Si el público de la pestaña se desactivó, se vuelve a "Todos".
+  const tab: 'all' | ServiceAudience = tabState === 'all' || audiences.includes(tabState) ? tabState : 'all'
 
   // La fuente de verdad es el servidor: al hacer router.refresh() llegan props nuevas.
   useEffect(() => { setServices(overview.services) }, [overview.services])
+  useEffect(() => { setAudiences(overview.audiences) }, [overview.audiences])
 
   // Activos primero, luego por nombre (también tras un toggle optimista).
   const sorted = useMemo(
@@ -95,23 +128,48 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
     return () => clearTimeout(t)
   }, [notice])
 
-  const handleCreate = () => { setEditingService(null); setSheetOpen(true) }
+  // Con pestaña de público seleccionada, la lista solo muestra ese público (+ unisex).
+  const visibleList = useMemo(
+    () => (multi && tab !== 'all' ? servicesForAudience(sorted, tab) : sorted),
+    [sorted, multi, tab],
+  )
+
+  const handleCreate = () => { setEditingService(null); setDraft(null); setSheetOpen(true) }
   const handleEdit = useCallback((service: ServiceOverviewItem) => {
     setEditingService(service)
+    setDraft(null)
     setSheetOpen(true)
   }, [])
-  const handleClose = useCallback(() => { setSheetOpen(false); setEditingService(null) }, [])
+  const handleDuplicate = useCallback((service: ServiceOverviewItem) => {
+    const target = duplicateTarget(serviceAudienceOf(service), audiences)
+    setEditingService(null)
+    setDraft({
+      name:                `${service.name} – ${AUDIENCE_LABELS[target].singular}`.slice(0, 80),
+      description:         service.description,
+      duration_minutes:    service.duration_minutes,
+      buffer_time_minutes: service.buffer_time_minutes ?? 0,
+      price_cop:           service.price_cop,
+      staff_ids:           service.staff_ids,
+      workstation_ids:     service.workstation_ids,
+      audience:            target,
+    })
+    setSheetOpen(true)
+  }, [audiences])
+  const handleClose = useCallback(() => { setSheetOpen(false); setEditingService(null); setDraft(null) }, [])
 
   const handleSaved = useCallback(() => {
     setNotice({ type: 'success', text: editingService ? 'Servicio actualizado.' : 'Servicio creado.' })
     setSheetOpen(false)
     setEditingService(null)
+    setDraft(null)
     router.refresh()
   }, [editingService, router])
 
   const rowProps = {
     staff,
+    audiences,
     onEdit: handleEdit,
+    onDuplicate: handleDuplicate,
     onOptimistic: (updated: ServiceOverviewItem) =>
       setServices(prev => prev.map(s => (s.id === updated.id ? updated : s))),
     onNotice: setNotice,
@@ -158,6 +216,38 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
         </div>
       )}
 
+      <AudienceControl
+        audiences={audiences}
+        onChange={setAudiences}
+        onNotice={setNotice}
+        onRefresh={() => router.refresh()}
+      />
+
+      {multi && services.length > 0 && (
+        <div role="tablist" aria-label="Filtrar por público" className="flex flex-wrap gap-2">
+          {(['all', ...audiences] as ('all' | ServiceAudience)[]).map(t => {
+            const selected = tab === t
+            return (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setTabState(t)}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                  selected ? '' : 'text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.03]'
+                }`}
+                style={selected
+                  ? { background: 'var(--primary-color)', color: 'var(--bg-color)', borderColor: 'var(--primary-color)' }
+                  : { borderColor: 'var(--border-color)' }}
+              >
+                {t === 'all' ? 'Todos' : AUDIENCE_LABELS[t].plural}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       <section aria-label="Lista de servicios">
         {services.length === 0 ? (
           <AdminEmptyState
@@ -187,14 +277,14 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.map(service => (
+                  {visibleList.map(service => (
                     <ServiceRow key={service.id} service={service} {...rowProps} />
                   ))}
                 </tbody>
                 <tfoot>
                   <tr style={{ borderTop: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}>
                     <td colSpan={7} className="px-5 py-3 text-xs text-xinuco-muted">
-                      {services.length} servicio{services.length !== 1 ? 's' : ''} registrado{services.length !== 1 ? 's' : ''}
+                      {visibleList.length} servicio{visibleList.length !== 1 ? 's' : ''} registrado{visibleList.length !== 1 ? 's' : ''}
                     </td>
                   </tr>
                 </tfoot>
@@ -203,11 +293,11 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
 
             {/* Mobile: tarjetas */}
             <div className="xl:hidden flex flex-col gap-3 animate-fade-in">
-              {sorted.map(service => (
+              {visibleList.map(service => (
                 <ServiceCard key={service.id} service={service} {...rowProps} />
               ))}
               <p className="text-xs text-xinuco-muted px-1">
-                {services.length} servicio{services.length !== 1 ? 's' : ''} registrado{services.length !== 1 ? 's' : ''}
+                {visibleList.length} servicio{visibleList.length !== 1 ? 's' : ''} registrado{visibleList.length !== 1 ? 's' : ''}
               </p>
             </div>
           </>
@@ -217,6 +307,9 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
       {sheetOpen && (
         <ServiceSheet
           service={editingService}
+          draft={draft}
+          audiences={audiences}
+          defaultAudience={tab !== 'all' ? tab : audiences[0]}
           staff={staff}
           workstations={workstations}
           onClose={handleClose}
@@ -224,6 +317,94 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
         />
       )}
     </>
+  )
+}
+
+/** "Públicos que atiendes": chips que se guardan al instante (optimista, con reversa si falla). */
+function AudienceControl({
+  audiences, onChange, onNotice, onRefresh,
+}: {
+  audiences: ServiceAudience[]
+  onChange: (a: ServiceAudience[]) => void
+  onNotice: (n: Notice) => void
+  onRefresh: () => void
+}) {
+  const [isPending, startTransition] = useTransition()
+
+  function toggle(a: ServiceAudience) {
+    const active = audiences.includes(a)
+    if (active && audiences.length === 1) {
+      onNotice({ type: 'info', text: 'Debes atender al menos un público.' })
+      return
+    }
+    const previous = audiences
+    const next = AUDIENCE_ORDER.filter(x => (x === a ? !active : audiences.includes(x)))
+    onChange(next)
+    startTransition(async () => {
+      const result = await setServiceAudiences(next)
+      if (result.error) {
+        onChange(previous)
+        onNotice({ type: 'error', text: result.error })
+        return
+      }
+      onRefresh()
+    })
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider mr-1">
+          Públicos que atiendes
+        </span>
+        {AUDIENCE_ORDER.map(a => {
+          const active = audiences.includes(a)
+          const isLast = active && audiences.length === 1
+          return (
+            <button
+              key={a}
+              type="button"
+              aria-pressed={active}
+              disabled={isPending || isLast}
+              title={isLast ? 'Debes atender al menos un público.' : undefined}
+              onClick={() => toggle(a)}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                active ? '' : 'text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.03]'
+              } ${isPending ? 'opacity-60 cursor-wait' : isLast ? 'cursor-not-allowed' : ''}`}
+              style={active
+                ? { background: 'var(--primary-color)', color: 'var(--bg-color)', borderColor: 'var(--primary-color)' }
+                : { borderColor: 'var(--border-color)' }}
+            >
+              {AUDIENCE_LABELS[a].plural}
+            </button>
+          )
+        })}
+      </div>
+      <p className="text-xs text-xinuco-muted">
+        Con más de uno, tus clientes eligen para quién es la cita al reservar.
+      </p>
+    </div>
+  )
+}
+
+/** Badge del público del servicio + aviso si está oculto por público desactivado. */
+function AudienceInfo({
+  service, audiences, block,
+}: { service: ServiceOverviewItem; audiences: ServiceAudience[]; block?: boolean }) {
+  const hidden = !isServiceVisible(service, audiences)
+  if (audiences.length <= 1 && !hidden) return null
+  return (
+    <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 ${block ? '' : 'mt-1'}`}>
+      <span
+        className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-xinuco-muted"
+        style={{ border: '1px solid var(--border-color)' }}
+      >
+        {audienceBadgeLabel(serviceAudienceOf(service))}
+      </span>
+      {hidden && (
+        <span className="text-[11px] text-amber-400/90">Oculto en reservas: público desactivado</span>
+      )}
+    </div>
   )
 }
 
@@ -244,7 +425,9 @@ function Th({ children, center, right }: { children: React.ReactNode; center?: b
 interface RowProps {
   service: ServiceOverviewItem
   staff: Staff[]
+  audiences: ServiceAudience[]
   onEdit: (s: ServiceOverviewItem) => void
+  onDuplicate: (s: ServiceOverviewItem) => void
   onOptimistic: (s: ServiceOverviewItem) => void
   onNotice: (n: Notice) => void
   onRefresh: () => void
@@ -320,11 +503,13 @@ function StatusSwitch({ active, pending, onClick }: { active: boolean; pending: 
 }
 
 function ActionsMenu({
-  service, pending, onEdit, onToggle, onDelete,
+  service, pending, onEdit, onDuplicate, onToggle, onDelete,
 }: {
   service: ServiceOverviewItem
   pending: boolean
   onEdit: () => void
+  /** Solo se pasa cuando el negocio atiende más de un público. */
+  onDuplicate?: () => void
   onToggle: () => void
   onDelete: () => void
 }) {
@@ -355,6 +540,15 @@ function ActionsMenu({
               <Pencil size={13} style={{ color: 'var(--primary-color)' }} />
               Editar
             </button>
+            {onDuplicate && (
+              <button
+                onClick={() => { setOpen(false); onDuplicate() }}
+                className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-xs font-medium text-xinuco-text hover:bg-white/[0.04] transition-colors text-left"
+              >
+                <Copy size={13} style={{ color: 'var(--primary-color)' }} />
+                Duplicar
+              </button>
+            )}
             <button
               onClick={() => { setOpen(false); onToggle() }}
               className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-xs font-medium text-xinuco-text hover:bg-white/[0.04] transition-colors text-left"
@@ -413,7 +607,7 @@ function StaffCell({ service, staff }: { service: ServiceOverviewItem; staff: St
 // ════════════════════════════════════════════════════════════════════════════════
 
 function ServiceRow(props: RowProps) {
-  const { service, staff, onEdit } = props
+  const { service, staff, audiences, onEdit, onDuplicate } = props
   const a = useServiceActions(props)
 
   return (
@@ -430,6 +624,7 @@ function ServiceRow(props: RowProps) {
           {service.description && (
             <span className="text-xs text-xinuco-muted line-clamp-1">{service.description}</span>
           )}
+          <AudienceInfo service={service} audiences={audiences} />
         </div>
       </td>
       <td className="px-4 py-4">
@@ -455,6 +650,7 @@ function ServiceRow(props: RowProps) {
           service={service}
           pending={a.isPending}
           onEdit={() => onEdit(service)}
+          onDuplicate={audiences.length > 1 ? () => onDuplicate(service) : undefined}
           onToggle={a.toggle}
           onDelete={a.remove}
         />
@@ -464,7 +660,7 @@ function ServiceRow(props: RowProps) {
 }
 
 function ServiceCard(props: RowProps) {
-  const { service, staff, onEdit } = props
+  const { service, staff, audiences, onEdit, onDuplicate } = props
   const a = useServiceActions(props)
 
   return (
@@ -482,11 +678,13 @@ function ServiceCard(props: RowProps) {
           {service.description && (
             <span className="text-xs text-xinuco-muted line-clamp-2">{service.description}</span>
           )}
+          <AudienceInfo service={service} audiences={audiences} />
         </div>
         <ActionsMenu
           service={service}
           pending={a.isPending}
           onEdit={() => onEdit(service)}
+          onDuplicate={audiences.length > 1 ? () => onDuplicate(service) : undefined}
           onToggle={a.toggle}
           onDelete={a.remove}
         />
@@ -520,12 +718,19 @@ function ServiceCard(props: RowProps) {
 
 function ServiceSheet({
   service,
+  draft,
+  audiences,
+  defaultAudience,
   staff,
   workstations,
   onClose,
   onSaved,
 }: {
   service: ServiceOverviewItem | null
+  /** Prellenado para "Duplicar" (solo al crear). */
+  draft: ServiceDraft | null
+  audiences: ServiceAudience[]
+  defaultAudience: ServiceAudience
   staff: Staff[]
   workstations: Workstation[]
   onClose: () => void
@@ -534,16 +739,30 @@ function ServiceSheet({
   const isEditing = Boolean(service)
   const backdropRef = useRef<HTMLDivElement>(null)
 
-  const allStaffInitially = !service || staff.length === 0 || service.staff_ids.length >= staff.length
+  // Al editar se usa el servicio; al duplicar, el borrador; si no, formulario vacío.
+  const src = service ?? draft
 
-  const [name, setName]                 = useState(service?.name ?? '')
-  const [description, setDesc]          = useState(service?.description ?? '')
-  const [duration, setDuration]         = useState(String(service?.duration_minutes ?? '30'))
-  const [buffer, setBuffer]             = useState(String(service?.buffer_time_minutes ?? '0'))
-  const [priceDisplay, setPriceDisplay] = useState(service?.price_cop ? formatCOP(service.price_cop) : '')
+  const allStaffInitially = !src || staff.length === 0 || src.staff_ids.length >= staff.length
+
+  // Público: opciones = activos + unisex (+ el actual si ya no está activo)
+  const initialAudience: ServiceAudienceOrAll =
+    service ? serviceAudienceOf(service) : draft?.audience ?? defaultAudience
+  const audienceOptions: ServiceAudienceOrAll[] = [
+    ...audiences, 'all' as const,
+    ...(initialAudience !== 'all' && !audiences.includes(initialAudience) ? [initialAudience] : []),
+  ]
+  const showAudienceField =
+    audiences.length > 1 || (Boolean(service) && initialAudience !== audiences[0])
+
+  const [audience, setAudience]         = useState<ServiceAudienceOrAll>(initialAudience)
+  const [name, setName]                 = useState(src?.name ?? '')
+  const [description, setDesc]          = useState(src?.description ?? '')
+  const [duration, setDuration]         = useState(String(src?.duration_minutes ?? '30'))
+  const [buffer, setBuffer]             = useState(String(src?.buffer_time_minutes ?? '0'))
+  const [priceDisplay, setPriceDisplay] = useState(src?.price_cop ? formatCOP(src.price_cop) : '')
   const [staffMode, setStaffMode]       = useState<'all' | 'some'>(allStaffInitially ? 'all' : 'some')
-  const [staffSel, setStaffSel]         = useState<string[]>(allStaffInitially ? [] : service!.staff_ids)
-  const [wsSel, setWsSel]               = useState<string[]>(service?.workstation_ids ?? [])
+  const [staffSel, setStaffSel]         = useState<string[]>(allStaffInitially ? [] : src!.staff_ids)
+  const [wsSel, setWsSel]               = useState<string[]>(src?.workstation_ids ?? [])
   const [formError, setFormError]       = useState<string | null>(null)
   const [isPending, startTransition]    = useTransition()
 
@@ -580,6 +799,7 @@ function ServiceSheet({
       duration_minutes:    parseInt(duration, 10),
       buffer_time_minutes: buffer.trim() === '' ? 0 : parseInt(buffer, 10),
       price_cop:           parseCOP(priceDisplay),
+      audience,
       staff_ids:           staffMode === 'all' || staffSel.length >= staff.length ? ('all' as const) : staffSel,
       workstation_ids:     wsSel,
     }
@@ -650,6 +870,21 @@ function ServiceSheet({
               className="input-base resize-none"
             />
           </div>
+
+          {showAudienceField && (
+            <div className="flex flex-col gap-2">
+              <label htmlFor="svc-audience" className={label}>Para</label>
+              <select
+                id="svc-audience" value={audience}
+                onChange={(e) => setAudience(e.target.value as ServiceAudienceOrAll)}
+                className="input-base"
+              >
+                {audienceOptions.map(a => (
+                  <option key={a} value={a}>{a === 'all' ? AUDIENCE_LABELS.all.plural : AUDIENCE_LABELS[a].singular}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-2">

@@ -5,10 +5,11 @@ import {
   Check, ChevronLeft, AlertCircle, Loader2,
   Calendar, Clock, Scissors, User, Sparkles, Phone, QrCode, Package, Minus, Plus,
 } from 'lucide-react'
-import type { Service, Staff } from '@xinuco/types'
+import type { Service, ServiceAudience, Staff } from '@xinuco/types'
 import { createBooking } from '@/actions/bookings'
 import { getAvailableSlotsAction } from '@/actions/staff'
 import { businessTodayISODate, addDaysToDateKey, businessNowHHMM } from '@/lib/agenda-time'
+import { AUDIENCE_LABELS, servicesForAudience } from '@/lib/service-audience'
 import { BookingPaymentStep } from '@/components/booking/BookingPaymentStep'
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -142,9 +143,11 @@ interface BookingWizardProps {
   bookableProducts?: BookableProducts
   /** servicio → barberos que lo hacen (get_public_service_staff). Sin entrada = todos. */
   serviceStaff?:    Record<string, string[]>
+  /** Públicos que atiende el negocio. Con más de uno, el cliente elige para quién es la cita. */
+  audiences?:       ServiceAudience[]
 }
 
-export function BookingWizard({ businessId, services, staff, mpBookingEnabled = false, bookableProducts, serviceStaff }: BookingWizardProps) {
+export function BookingWizard({ businessId, services, staff, mpBookingEnabled = false, bookableProducts, serviceStaff, audiences = ['men'] }: BookingWizardProps) {
   const [state, dispatch] = useReducer(wizardReducer, initialState)
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -154,6 +157,9 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
   const [paymentStep, setPaymentStep] = useState<'form' | 'mp_payment'>('form')
   // Productos apartados: item_id → cantidad (0 = no apartar)
   const [productQty, setProductQty] = useState<Record<string, number>>({})
+  // Público elegido (solo si el negocio atiende más de uno)
+  const [audience, setAudience] = useState<ServiceAudience | null>(null)
+  const multiAudience = audiences.length > 1
 
   useEffect(() => {
     // Breve timeout para mostrar el esqueleto (Zero-Flicker UX effect)
@@ -165,6 +171,12 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
 
   // ── Resolver nombres para los resúmenes ──────────────────────────────────
   const selectedService = services.find(s => s.id === state.serviceId)
+  const visibleServices = multiAudience
+    ? (audience ? servicesForAudience(services, audience) : [])
+    : services
+  const step1Summary = selectedService
+    ? (multiAudience && audience ? `${AUDIENCE_LABELS[audience].singular} · ${selectedService.name}` : selectedService.name)
+    : undefined
   const selectedStaff = state.staffId === 'any'
     ? null
     : staff.find(s => s.id === state.staffId)
@@ -326,10 +338,40 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
         currentStep={state.currentStep}
         title="¿Qué te harás?"
         icon={<Scissors size={14} />}
-        summary={selectedService?.name}
+        summary={step1Summary}
         onGoBack={() => dispatch({ type: 'GOTO_STEP', payload: 1 })}
       >
         <div className="flex flex-col gap-3 px-1 pb-2">
+          {isMounted && multiAudience && services.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-semibold text-xinuco-text">¿Para quién es la cita?</p>
+              <div className="flex flex-wrap gap-2">
+                {audiences.map(a => {
+                  const selected = audience === a
+                  return (
+                    <button
+                      key={a}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setAudience(a)}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-200 active:scale-95"
+                      style={selected ? {
+                        background: 'var(--primary-color)',
+                        color: 'var(--bg-color)',
+                        borderColor: 'var(--primary-color)',
+                      } : {
+                        background: 'var(--surface-color, rgba(255,255,255,0.03))',
+                        color: 'var(--text-color, inherit)',
+                        borderColor: 'var(--border-color)',
+                      }}
+                    >
+                      {AUDIENCE_LABELS[a].singular}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           {!isMounted ? (
             // Skeleton de carga parpadeante (Premium Minimalist)
             <>
@@ -362,8 +404,16 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
               <p className="text-sm font-medium">No hay servicios disponibles</p>
               <p className="text-xs opacity-60">Pronto agregaremos nuestro catálogo.</p>
             </div>
+          ) : multiAudience && !audience ? (
+            <p className="text-xs text-xinuco-muted opacity-70 px-1">
+              Elige para quién es la cita para ver los servicios.
+            </p>
+          ) : visibleServices.length === 0 ? (
+            <p className="text-sm text-xinuco-muted px-1">
+              No hay servicios para {audience ? AUDIENCE_LABELS[audience].plural : 'este público'} por ahora.
+            </p>
           ) : (
-            services.map(svc => (
+            visibleServices.map(svc => (
               <div
                 key={svc.id}
                 className="flex flex-col p-4 rounded-2xl border transition-all duration-300 hover:scale-[1.01] group"

@@ -2,6 +2,7 @@ import { createClient } from '@xinuco/supabase/server'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import type { Service, Staff } from '@xinuco/types'
+import { filterVisibleServices, normalizeAudiences } from '@/lib/service-audience'
 import { BookingWizard, type BookableProducts } from '@/components/booking/BookingWizard'
 
 // Fila devuelta por la RPC pública get_public_business (solo campos seguros)
@@ -10,6 +11,7 @@ interface PublicBusinessRow {
   name:      string
   is_active: boolean
   branding:  any
+  service_audiences: string[] | null
 }
 
 interface PublicBookingPageProps {
@@ -74,7 +76,9 @@ export default async function PublicBookingPage({ params }: PublicBookingPagePro
       ? (productsData as BookableProducts)
       : { enabled: false, max_units: 0, items: [] }
 
-  const services = (servicesRes.data ?? []) as Service[]
+  // Públicos activos: los servicios de públicos desactivados no se ofrecen
+  const audiences = normalizeAudiences(business.service_audiences)
+  const services = filterVisibleServices((servicesRes.data ?? []) as Service[], audiences)
   const staff = (staffRes.data ?? []) as Staff[]
 
   return (
@@ -136,6 +140,7 @@ export default async function PublicBookingPage({ params }: PublicBookingPagePro
         <BookingWizard
           businessId={business.id}
           services={services}
+          audiences={audiences}
           staff={staff}
           bookableProducts={bookableProducts}
           serviceStaff={serviceStaff}

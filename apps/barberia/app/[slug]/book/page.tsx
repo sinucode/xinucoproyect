@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
 import { BookingWizard, type BookableProducts } from '@/components/booking/BookingWizard'
 import type { Service, Staff } from '@xinuco/types'
+import { filterVisibleServices, normalizeAudiences } from '@/lib/service-audience'
 
 interface BookPageProps {
   params: Promise<{ slug: string }>
@@ -15,7 +16,7 @@ export default async function BookPage({ params }: BookPageProps) {
   // Fetch de control para inyectar la metadata y asegurar existencia del negocio
   const { data: business } = await supabase
     .rpc('get_public_business', { p_slug: slug })
-    .maybeSingle<{ id: string; name: string; online_payments: boolean }>()
+    .maybeSingle<{ id: string; name: string; online_payments: boolean; service_audiences: string[] | null }>()
 
   if (!business) {
     notFound()
@@ -43,7 +44,9 @@ export default async function BookPage({ params }: BookPageProps) {
       ? (productsData as BookableProducts)
       : { enabled: false, max_units: 0, items: [] }
 
-  const services = (servicesRes.data ?? []) as Service[]
+  // Públicos activos: los servicios de públicos desactivados no se ofrecen
+  const audiences = normalizeAudiences(business.service_audiences)
+  const services = filterVisibleServices((servicesRes.data ?? []) as Service[], audiences)
   const staff = (staffRes.data ?? []) as Staff[]
 
   return (
@@ -77,6 +80,7 @@ export default async function BookPage({ params }: BookPageProps) {
           <BookingWizard
             businessId={business.id}
             services={services}
+            audiences={audiences}
             staff={staff}
             mpBookingEnabled={mpBookingEnabled}
             bookableProducts={bookableProducts}

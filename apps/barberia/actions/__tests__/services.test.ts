@@ -1,4 +1,4 @@
-import { createService, updateService, deleteService, setServiceActive } from '../services'
+import { createService, updateService, deleteService, setServiceActive, setServiceAudiences } from '../services'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 
@@ -49,6 +49,7 @@ const validInput = {
   duration_minutes: 30,
   buffer_time_minutes: 5,
   price_cop: 25000,
+  audience: 'men' as const,
   staff_ids: 'all' as const,
   workstation_ids: [] as string[],
 }
@@ -103,6 +104,7 @@ describe('Services Server Actions', () => {
       ['precio 0', { price_cop: 0 }, /precio/i],
       ['precio > 10.000.000', { price_cop: 10_000_001 }, /precio/i],
       ['precio decimal', { price_cop: 100.5 }, /precio/i],
+      ['público inválido', { audience: 'dogs' as any }, /público inválido/i],
     ]
 
     it.each(cases)('%s', async (_label, patch, re) => {
@@ -140,7 +142,7 @@ describe('Services Server Actions', () => {
       expect(r.success).toBe(true)
       expect(r.data).toEqual(created)
       const insert = calls.flatMap(c => c.ops.map(o => ({ t: c.table, ...o }))).find(o => o.t === 'services' && o.op === 'insert')
-      expect(insert!.args[0]).toMatchObject({ business_id: 'biz1', name: 'Corte Clásico', buffer_time_minutes: 5, is_active: true })
+      expect(insert!.args[0]).toMatchObject({ business_id: 'biz1', name: 'Corte Clásico', buffer_time_minutes: 5, audience: 'men', is_active: true })
       expect(revalidatePath).toHaveBeenCalled()
     })
   })
@@ -210,6 +212,32 @@ describe('Services Server Actions', () => {
         { op: 'eq', args: ['id', 's1'] },
         { op: 'eq', args: ['business_id', 'biz1'] },
       ]))
+    })
+  })
+
+  describe('setServiceAudiences', () => {
+    it('rechaza al no-admin', async () => {
+      setup('barber')
+      expect(await setServiceAudiences(['men'])).toEqual({ error: NOT_ADMIN })
+    })
+
+    it('valida valores y exige al menos un público', async () => {
+      setup('admin')
+      expect((await setServiceAudiences(['men', 'dogs'])).error).toBe('Público inválido.')
+      setup('admin')
+      expect((await setServiceAudiences([])).error).toBe('Debes atender al menos un público.')
+    })
+
+    it('guarda ordenado, filtrando por id del negocio del perfil', async () => {
+      const { calls } = setup('admin', { businesses: [{ data: null, error: null }] })
+      const r = await setServiceAudiences(['kids', 'men', 'kids'])
+      expect(r.success).toBe(true)
+      const biz = calls.find(c => c.table === 'businesses')!
+      expect(biz.ops).toEqual(expect.arrayContaining([
+        { op: 'update', args: [{ service_audiences: ['men', 'kids'] }] },
+        { op: 'eq', args: ['id', 'biz1'] },
+      ]))
+      expect(revalidatePath).toHaveBeenCalledWith('/[slug]/book', 'page')
     })
   })
 })
