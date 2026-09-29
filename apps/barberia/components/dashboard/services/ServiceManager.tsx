@@ -128,7 +128,7 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
           <button
             id="btn-add-service"
             onClick={handleCreate}
-            className="btn-primary flex items-center gap-2 animate-fade-in"
+            className="btn-primary flex items-center gap-2 shrink-0 whitespace-nowrap animate-fade-in"
           >
             <Plus size={16} strokeWidth={2.5} />
             <span className="hidden sm:inline">Añadir Servicio</span>
@@ -171,7 +171,7 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
           <>
             {/* Desktop: tabla */}
             <div
-              className="hidden md:block rounded-xl animate-fade-in [&_thead_th:first-child]:rounded-tl-xl [&_thead_th:last-child]:rounded-tr-xl"
+              className="hidden xl:block rounded-xl animate-fade-in [&_thead_th:first-child]:rounded-tl-xl [&_thead_th:last-child]:rounded-tr-xl"
               style={{ border: '1px solid var(--border-color)' }}
             >
               <table className="w-full text-sm" aria-label="Catálogo de servicios">
@@ -202,7 +202,7 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
             </div>
 
             {/* Mobile: tarjetas */}
-            <div className="md:hidden flex flex-col gap-3 animate-fade-in">
+            <div className="xl:hidden flex flex-col gap-3 animate-fade-in">
               {sorted.map(service => (
                 <ServiceCard key={service.id} service={service} {...rowProps} />
               ))}
