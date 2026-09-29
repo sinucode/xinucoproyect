@@ -8,6 +8,7 @@ import {
 import type { Service, Staff } from '@xinuco/types'
 import { createBooking } from '@/actions/bookings'
 import { getAvailableSlotsAction } from '@/actions/staff'
+import { businessTodayISODate, addDaysToDateKey, businessNowHHMM } from '@/lib/agenda-time'
 import { BookingPaymentStep } from '@/components/booking/BookingPaymentStep'
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -96,15 +97,18 @@ function formatCOP(price: number): string {
 
 /** Genera un arreglo de N fechas a partir de un desfase de días */
 function getUpcomingDates(count: number, offsetDays: number = 0): { dateStr: string; dayName: string; dayNum: number; monthName: string; isToday: boolean }[] {
+  // Fechas en la zona del negocio (no UTC): de noche en Colombia, toISOString()
+  // ya es el día siguiente y la cita quedaba reservada un día después.
+  const today = businessTodayISODate()
   const dates = []
   for (let i = 0; i < count; i++) {
-    const d = new Date()
-    d.setDate(d.getDate() + offsetDays + i)
+    const dateStr = addDaysToDateKey(today, offsetDays + i)
+    const d = new Date(`${dateStr}T00:00:00Z`)
     dates.push({
-      dateStr: d.toISOString().split('T')[0],
-      dayName: d.toLocaleDateString('es-CO', { weekday: 'short' }),
-      dayNum: d.getDate(),
-      monthName: d.toLocaleDateString('es-CO', { month: 'short' }),
+      dateStr,
+      dayName: d.toLocaleDateString('es-CO', { weekday: 'short', timeZone: 'UTC' }),
+      dayNum: d.getUTCDate(),
+      monthName: d.toLocaleDateString('es-CO', { month: 'short', timeZone: 'UTC' }),
       isToday: offsetDays === 0 && i === 0,
     })
   }
@@ -159,18 +163,15 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
 
       const finalStaffId = state.staffId === 'any' ? null : state.staffId
 
-      const res = await getAvailableSlotsAction(businessId, finalStaffId, selectedDate, duration)
+      // Con serviceId se usa get_available_slots_v2 (soporta "cualquiera" y buffer)
+      const res = await getAvailableSlotsAction(businessId, finalStaffId, selectedDate, duration, state.serviceId)
       
       let finalSlots = res.slots || []
       
-      // Filtrar horas pasadas si la cita es para HOY
-      const today = new Date().toISOString().split('T')[0]
-      if (selectedDate === today) {
-        const now = new Date()
-        const currentHour = now.getHours()
-        const currentMinute = now.getMinutes()
-        const currentTimeStr = `${currentHour.toString().padStart(2, '0')}:${currentMinute.toString().padStart(2, '0')}`
-        finalSlots = finalSlots.filter((slot: string) => slot >= currentTimeStr)
+      // Filtrar horas pasadas si la cita es para HOY (hora del negocio)
+      if (selectedDate === businessTodayISODate()) {
+        const nowHHMM = businessNowHHMM()
+        finalSlots = finalSlots.filter((slot: string) => slot >= nowHHMM)
       }
 
       dispatch({ type: 'SET_SLOTS', payload: finalSlots })

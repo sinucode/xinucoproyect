@@ -63,3 +63,10 @@ export function businessHour(): number {
     new Intl.DateTimeFormat('en-US', { timeZone: BUSINESS_TZ, hour: 'numeric', hourCycle: 'h23' }).format(new Date()),
   )
 }
+
+/** Hora actual 'HH:MM' en la zona del negocio (para ocultar horarios ya pasados hoy). */
+export function businessNowHHMM(): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: BUSINESS_TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).format(new Date())
+}
