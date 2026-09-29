@@ -25,13 +25,20 @@ function mapError(message: string | undefined): string {
 
 export async function cancelAppointmentByToken(
   token: string,
+  reason?: string | null,
 ): Promise<{ success: true } | { error: string }> {
   if (typeof token !== 'string' || !UUID_RE.test(token)) {
     return { error: 'Enlace inválido.' }
   }
 
+  // Motivo opcional: se recorta y se limita a 300 caracteres (igual que la BD).
+  const cleanReason = (typeof reason === 'string' ? reason.trim().slice(0, 300) : '') || null
+
   const supabase = await createClient()
-  const { data, error } = await supabase.rpc('cancel_appointment_by_token', { p_token: token })
+  const { data, error } = await supabase.rpc('cancel_appointment_by_token', {
+    p_token:  token,
+    p_reason: cleanReason,
+  })
   if (error) return { error: mapError(error.message) }
 
   const result = data as { appointment_id?: string; business_id?: string } | null
@@ -44,7 +51,7 @@ export async function cancelAppointmentByToken(
       const admin = await createAdminClient()
 
       try {
-        await sendCancellationNotice({ supabase: admin as any, businessId, appointmentId })
+        await sendCancellationNotice({ supabase: admin as any, businessId, appointmentId, reason: cleanReason })
       } catch (e) {
         console.error('[cancelAppointmentByToken] email:', e)
       }
@@ -60,7 +67,7 @@ export async function cancelAppointmentByToken(
           p_entity_type: 'appointment',
           p_entity_id:   appointmentId,
           p_old_value:   null,
-          p_new_value:   { status: 'cancelled', source: 'email_link' },
+          p_new_value:   { status: 'cancelled', source: 'email_link', reason: cleanReason },
         })
       } catch (e) {
         console.error('[cancelAppointmentByToken] audit:', e)

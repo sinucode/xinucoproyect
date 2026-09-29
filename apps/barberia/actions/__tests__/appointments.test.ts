@@ -76,6 +76,11 @@ describe('Appointments Server Actions', () => {
       const result = await updateAppointmentStatus('apt1', 'cancelled')
       
       expect(result.success).toBe(true)
+      expect(mockSupabase.update).toHaveBeenCalledWith({
+        status: 'cancelled',
+        updated_at: expect.any(String),
+        cancelled_by: 'business',
+      })
       expect(sendCancellationNotice).toHaveBeenCalledWith({
         supabase: mockSupabase,
         businessId: 'b1',

@@ -226,22 +226,22 @@ function buttonBlock(label: string, href: string, theme: Theme): string {
     </table>`
 }
 
-// Botón secundario (contorno): misma medida que buttonBlock, más una línea aclaratoria.
-function secondaryButtonBlock(label: string, href: string | null | undefined, hint?: string): string {
+// Botón de peligro (contorno rojo): misma medida que buttonBlock, más una línea aclaratoria.
+function dangerOutlineButtonBlock(label: string, href: string | null | undefined, hint?: string): string {
   const safe = safeHttpsUrl(href)
   if (!safe) return ''
   return `
     <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:22px auto 0 auto;">
       <tr>
-        <td align="center" style="border-radius:8px;background-color:#FFFFFF;border:1px solid #D1D5DB;">
+        <td align="center" style="border-radius:8px;background-color:#FFFFFF;border:2px solid #DC2626;">
           <a href="${safe}" target="_blank"
-             style="display:inline-block;padding:12px 26px;font-size:14px;font-weight:700;color:#374151;text-decoration:none;border-radius:8px;">
+             style="display:inline-block;padding:12px 26px;font-size:14px;font-weight:700;color:#DC2626;text-decoration:none;border-radius:8px;">
             ${label}
           </a>
         </td>
       </tr>
     </table>${hint ? `
-    <p style="margin:10px 0 0 0;font-size:11px;color:${C.muted};line-height:1.5;text-align:center;">${hint}</p>` : ''}`
+    <p style="margin:10px 0 0 0;font-size:11px;color:#B45353;line-height:1.5;text-align:center;">${hint}</p>` : ''}`
 }
 
 const CANCEL_HINT = 'Si cancelas, liberamos el horario (y los productos apartados) para otra persona.'
@@ -304,7 +304,7 @@ export function appointmentConfirmationEmail(data: {
     )}
     ${appointmentDetailsBlock(detailRows, theme)}
     ${noteBlock(`${productsNote}Si necesitas reagendar o cancelar tu cita, avísanos con anticipación. ¡Te esperamos!`, theme)}
-    ${secondaryButtonBlock('Cancelar cita', data.cancelUrl, CANCEL_HINT)}`
+    ${dangerOutlineButtonBlock('Cancelar cita', data.cancelUrl, CANCEL_HINT)}`
 
   return emailLayout(theme, content)
 }
@@ -343,7 +343,7 @@ export function appointmentReminderEmail(data: {
     )}
     ${appointmentDetailsBlock(detailRows, theme)}
     ${noteBlock('Si no puedes asistir, avísanos lo antes posible para liberar el espacio. ¡Te esperamos!', theme)}
-    ${secondaryButtonBlock('Cancelar cita', data.cancelUrl, CANCEL_HINT)}`
+    ${dangerOutlineButtonBlock('Cancelar cita', data.cancelUrl, CANCEL_HINT)}`
 
   return emailLayout(theme, content)
 }
@@ -355,7 +355,7 @@ export function appointmentCancellationEmail(data: {
   businessName: string
   serviceName:  string
   startTime:    string
-  reason?:      string
+  reason?:      string | null
   brand?:       EmailBrand
 }): string {
   const theme = buildTheme(data.brand, data.businessName)

@@ -51,12 +51,47 @@ describe('cancelAppointmentByToken', () => {
     rpc.mockResolvedValueOnce({ data: { appointment_id: 'appt1', business_id: 'biz1' }, error: null })
     const result = await cancelAppointmentByToken(TOKEN)
     expect(result).toEqual({ success: true })
-    expect(rpc).toHaveBeenCalledWith('cancel_appointment_by_token', { p_token: TOKEN })
+    expect(rpc).toHaveBeenCalledWith('cancel_appointment_by_token', { p_token: TOKEN, p_reason: null })
     expect(sendCancellationNotice).toHaveBeenCalledWith({
       supabase: admin,
       businessId: 'biz1',
       appointmentId: 'appt1',
+      reason: null,
     })
+  })
+
+  it('passes the trimmed reason to the rpc, the email and the audit log', async () => {
+    rpc.mockResolvedValueOnce({ data: { appointment_id: 'appt1', business_id: 'biz1' }, error: null })
+    const result = await cancelAppointmentByToken(TOKEN, '  me surgió un imprevisto  ')
+    expect(result).toEqual({ success: true })
+    expect(rpc).toHaveBeenCalledWith('cancel_appointment_by_token', {
+      p_token: TOKEN,
+      p_reason: 'me surgió un imprevisto',
+    })
+    expect(sendCancellationNotice).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'me surgió un imprevisto' }),
+    )
+    expect(adminRpc).toHaveBeenCalledWith(
+      'log_action',
+      expect.objectContaining({
+        p_new_value: { status: 'cancelled', source: 'email_link', reason: 'me surgió un imprevisto' },
+      }),
+    )
+  })
+
+  it('truncates a reason longer than 300 characters', async () => {
+    rpc.mockResolvedValueOnce({ data: { appointment_id: 'appt1', business_id: 'biz1' }, error: null })
+    await cancelAppointmentByToken(TOKEN, 'a'.repeat(500))
+    expect(rpc).toHaveBeenCalledWith('cancel_appointment_by_token', {
+      p_token: TOKEN,
+      p_reason: 'a'.repeat(300),
+    })
+  })
+
+  it('sends null when the reason is empty or whitespace', async () => {
+    rpc.mockResolvedValueOnce({ data: { appointment_id: 'appt1', business_id: 'biz1' }, error: null })
+    await cancelAppointmentByToken(TOKEN, '   ')
+    expect(rpc).toHaveBeenCalledWith('cancel_appointment_by_token', { p_token: TOKEN, p_reason: null })
   })
 
   it('still succeeds when the email fails', async () => {

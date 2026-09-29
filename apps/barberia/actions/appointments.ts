@@ -115,7 +115,12 @@ export async function updateAppointmentStatus(appointmentId: string, status: App
 
   const { error } = await supabase
     .from('appointments')
-    .update({ status, updated_at: new Date().toISOString() })
+    .update({
+      status,
+      updated_at: new Date().toISOString(),
+      // Cancelada desde la Agenda → la cancela el negocio (el cliente usa el enlace del correo).
+      ...(status === 'cancelled' ? { cancelled_by: 'business' as const } : {}),
+    })
     .eq('id', appointmentId)
 
   if (error) {

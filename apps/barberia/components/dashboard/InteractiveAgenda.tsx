@@ -208,6 +208,13 @@ export function InteractiveAgenda({
             const cfg = STATUS_CONFIG[appt.status as AppointmentStatus] || STATUS_CONFIG.scheduled
             const Icon = cfg.Icon
             const isUpdating = updatingId === appt.id
+            const cancelReason = typeof appt.cancellation_reason === 'string' ? appt.cancellation_reason.trim() : ''
+            const cancelNote =
+              appt.cancelled_by === 'customer'
+                ? `Cancelada por el cliente${cancelReason ? `: “${cancelReason}”` : ''}`
+                : appt.cancelled_by === 'business'
+                  ? 'Cancelada por el negocio'
+                  : null
             const isActive = appt.status === 'scheduled' || appt.status === 'in_progress' || appt.status === 'ready_to_pay'
 
             return (
@@ -286,6 +293,14 @@ export function InteractiveAgenda({
                           {appt.staff?.full_name ? `con ${barberName}` : barberName}
                         </span>
                       </div>
+                      {appt.status === 'cancelled' && cancelNote && (
+                        <p
+                          className="text-xs text-xinuco-muted mt-1 line-clamp-2"
+                          title={cancelNote}
+                        >
+                          {cancelNote}
+                        </p>
+                      )}
                     </div>
                   </div>
 

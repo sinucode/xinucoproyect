@@ -271,7 +271,7 @@ export async function sendCancellationNotice(params: {
   supabase:      XinucoSupabase
   businessId:    string
   appointmentId: string
-  reason?:       string
+  reason?:       string | null
 }): Promise<void> {
   const { supabase, businessId, appointmentId, reason } = params
 
