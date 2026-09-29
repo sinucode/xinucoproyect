@@ -14,36 +14,87 @@ import {
   Clock,
   UserCheck,
   Loader2,
+  Banknote,
+  Flag,
+  AlertTriangle,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
   getWalkInQueue,
+  getWalkInHistory,
+  getStaffStatusNow,
   addWalkIn,
+  startWalkIn,
   updateWalkInStatus,
   assignStaff,
   removeFromQueue,
 } from '@/actions/walk-ins'
 import type { WalkInWithRelations } from '@/actions/walk-ins'
+import { updateAppointmentStatus } from '@/actions/appointments'
+import { CheckoutModal } from '@/components/finance/CheckoutModal'
+import { formatApptTime } from '@/lib/agenda-time'
+import { estimateWaits, businessNowAsUtcMs } from '@/lib/walk-in-wait'
+import type { StaffStatusNow } from '@/lib/walk-in-wait'
 import type { Staff, Service } from '@xinuco/types'
 
 // ── Tipos de props ────────────────────────────────────────────────────────────
 
 interface WalkInQueueProps {
-  initialQueue:   WalkInWithRelations[]
-  initialHistory: WalkInWithRelations[]
-  staffList:      Pick<Staff, 'id' | 'full_name'>[]
-  serviceList:    Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
-  businessId:     string
-  slug:           string
+  initialQueue:       WalkInWithRelations[]
+  initialHistory:     WalkInWithRelations[]
+  initialStaffStatus: StaffStatusNow[]
+  staffList:          Pick<Staff, 'id' | 'full_name'>[]
+  serviceList:        Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
+  businessId:         string
+  slug:               string
+  activeShiftId:      string | null
 }
 
-// ── Wait time badge ──────────────────────────────────────────────────────────
+const BOGOTA_TZ = 'America/Bogota'
 
-function WaitTimeBadge({ arrivedAt }: { arrivedAt: string }) {
-  const minutesWaited = Math.floor(
-    (Date.now() - new Date(arrivedAt).getTime()) / 60_000
-  )
+/** Hora real de llegada (instante real → zona del negocio), p. ej. "2:15 p. m." */
+function formatArrival(iso: string): string {
+  return new Date(iso).toLocaleTimeString('es-CO', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: BOGOTA_TZ,
+  })
+}
+
+function minutesSince(iso: string): number {
+  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60_000))
+}
+
+// ── Estado del barbero ───────────────────────────────────────────────────────
+
+type PanelStatus = StaffStatusNow['status'] | 'unknown'
+
+function statusMeta(s: { status: PanelStatus; busy_until: string | null }): { label: string; cls: string } {
+  switch (s.status) {
+    case 'free':
+      return { label: 'Libre', cls: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/25' }
+    case 'busy':
+      return {
+        label: s.busy_until ? `En cita hasta ${formatApptTime(s.busy_until)}` : 'En cita',
+        cls: 'text-amber-400 bg-amber-400/10 border-amber-400/25',
+      }
+    case 'break':
+      return { label: 'Almorzando', cls: 'text-sky-400 bg-sky-400/10 border-sky-400/25' }
+    case 'time_off':
+      return { label: 'Con permiso', cls: 'text-violet-400 bg-violet-400/10 border-violet-400/25' }
+    case 'off':
+      return { label: 'Fuera de horario', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/25' }
+    default:
+      return { label: '', cls: '' }
+  }
+}
+
+// ── Wait badges ──────────────────────────────────────────────────────────────
+
+function ArrivalBadge({ arrivedAt }: { arrivedAt: string }) {
+  const minutesWaited = minutesSince(arrivedAt)
 
   let colorClass: string
   if (minutesWaited < 15) {
@@ -56,10 +107,12 @@ function WaitTimeBadge({ arrivedAt }: { arrivedAt: string }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${colorClass}`}
+      title={`Llegó a las ${formatArrival(arrivedAt)}`}
+      suppressHydrationWarning
+      className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${colorClass}`}
     >
       <Clock size={9} />
-      hace {minutesWaited} min
+      llegó hace {minutesWaited} min
     </span>
   )
 }
@@ -90,26 +143,197 @@ function StaffChip({ name }: { name?: string }) {
   )
 }
 
-// ── Walk-in Card ─────────────────────────────────────────────────────────────
+// ── Panel "Atender" ──────────────────────────────────────────────────────────
 
-interface WalkInCardProps {
+interface AttendPanelProps {
   entry:       WalkInWithRelations
+  staffStatus: StaffStatusNow[]
   staffList:   Pick<Staff, 'id' | 'full_name'>[]
-  onRefresh:   () => void
+  serviceList: Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
+  onClose:     () => void
+  onDone:      () => void
 }
 
-function WalkInCard({ entry, staffList, onRefresh }: WalkInCardProps) {
+function AttendPanel({ entry, staffStatus, staffList, serviceList, onClose, onDone }: AttendPanelProps) {
+  const [isPending, startTransition] = useTransition()
+  const [error, setError]            = useState<string | null>(null)
+
+  // Barberos con estado (libres primero); sin estado (RPC caída) → lista simple
+  const options: { id: string; full_name: string; status: PanelStatus; busy_until: string | null }[] =
+    staffStatus.length > 0
+      ? [...staffStatus].sort((a, b) => Number(b.status === 'free') - Number(a.status === 'free'))
+      : staffList.map((s) => ({ id: s.id, full_name: s.full_name, status: 'unknown' as const, busy_until: null }))
+
+  const initialStaff = (() => {
+    const pre = options.find((o) => o.id === entry.staff_id && o.status === 'free')
+    if (pre) return pre.id
+    const firstFree = options.find((o) => o.status === 'free')
+    if (firstFree) return firstFree.id
+    return options.find((o) => o.id === entry.staff_id)?.id ?? ''
+  })()
+
+  const [staffId, setStaffId]     = useState(initialStaff)
+  const [serviceId, setServiceId] = useState(entry.service_id ?? '')
+
+  const needsService = !entry.service_id
+  const selected     = options.find((o) => o.id === staffId)
+  const showWarning  = selected && selected.status !== 'free' && selected.status !== 'unknown'
+
+  const handleConfirm = () => {
+    if (!staffId) { setError('Elige un barbero.'); return }
+    if (needsService && !serviceId) { setError('Elige el servicio para atender.'); return }
+    setError(null)
+    startTransition(async () => {
+      const result = await startWalkIn(entry.id, staffId, needsService ? serviceId : null)
+      if (result.error) {
+        setError(result.error)
+      } else {
+        onDone()
+      }
+    })
+  }
+
+  return (
+    <div
+      className="rounded-lg border p-3 flex flex-col gap-2.5"
+      style={{ backgroundColor: 'var(--bg-color)', borderColor: 'var(--border-color)' }}
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-xinuco-muted">¿Quién lo atiende?</p>
+
+      <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Barbero">
+        {options.length === 0 && (
+          <p className="text-xs text-xinuco-muted">No hay barberos activos.</p>
+        )}
+        {options.map((o) => {
+          const meta = statusMeta(o)
+          const isSel = o.id === staffId
+          return (
+            <button
+              key={o.id}
+              type="button"
+              role="radio"
+              aria-checked={isSel}
+              onClick={() => setStaffId(o.id)}
+              className="flex items-center justify-between gap-2 text-left rounded-lg border px-2.5 py-1.5 text-xs transition-colors"
+              style={{
+                borderColor: isSel ? 'var(--primary-color)' : 'var(--border-color)',
+                backgroundColor: isSel
+                  ? 'color-mix(in srgb, var(--primary-color) 10%, transparent)'
+                  : 'transparent',
+              }}
+            >
+              <span className="font-medium text-xinuco-text truncate">{o.full_name}</span>
+              {meta.label && (
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${meta.cls}`}>
+                  {meta.label}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {showWarning && (
+        <p className="flex items-center gap-1.5 text-[11px] text-amber-400">
+          <AlertTriangle size={11} className="flex-shrink-0" />
+          Está ocupado; el turno se le asignará igual.
+        </p>
+      )}
+
+      {needsService && (
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-xinuco-muted">
+            Servicio <span className="text-red-400">*</span>
+          </label>
+          <select
+            value={serviceId}
+            onChange={(e) => setServiceId(e.target.value)}
+            className="w-full text-xs rounded-lg px-2 py-1.5 border outline-none cursor-pointer"
+            style={{
+              backgroundColor: 'var(--bg-color)',
+              borderColor:     'var(--border-color)',
+              color:           'var(--text-color, #F4F4F4)',
+            }}
+          >
+            <option value="">Elige el servicio…</option>
+            {serviceList.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {error && <p className="text-[11px] text-red-400 bg-red-400/10 rounded-lg px-2.5 py-1.5">{error}</p>}
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleConfirm}
+          disabled={isPending}
+          className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
+          style={{ backgroundColor: 'var(--primary-color)', color: '#080808' }}
+        >
+          {isPending ? <Loader2 size={12} className="animate-spin" /> : <Play size={11} />}
+          Confirmar
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={isPending}
+          className="text-xs px-3 py-1.5 rounded-lg border text-xinuco-muted hover:text-xinuco-text transition-colors"
+          style={{ borderColor: 'var(--border-color)' }}
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Turno (card) ─────────────────────────────────────────────────────────────
+
+interface WalkInCardProps {
+  entry:        WalkInWithRelations
+  staffList:    Pick<Staff, 'id' | 'full_name'>[]
+  serviceList:  Pick<Service, 'id' | 'name' | 'price_cop' | 'duration_minutes'>[]
+  staffStatus:  StaffStatusNow[]
+  /** Minutos estimados hasta ser atendido (solo turnos en espera); null si no hay barberos */
+  waitMinutes?: number | null
+  noStaffNow?:  boolean
+  onRefresh:    () => void
+  onCharge:     (entry: WalkInWithRelations) => void
+}
+
+function WalkInCard({
+  entry, staffList, serviceList, staffStatus, waitMinutes, noStaffNow, onRefresh, onCharge,
+}: WalkInCardProps) {
   const [isPending, startTransition]      = useTransition()
   const [showConfirmCancel, setShowConfirm] = useState(false)
+  const [showAttend, setShowAttend]         = useState(false)
   const [completedAnim, setCompletedAnim]   = useState(false)
+  const [actionError, setActionError]       = useState<string | null>(null)
 
-  const handleStatusChange = (nextStatus: 'in_progress' | 'completed' | 'cancelled') => {
-    if (nextStatus === 'completed') {
-      setCompletedAnim(true)
-      setTimeout(() => setCompletedAnim(false), 800)
-    }
+  const appointmentId = entry.appointment_id ?? null
+  const hasAppointment = entry.status === 'in_progress' && !!appointmentId
+  const apptStatus = entry.appointment?.status
+  const readyToPay = apptStatus === 'ready_to_pay'
+
+  // Flujo legacy (sin cita): solo cambia el estado del turno
+  const handleLegacyComplete = () => {
+    setCompletedAnim(true)
+    setTimeout(() => setCompletedAnim(false), 800)
     startTransition(async () => {
-      await updateWalkInStatus(entry.id, nextStatus)
+      await updateWalkInStatus(entry.id, 'completed')
+      onRefresh()
+    })
+  }
+
+  const handleFinish = () => {
+    if (!appointmentId) return
+    setActionError(null)
+    startTransition(async () => {
+      const result = await updateAppointmentStatus(appointmentId, 'ready_to_pay')
+      if (result?.error) setActionError(result.error)
       onRefresh()
     })
   }
@@ -122,12 +346,26 @@ function WalkInCard({ entry, staffList, onRefresh }: WalkInCardProps) {
   }
 
   const handleCancel = () => {
+    setActionError(null)
     startTransition(async () => {
-      await removeFromQueue(entry.id)
+      if (hasAppointment && appointmentId) {
+        // El trigger cierra el turno al cancelar la cita
+        const result = await updateAppointmentStatus(appointmentId, 'cancelled')
+        if (result?.error) setActionError(result.error)
+      } else {
+        await removeFromQueue(entry.id)
+      }
       setShowConfirm(false)
       onRefresh()
     })
   }
+
+  const isWaiting = entry.status === 'waiting'
+  const waitLabel =
+    noStaffNow ? 'Sin barberos disponibles'
+    : waitMinutes == null ? null
+    : waitMinutes <= 0 ? 'Le toca ya'
+    : `Espera ~${waitMinutes} min`
 
   return (
     <div
@@ -163,7 +401,17 @@ function WalkInCard({ entry, staffList, onRefresh }: WalkInCardProps) {
             </span>
           )}
         </div>
-        <WaitTimeBadge arrivedAt={entry.arrived_at} />
+        <div className="flex flex-col items-end gap-1">
+          <ArrivalBadge arrivedAt={entry.arrived_at} />
+          {isWaiting && waitLabel && (
+            <span
+              suppressHydrationWarning
+              className={`text-[10px] font-semibold whitespace-nowrap ${noStaffNow ? 'text-zinc-500' : 'text-xinuco-text'}`}
+            >
+              {waitLabel}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Row 2: service + staff chips */}
@@ -175,6 +423,18 @@ function WalkInCard({ entry, staffList, onRefresh }: WalkInCardProps) {
           </span>
         )}
         <StaffChip name={entry.staff?.full_name} />
+        {hasAppointment && entry.appointment?.start_time && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border text-zinc-400 bg-zinc-500/10 border-zinc-500/25">
+            <Clock size={9} />
+            Desde {formatApptTime(entry.appointment.start_time)}
+          </span>
+        )}
+        {hasAppointment && readyToPay && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-400/10 border-emerald-400/25">
+            <Banknote size={9} />
+            Listo para cobrar
+          </span>
+        )}
       </div>
 
       {/* Row 3: notes */}
@@ -184,15 +444,31 @@ function WalkInCard({ entry, staffList, onRefresh }: WalkInCardProps) {
         </p>
       )}
 
+      {/* Panel Atender */}
+      {showAttend && isWaiting && (
+        <AttendPanel
+          entry={entry}
+          staffStatus={staffStatus}
+          staffList={staffList}
+          serviceList={serviceList}
+          onClose={() => setShowAttend(false)}
+          onDone={() => { setShowAttend(false); onRefresh() }}
+        />
+      )}
+
+      {actionError && (
+        <p className="text-[11px] text-red-400 bg-red-400/10 rounded-lg px-2.5 py-1.5">{actionError}</p>
+      )}
+
       {/* Row 4: actions */}
       <div className="flex items-center gap-2 flex-wrap pt-1 border-t" style={{ borderColor: 'var(--border-color)' }}>
         {isPending ? (
           <Loader2 size={14} className="animate-spin text-xinuco-muted" />
         ) : (
           <>
-            {entry.status === 'waiting' && (
+            {isWaiting && !showAttend && (
               <button
-                onClick={() => handleStatusChange('in_progress')}
+                onClick={() => setShowAttend(true)}
                 className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-all hover:scale-105"
                 style={{
                   color:           'var(--primary-color)',
@@ -203,9 +479,28 @@ function WalkInCard({ entry, staffList, onRefresh }: WalkInCardProps) {
                 Atender
               </button>
             )}
-            {entry.status === 'in_progress' && (
+
+            {hasAppointment && !readyToPay && (
               <button
-                onClick={() => handleStatusChange('completed')}
+                onClick={handleFinish}
+                className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-amber-500/15 text-amber-400 transition-all hover:scale-105"
+              >
+                <Flag size={11} />
+                Terminar
+              </button>
+            )}
+            {hasAppointment && readyToPay && (
+              <button
+                onClick={() => onCharge(entry)}
+                className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 transition-all hover:scale-105"
+              >
+                <Banknote size={11} />
+                Cobrar
+              </button>
+            )}
+            {entry.status === 'in_progress' && !hasAppointment && (
+              <button
+                onClick={handleLegacyComplete}
                 className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 transition-all hover:scale-105"
               >
                 <CheckCircle size={11} />
@@ -213,37 +508,41 @@ function WalkInCard({ entry, staffList, onRefresh }: WalkInCardProps) {
               </button>
             )}
 
-            {/* Staff selector */}
-            <select
-              value={entry.staff_id ?? ''}
-              onChange={(e) => handleAssign(e.target.value || null)}
-              className="ml-auto text-[11px] rounded-lg px-2 py-1 border outline-none cursor-pointer transition-colors"
-              style={{
-                backgroundColor: 'var(--bg-color)',
-                borderColor:     'var(--border-color)',
-                color:           'var(--text-color, #F4F4F4)',
-              }}
-            >
-              <option value="">Asignar barbero</option>
-              {staffList.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.full_name}
-                </option>
-              ))}
-            </select>
+            {/* Staff selector (no aplica si ya hay cita: el barbero quedó fijo) */}
+            {!hasAppointment && (
+              <select
+                value={entry.staff_id ?? ''}
+                onChange={(e) => handleAssign(e.target.value || null)}
+                className="ml-auto text-[11px] rounded-lg px-2 py-1 border outline-none cursor-pointer transition-colors"
+                style={{
+                  backgroundColor: 'var(--bg-color)',
+                  borderColor:     'var(--border-color)',
+                  color:           'var(--text-color, #F4F4F4)',
+                }}
+              >
+                <option value="">Asignar barbero</option>
+                {staffList.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.full_name}
+                  </option>
+                ))}
+              </select>
+            )}
 
-            {/* Cancel */}
+            {/* Quitar */}
             {!showConfirmCancel ? (
               <button
                 onClick={() => setShowConfirm(true)}
-                className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-all"
-                title="Cancelar walk-in"
+                className={`p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-all ${hasAppointment ? 'ml-auto' : ''}`}
+                title={hasAppointment ? 'Cancelar la cita y quitar de la fila' : 'Quitar de la fila'}
               >
                 <X size={13} />
               </button>
             ) : (
               <div className="flex items-center gap-1">
-                <span className="text-[10px] text-red-400">¿Cancelar?</span>
+                <span className="text-[10px] text-red-400">
+                  {hasAppointment ? '¿Cancelar la cita?' : '¿Quitar de la fila?'}
+                </span>
                 <button
                   onClick={handleCancel}
                   className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30"
@@ -265,7 +564,7 @@ function WalkInCard({ entry, staffList, onRefresh }: WalkInCardProps) {
   )
 }
 
-// ── Add Walk-in Sheet ──────────────────────────────────────────────────────
+// ── Sheet: nuevo turno ─────────────────────────────────────────────────────
 
 interface AddWalkInSheetProps {
   businessId:  string
@@ -349,7 +648,7 @@ function AddWalkInSheet({ businessId, staffList, serviceList, onClose, onSuccess
             >
               <Users size={16} style={{ color: 'var(--primary-color)' }} />
             </div>
-            <span className="font-semibold text-sm text-xinuco-text">Agregar Walk-in</span>
+            <span className="font-semibold text-sm text-xinuco-text">Nuevo turno</span>
           </div>
           <button
             onClick={onClose}
@@ -379,12 +678,12 @@ function AddWalkInSheet({ businessId, staffList, serviceList, onClose, onSuccess
           {/* Phone */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-xinuco-muted uppercase tracking-wide">
-              Teléfono <span className="text-zinc-600 font-normal normal-case">(opcional)</span>
+              Teléfono <span className="text-amber-400/80 font-normal normal-case">(recomendado)</span>
             </label>
             <input
               className={inputCls}
               style={inputStyle}
-              placeholder="+57 300 000 0000"
+              placeholder="Para registrarlo en Clientes"
               type="tel"
               value={form.customer_phone}
               onChange={(e) => setForm((p) => ({ ...p, customer_phone: e.target.value }))}
@@ -475,7 +774,7 @@ function AddWalkInSheet({ businessId, staffList, serviceList, onClose, onSuccess
             }}
           >
             {isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            Agregar a cola
+            Agregar a la fila
           </button>
         </div>
       </div>
@@ -521,25 +820,48 @@ function HistoryItem({ entry }: { entry: WalkInWithRelations }) {
 export function WalkInQueue({
   initialQueue,
   initialHistory,
+  initialStaffStatus,
   staffList,
   serviceList,
   businessId,
+  activeShiftId,
 }: WalkInQueueProps) {
   const [queue, setQueue]           = useState<WalkInWithRelations[]>(initialQueue)
   const [history, setHistory]       = useState<WalkInWithRelations[]>(initialHistory)
+  const [staffStatus, setStaffStatus] = useState<StaffStatusNow[]>(initialStaffStatus)
   const [showAddSheet, setShowAdd]  = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [checkoutEntry, setCheckoutEntry] = useState<WalkInWithRelations | null>(null)
+  const [checkoutWarning, setCheckoutWarning] = useState<string | null>(null)
   const [, startTransition]         = useTransition()
 
   const waiting    = queue.filter((e) => e.status === 'waiting')
   const inProgress = queue.filter((e) => e.status === 'in_progress')
+  const freeBarbers = staffStatus.filter((s) => s.status === 'free').length
 
-  // Refresh queue from server
+  // Espera estimada por turno (busy_until y "ahora" en hora local del negocio como UTC)
+  const estimate = estimateWaits(
+    waiting.map((w) => ({
+      id:               w.id,
+      staff_id:         w.staff_id,
+      duration_minutes: w.service?.duration_minutes ?? null,
+    })),
+    staffStatus,
+    businessNowAsUtcMs(),
+  )
+
+  // Refresh queue + barber status + history from server
   const refresh = useCallback(() => {
     startTransition(async () => {
       try {
-        const fresh = await getWalkInQueue(businessId)
+        const [fresh, status, hist] = await Promise.all([
+          getWalkInQueue(businessId),
+          getStaffStatusNow(businessId),
+          getWalkInHistory(businessId, 10),
+        ])
         setQueue(fresh)
+        setStaffStatus(status)
+        setHistory(hist)
       } catch {
         // silent refresh failure — stale data is acceptable
       }
@@ -551,6 +873,22 @@ export function WalkInQueue({
     const id = setInterval(refresh, 30_000)
     return () => clearInterval(id)
   }, [refresh])
+
+  // Cobrar: mismo requisito que la Agenda (turno de caja abierto)
+  const handleCharge = (entry: WalkInWithRelations) => {
+    if (!activeShiftId) {
+      setCheckoutWarning('⚠️ Debes abrir un turno de caja en el gestor antes de realizar cobros.')
+      setTimeout(() => setCheckoutWarning(null), 5000)
+      return
+    }
+    setCheckoutWarning(null)
+    setCheckoutEntry(entry)
+  }
+
+  const handleCheckoutSuccess = () => {
+    setCheckoutEntry(null)
+    refresh() // el trigger completa el turno al cobrar la cita
+  }
 
   const columnHeader = (
     label:    string,
@@ -580,6 +918,20 @@ export function WalkInQueue({
     </div>
   )
 
+  const renderCard = (entry: WalkInWithRelations) => (
+    <WalkInCard
+      key={entry.id}
+      entry={entry}
+      staffList={staffList}
+      serviceList={serviceList}
+      staffStatus={staffStatus}
+      waitMinutes={estimate.minutesById[entry.id] ?? null}
+      noStaffNow={entry.status === 'waiting' && !estimate.available}
+      onRefresh={refresh}
+      onCharge={handleCharge}
+    />
+  )
+
   return (
     <div className="flex flex-col gap-6 pt-6">
       {/* Page Header */}
@@ -595,21 +947,12 @@ export function WalkInQueue({
             <Users size={22} style={{ color: 'var(--primary-color)' }} />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-serif font-bold text-xl text-xinuco-text">Cola de Walk-ins</h1>
-              {waiting.length > 0 && (
-                <span
-                  className="text-[11px] font-bold px-2 py-0.5 rounded-full"
-                  style={{
-                    color:           'var(--primary-color)',
-                    backgroundColor: 'color-mix(in srgb, var(--primary-color) 15%, transparent)',
-                  }}
-                >
-                  {waiting.length} en espera
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-xinuco-muted mt-0.5">
+            <h1 className="font-serif font-bold text-xl text-xinuco-text">Fila de espera</h1>
+            <p className="text-xs text-xinuco-text mt-0.5 font-medium">
+              {waiting.length} en espera · {inProgress.length} atendiendo ·{' '}
+              {freeBarbers} {freeBarbers === 1 ? 'barbero libre' : 'barberos libres'}
+            </p>
+            <p className="text-[11px] text-xinuco-muted mt-0.5">
               Clientes sin cita previa — actualización automática cada 30s
             </p>
           </div>
@@ -624,10 +967,17 @@ export function WalkInQueue({
           }}
         >
           <Plus size={15} />
-          <span className="hidden sm:inline">Agregar Walk-in</span>
+          <span className="hidden sm:inline">Agregar a la fila</span>
           <span className="sm:hidden">Agregar</span>
         </button>
       </div>
+
+      {/* Advertencia de caja cerrada al intentar cobrar */}
+      {checkoutWarning && (
+        <div className="p-3 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-400 text-xs flex gap-2">
+          <span>{checkoutWarning}</span>
+        </div>
+      )}
 
       {/* Empty state */}
       {queue.length === 0 ? (
@@ -647,7 +997,7 @@ export function WalkInQueue({
           <div className="text-center">
             <p className="font-semibold text-xinuco-text">No hay clientes en espera</p>
             <p className="text-sm text-xinuco-muted mt-1">
-              Agrega el primer walk-in para comenzar la cola
+              Agrega el primer turno para comenzar la fila
             </p>
           </div>
           <button
@@ -660,7 +1010,7 @@ export function WalkInQueue({
             }}
           >
             <Plus size={14} />
-            Agregar Walk-in
+            Agregar a la fila
           </button>
         </div>
       ) : (
@@ -678,14 +1028,7 @@ export function WalkInQueue({
                   <p className="text-xs text-xinuco-muted">Sin clientes en espera</p>
                 </div>
               ) : (
-                waiting.map((entry) => (
-                  <WalkInCard
-                    key={entry.id}
-                    entry={entry}
-                    staffList={staffList}
-                    onRefresh={refresh}
-                  />
-                ))
+                waiting.map(renderCard)
               )}
             </div>
           </div>
@@ -702,14 +1045,7 @@ export function WalkInQueue({
                   <p className="text-xs text-xinuco-muted">Ningún cliente en atención ahora</p>
                 </div>
               ) : (
-                inProgress.map((entry) => (
-                  <WalkInCard
-                    key={entry.id}
-                    entry={entry}
-                    staffList={staffList}
-                    onRefresh={refresh}
-                  />
-                ))
+                inProgress.map(renderCard)
               )}
             </div>
           </div>
@@ -750,7 +1086,7 @@ export function WalkInQueue({
         </div>
       )}
 
-      {/* Add Walk-in Sheet */}
+      {/* Sheet: nuevo turno */}
       {showAddSheet && (
         <AddWalkInSheet
           businessId={businessId}
@@ -758,6 +1094,24 @@ export function WalkInQueue({
           serviceList={serviceList}
           onClose={() => setShowAdd(false)}
           onSuccess={refresh}
+        />
+      )}
+
+      {/* Checkout (mismo modal que la Agenda) */}
+      {checkoutEntry && checkoutEntry.appointment_id && (
+        <CheckoutModal
+          appointment={{
+            id:            checkoutEntry.appointment_id,
+            customer_name: checkoutEntry.customer_name,
+            customer_id:   checkoutEntry.customer_id ?? undefined,
+            service_name:  checkoutEntry.appointment?.services?.name ?? checkoutEntry.service?.name,
+            service_price: checkoutEntry.appointment?.services?.price_cop ?? checkoutEntry.service?.price_cop ?? 0,
+            staff_id:      checkoutEntry.staff_id,
+          }}
+          businessId={businessId}
+          activeShiftId={activeShiftId || ''}
+          onClose={() => setCheckoutEntry(null)}
+          onSuccess={handleCheckoutSuccess}
         />
       )}
     </div>

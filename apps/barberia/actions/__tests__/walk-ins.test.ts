@@ -1,4 +1,4 @@
-import { addWalkIn, updateWalkInStatus, assignStaff } from '../walk-ins'
+import { addWalkIn, updateWalkInStatus, assignStaff, startWalkIn } from '../walk-ins'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 
@@ -86,6 +86,44 @@ describe('Walk-ins Server Actions', () => {
       
       expect(result.success).toBe(true)
       expect(mockSupabase.update).toHaveBeenCalledWith({ staff_id: 'staff1' })
+    })
+  })
+
+  describe('startWalkIn', () => {
+    beforeEach(() => {
+      mockSupabase.auth = { getUser: jest.fn().mockResolvedValue({ data: { user: { id: 'u1' } } }) }
+      mockSupabase.rpc = jest.fn()
+    })
+
+    it('calls the RPC and returns the appointment id', async () => {
+      mockSupabase.rpc.mockResolvedValueOnce({ data: { appointment_id: 'appt1', customer_id: 'c1' }, error: null })
+
+      const result = await startWalkIn('wi1', 'staff1', 'svc1')
+
+      expect(mockSupabase.rpc).toHaveBeenCalledWith('start_walk_in', {
+        p_walk_in_id: 'wi1',
+        p_staff_id:   'staff1',
+        p_service_id: 'svc1',
+      })
+      expect(result).toEqual({ success: true, appointmentId: 'appt1' })
+      expect(revalidatePath).toHaveBeenCalledWith('/[slug]/dashboard/walk-ins', 'page')
+      expect(revalidatePath).toHaveBeenCalledWith('/[slug]/dashboard/appointments', 'page')
+    })
+
+    it('maps RPC errors to Spanish messages', async () => {
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'walk_in_not_waiting' } })
+      expect(await startWalkIn('wi1', 'staff1')).toEqual({ error: 'Este turno ya no está en espera.' })
+
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'service_required' } })
+      expect(await startWalkIn('wi1', 'staff1')).toEqual({ error: 'Elige el servicio para atender.' })
+      expect(revalidatePath).not.toHaveBeenCalled()
+    })
+
+    it('requires a session', async () => {
+      mockSupabase.auth.getUser.mockResolvedValueOnce({ data: { user: null } })
+      const result = await startWalkIn('wi1', 'staff1')
+      expect(result.error).toBeTruthy()
+      expect(mockSupabase.rpc).not.toHaveBeenCalled()
     })
   })
 })

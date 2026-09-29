@@ -1183,7 +1183,7 @@ const FEATURE_ROWS: { label: string; cat: string; esencial: boolean; profesional
   { label: 'MP — Pago online al reservar',    cat: 'Pagos',         esencial: false, profesional: true,  elite: true  },
   { label: 'Bot WhatsApp anti-ausencias',     cat: 'Comunicación',  esencial: false, profesional: false, elite: true  },
   { label: 'Programa de Lealtad',             cat: 'Marketing',     esencial: false, profesional: false, elite: true  },
-  { label: 'Walk-ins (cola sin cita)',         cat: 'Operaciones',   esencial: false, profesional: false, elite: true  },
+  { label: 'Fila de espera (clientes sin cita)',         cat: 'Operaciones',   esencial: false, profesional: false, elite: true  },
   { label: 'Auditoría inmutable',              cat: 'Compliance',    esencial: false, profesional: false, elite: true  },
   { label: 'Activos Fijos & depreciación',    cat: 'Compliance',    esencial: false, profesional: false, elite: true  },
   { label: 'Inventario de productos',         cat: 'Operaciones',   esencial: false, profesional: false, elite: true  },
@@ -1233,7 +1233,7 @@ const PRICING_CARDS: {
       'Programa de Lealtad',
       'Inventario de productos',
       'Activos Fijos & depreciación',
-      'Walk-ins — cola sin cita',
+      'Fila de espera — clientes sin cita',
     ],
   },
 ]

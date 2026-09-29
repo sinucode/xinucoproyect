@@ -56,7 +56,7 @@ const FEATURE_GROUPS: {
     color: '#F59E0B',
     features: [
       { key: 'workstations', label: 'Puestos',     icon: Armchair,       desc: 'Gestión de sillas y puestos de trabajo' },
-      { key: 'walk_ins',     label: 'Walk-ins',    icon: Users,          desc: 'Cola de clientes sin cita previa' },
+      { key: 'walk_ins',     label: 'Fila de espera', icon: Users,          desc: 'Cola de clientes sin cita previa' },
       { key: 'crm',          label: 'CRM',         icon: ClipboardList,  desc: 'Expediente completo del cliente' },
     ],
   },

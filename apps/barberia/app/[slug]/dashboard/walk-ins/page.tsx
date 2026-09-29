@@ -1,13 +1,14 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { getWalkInQueue, getWalkInHistory } from '@/actions/walk-ins'
+import { getWalkInQueue, getWalkInHistory, getStaffStatusNow } from '@/actions/walk-ins'
+import { getActiveShiftDetails } from '@/actions/finance'
 import { WalkInQueue } from '@/components/dashboard/walk-ins/WalkInQueue'
 import type { BusinessFeatures, Staff, Service } from '@xinuco/types'
 
 export const metadata: Metadata = {
-  title: 'Walk-ins — Xinuco',
-  description: 'Cola de clientes sin cita previa',
+  title: 'Fila de espera — Xinuco',
+  description: 'Fila de turnos de clientes sin cita previa',
 }
 
 export default async function WalkInsPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -21,7 +22,7 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
   // 2. Obtener business_id
   const { data: profile } = await supabase
     .from('profiles')
-    .select('business_id')
+    .select('business_id, role')
     .eq('id', user.id)
     .single()
 
@@ -37,10 +38,18 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
   const features = (biz?.features_enabled ?? {}) as unknown as BusinessFeatures
   if (!features?.walk_ins) redirect(`/${slug}/dashboard`)
 
-  // 4. Carga paralela: cola activa + historial + staff + servicios
-  const [queue, history, staffRows, serviceRows] = await Promise.all([
+  // 3b. Turno de caja activo (solo admin, igual que la Agenda) para poder cobrar desde la fila
+  let activeShiftId: string | null = null
+  if (profile.role === 'admin') {
+    const shiftDetails = await getActiveShiftDetails(profile.business_id)
+    activeShiftId = shiftDetails?.shift?.id || null
+  }
+
+  // 4. Carga paralela: cola activa + historial + estado de barberos + staff + servicios
+  const [queue, history, staffStatus, staffRows, serviceRows] = await Promise.all([
     getWalkInQueue(profile.business_id),
     getWalkInHistory(profile.business_id, 10),
+    getStaffStatusNow(profile.business_id),
     supabase
       .from('staff')
       .select('id, full_name')
@@ -63,9 +72,11 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
       <WalkInQueue
         initialQueue={queue}
         initialHistory={history}
+        initialStaffStatus={staffStatus}
         staffList={staffList}
         serviceList={serviceList}
         businessId={profile.business_id}
+        activeShiftId={activeShiftId}
         slug={slug}
       />
     </div>

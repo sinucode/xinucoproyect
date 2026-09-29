@@ -25,7 +25,7 @@ export const FEATURE_CATALOG: Record<keyof BusinessFeatures, FeatureMeta> = {
   retail_sales:           { label: 'Ventas Retail',          description: 'Venta rápida de productos sin cita asociada',             icon: 'ShoppingBag', category: 'finanzas' },
   loyalty:                { label: 'Programa de Lealtad',    description: 'Puntos y recompensas para clientes frecuentes',           icon: 'Gift',       category: 'finanzas' },
   workstations:           { label: 'Puestos de Trabajo',     description: 'Gestión de sillas, cabinas y workstations',              icon: 'LayoutGrid', category: 'operaciones' },
-  walk_ins:               { label: 'Walk-ins',               description: 'Cola de clientes sin cita previa',                       icon: 'Users',      category: 'operaciones' },
+  walk_ins:               { label: 'Fila de espera',          description: 'Fila de turnos de clientes sin cita previa',                    icon: 'Users',      category: 'operaciones' },
   crm:                    { label: 'CRM Clientes',           description: 'Expediente técnico y notas por cliente',                 icon: 'BookUser',   category: 'operaciones' },
   audit_logs:             { label: 'Auditoría',              description: 'Trail de auditoría inmutable de todas las acciones',     icon: 'Shield',     category: 'compliance' },
   fixed_assets:           { label: 'Activos Fijos',          description: 'Inventario y depreciación de equipos',                   icon: 'Package',    category: 'compliance' },

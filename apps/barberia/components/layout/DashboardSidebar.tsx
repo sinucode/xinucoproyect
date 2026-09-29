@@ -33,7 +33,7 @@ interface NavLink {
 function buildLinks(slug: string, features: BusinessFeatures): NavLink[] {
   const all: NavLink[] = [
     { href: `/${slug}/dashboard/appointments`, icon: CalendarDays, label: 'Agenda',         feature: null,               adminOnly: false },
-    { href: `/${slug}/dashboard/walk-ins`,     icon: UserPlus,     label: 'Walk-ins',        feature: 'walk_ins',         adminOnly: false },
+    { href: `/${slug}/dashboard/walk-ins`,     icon: UserPlus,     label: 'Fila de espera',   feature: 'walk_ins',         adminOnly: false },
     { href: `/${slug}/dashboard/crm`,          icon: BookUser,     label: 'Clientes',        feature: 'crm',              adminOnly: false },
     { href: `/${slug}/dashboard/services`,     icon: Scissors,     label: 'Servicios',      feature: null,               adminOnly: true },
     { href: `/${slug}/dashboard/staff`,        icon: Users,        label: 'Staff',           feature: null,               adminOnly: true },
