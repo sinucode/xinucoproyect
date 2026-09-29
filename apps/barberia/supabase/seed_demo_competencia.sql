@@ -70,6 +70,20 @@ BEGIN
     (b, c6, v4, s2, (d + 2 + TIME '12:00') AT TIME ZONE 'UTC', 'payment_pending');
 END $$;
 
+-- ── Productos demo de inventario (para "Añadir producto" en el cobro) ─────────
+INSERT INTO inventory_items (business_id, name, category, description, current_stock, min_stock, unit_price, unit_cost, is_active)
+SELECT '53c66a4f-13d1-4a1c-8cbc-7207f8abe22e', v.name, v.cat, v.descr, v.stock, v.min, v.price, v.cost, TRUE
+  FROM (VALUES
+    ('Demo Cera modeladora',   'hair'     , 'Fijación media 100 g', 12, 3, 25000, 12000),
+    ('Demo Gel fijador',       'hair'     , 'Fijación fuerte 250 ml', 10, 3, 18000,  8000),
+    ('Demo Aceite para barba', 'skincare' , '30 ml',                  6, 2, 32000, 15000),
+    ('Demo Gaseosa',           'other',     'Lata 330 ml',           24, 6,  4000,  2000),
+    ('Demo Agua',              'other',     'Botella 600 ml',        24, 6,  3000,  1200),
+    ('Demo Shampoo anticaspa', 'hair'     , 'Agotado — para probar',  0, 2, 28000, 14000)
+  ) AS v(name, cat, descr, stock, min, price, cost)
+ WHERE NOT EXISTS (SELECT 1 FROM inventory_items i
+                    WHERE i.business_id = '53c66a4f-13d1-4a1c-8cbc-7207f8abe22e' AND i.name = v.name);
+
 -- ============================================================
 -- LIMPIEZA — borra SOLO los datos "Demo" de Barbería Competencia.
 -- Descomentar y correr cuando ya no se necesiten.
@@ -77,6 +91,13 @@ END $$;
 -- DO $$
 -- DECLARE b UUID := '53c66a4f-13d1-4a1c-8cbc-7207f8abe22e';
 -- BEGIN
+--   -- Ventas/pagos hechos al cobrar citas demo (y sus movimientos de inventario)
+--   DELETE FROM inventory_movements WHERE business_id = b AND item_id IN (SELECT id FROM inventory_items WHERE business_id = b AND name LIKE 'Demo %');
+--   DELETE FROM payments   WHERE business_id = b AND sale_id IN (SELECT id FROM sales WHERE business_id = b AND appointment_id IN (SELECT a.id FROM appointments a JOIN customers c ON c.id = a.customer_id WHERE a.business_id = b AND c.full_name LIKE 'Demo %'));
+--   DELETE FROM sale_items WHERE business_id = b AND sale_id IN (SELECT id FROM sales WHERE business_id = b AND appointment_id IN (SELECT a.id FROM appointments a JOIN customers c ON c.id = a.customer_id WHERE a.business_id = b AND c.full_name LIKE 'Demo %'));
+--   DELETE FROM sales      WHERE business_id = b AND appointment_id IN (SELECT a.id FROM appointments a JOIN customers c ON c.id = a.customer_id WHERE a.business_id = b AND c.full_name LIKE 'Demo %');
+--   DELETE FROM inventory_items WHERE business_id = b AND name LIKE 'Demo %';
+--   -- (El turno de caja abierto en las pruebas se cierra desde el dashboard con "Cerrar Turno de Caja".)
 --   DELETE FROM appointments   WHERE business_id = b AND customer_id IN (SELECT id FROM customers WHERE business_id = b AND full_name LIKE 'Demo %');
 --   DELETE FROM customers      WHERE business_id = b AND full_name LIKE 'Demo %';
 --   DELETE FROM staff_services WHERE business_id = b AND staff_id IN (SELECT id FROM staff WHERE business_id = b AND full_name LIKE 'Demo %');

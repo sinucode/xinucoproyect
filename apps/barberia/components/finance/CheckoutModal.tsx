@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Plus, Trash, CreditCard, Banknote, Landmark, X, Loader2, DollarSign, Percent, QrCode } from 'lucide-react'
+import { Plus, Minus, Trash, CreditCard, Banknote, Landmark, X, Loader2, DollarSign, Percent, QrCode } from 'lucide-react'
 import { checkoutAppointment, type CheckoutItemInput } from '@/actions/finance'
-import type { PaymentMethod } from '@xinuco/types'
+import { getInventoryItems } from '@/actions/inventory'
+import type { PaymentMethod, InventoryItem } from '@xinuco/types'
 import { MPPaymentPanel } from '@/components/pos/MPPaymentPanel'
 
 interface CheckoutModalProps {
@@ -41,8 +42,16 @@ export function CheckoutModal({
     },
   ])
 
-  // Estado para añadir nuevos productos manualmente
+  // Selector de productos de inventario (se carga una sola vez al abrir el panel)
   const [showAddProduct, setShowAddProduct] = useState(false)
+  const [showManualForm, setShowManualForm] = useState(false)
+  const [inventory, setInventory] = useState<InventoryItem[] | null>(null)
+  const [inventoryLoading, setInventoryLoading] = useState(false)
+  const [inventoryError, setInventoryError] = useState<string | null>(null)
+  const [inventoryLoaded, setInventoryLoaded] = useState(false)
+  const [inventoryFilter, setInventoryFilter] = useState('')
+
+  // Estado para añadir nuevos productos manualmente
   const [newProdName, setNewProdName] = useState('')
   const [newProdPrice, setNewProdPrice] = useState<number | ''>('')
   const [newProdQty, setNewProdQty] = useState<number>(1)
@@ -70,6 +79,72 @@ export function CheckoutModal({
   const finalReceived = Number(receivedAmount) || 0
   const changeAmount = paymentMethod === 'cash' && finalReceived > totalAmount ? finalReceived - totalAmount : 0
 
+  // Stock conocido por ítem de inventario (para topar el stepper)
+  const stockById: Record<string, number> = {}
+  for (const inv of inventory ?? []) stockById[inv.id] = inv.current_stock
+
+  // Abrir el panel de productos y cargar el inventario la primera vez
+  const handleOpenAddProduct = async () => {
+    setShowAddProduct(true)
+    setShowManualForm(false)
+    if (inventoryLoaded || inventoryLoading) return
+    setInventoryLoading(true)
+    setInventoryError(null)
+    try {
+      const { data, error } = await getInventoryItems(businessId)
+      if (error || !data) {
+        setInventoryError(error || 'No se pudo cargar el inventario.')
+      } else {
+        setInventory(data)
+        setInventoryLoaded(true)
+      }
+    } catch {
+      setInventoryError('No se pudo cargar el inventario.')
+    } finally {
+      setInventoryLoading(false)
+    }
+  }
+
+  // Agregar un producto del inventario (o incrementar su cantidad)
+  const handleAddInventoryItem = (inv: InventoryItem) => {
+    const existingIdx = items.findIndex((it) => it.inventoryItemId === inv.id)
+    if (existingIdx >= 0) {
+      if (items[existingIdx].quantity + 1 > inv.current_stock) {
+        setValidationError(`No hay más unidades de ${inv.name} en inventario.`)
+        return
+      }
+      setItems(items.map((it, i) => (i === existingIdx ? { ...it, quantity: it.quantity + 1 } : it)))
+    } else {
+      setItems([
+        ...items,
+        {
+          description: inv.name,
+          quantity: 1,
+          unitPrice: inv.unit_price ?? 0,
+          itemType: 'product',
+          staffId: appointment.staff_id || null,
+          inventoryItemId: inv.id,
+        },
+      ])
+    }
+    setValidationError(null)
+  }
+
+  // Cambiar cantidad de un producto del ticket (mín. 1, tope = stock si es de inventario)
+  const handleChangeQuantity = (index: number, delta: number) => {
+    const item = items[index]
+    const next = item.quantity + delta
+    if (next < 1) return
+    if (delta > 0 && item.inventoryItemId && item.inventoryItemId in stockById) {
+      if (next > stockById[item.inventoryItemId]) {
+        setValidationError(`No hay más unidades de ${item.description} en inventario.`)
+        return
+      }
+    }
+    setItems(items.map((it, i) => (i === index ? { ...it, quantity: next } : it)))
+    setValidationError(null)
+  }
+
   // Agregar un producto dinámicamente
   const handleAddProduct = () => {
     if (!newProdName.trim()) {
@@ -95,6 +170,7 @@ export function CheckoutModal({
     setNewProdPrice('')
     setNewProdQty(1)
     setShowAddProduct(false)
+    setShowManualForm(false)
     setValidationError(null)
   }
 
@@ -150,6 +226,22 @@ export function CheckoutModal({
     }).format(val)
   }
 
+  // Efectivo rápido: múltiplos redondos estrictamente mayores al total
+  const suggestedCash = Array.from(
+    new Set([5000, 10000, 20000, 50000, 100000].map((m) => (Math.floor(totalAmount / m) + 1) * m))
+  )
+    .sort((a, b) => a - b)
+    .slice(0, 3)
+  const billChips = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
+  const chipClass =
+    'text-xs font-semibold py-2 rounded-lg border border-zinc-800 bg-zinc-950 hover:border-[var(--primary-color)] text-zinc-200'
+
+  // Filtro del selector de inventario
+  const filterText = inventoryFilter.trim().toLowerCase()
+  const visibleInventory = (inventory ?? []).filter(
+    (inv) => !filterText || inv.name.toLowerCase().includes(filterText)
+  )
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
       <div 
@@ -183,7 +275,7 @@ export function CheckoutModal({
               </h3>
               {!showAddProduct && (
                 <button
-                  onClick={() => setShowAddProduct(true)}
+                  onClick={handleOpenAddProduct}
                   className="text-xs font-semibold flex items-center gap-1 text-[var(--primary-color)] hover:underline"
                 >
                   <Plus size={14} />
@@ -192,9 +284,97 @@ export function CheckoutModal({
               )}
             </div>
 
-            {/* Inline Add Product Form */}
+            {/* Selector de productos de inventario */}
             {showAddProduct && (
               <div className="mb-4 p-3 bg-zinc-900 border border-zinc-800 rounded-xl space-y-3 animate-fade-in">
+                {!showManualForm ? (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-xinuco-text">Agregar Producto</h4>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddProduct(false)}
+                        className="p-0.5 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
+                        title="Cerrar"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    {inventoryLoading && (
+                      <div className="flex items-center gap-2 text-xs text-xinuco-muted py-2">
+                        <Loader2 size={14} className="animate-spin" />
+                        Cargando inventario...
+                      </div>
+                    )}
+
+                    {inventoryError && !inventoryLoading && (
+                      <p className="text-xs text-red-400">{inventoryError}</p>
+                    )}
+
+                    {inventoryLoaded && inventory && (
+                      <>
+                        {inventory.length > 6 && (
+                          <input
+                            type="text"
+                            placeholder="Buscar producto…"
+                            value={inventoryFilter}
+                            onChange={(e) => setInventoryFilter(e.target.value)}
+                            className="w-full text-sm bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-zinc-700"
+                          />
+                        )}
+                        {inventory.length === 0 ? (
+                          <p className="text-xs text-xinuco-muted">No hay productos activos en el inventario.</p>
+                        ) : visibleInventory.length === 0 ? (
+                          <p className="text-xs text-xinuco-muted">Sin resultados.</p>
+                        ) : (
+                          <ul className="max-h-48 overflow-y-auto grid grid-cols-1 gap-1.5">
+                            {visibleInventory.map((inv) => {
+                              const outOfStock = inv.current_stock <= 0
+                              const noPrice = !inv.unit_price
+                              const disabled = outOfStock || noPrice
+                              return (
+                                <li key={inv.id}>
+                                  <button
+                                    type="button"
+                                    disabled={disabled}
+                                    onClick={() => handleAddInventoryItem(inv)}
+                                    className="w-full flex items-center justify-between gap-3 text-left px-3 py-2 rounded-lg border border-zinc-800 bg-zinc-950 hover:border-[var(--primary-color)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-zinc-800"
+                                  >
+                                    <span className="min-w-0">
+                                      <span className="block text-sm font-semibold text-zinc-100 truncate">{inv.name}</span>
+                                      <span className="block text-xs text-xinuco-muted">
+                                        {noPrice ? 'Sin precio' : formatCurrency(inv.unit_price as number)}
+                                      </span>
+                                    </span>
+                                    <span
+                                      className={`shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
+                                        outOfStock
+                                          ? 'text-red-400 border-red-900/40 bg-red-950/40'
+                                          : 'text-zinc-300 border-zinc-800 bg-zinc-900'
+                                      }`}
+                                    >
+                                      {outOfStock ? 'Agotado' : `Quedan ${inv.current_stock}`}
+                                    </span>
+                                  </button>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        )}
+                      </>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setShowManualForm(true)}
+                      className="text-xs font-semibold text-[var(--primary-color)] hover:underline"
+                    >
+                      Otro producto (manual)
+                    </button>
+                  </>
+                ) : (
+                  <>
                 <h4 className="text-xs font-bold text-xinuco-text">Agregar Producto Adicional</h4>
                 <div className="grid grid-cols-1 gap-2">
                   <input
@@ -227,10 +407,10 @@ export function CheckoutModal({
                 </div>
                 <div className="flex gap-2 justify-end">
                   <button
-                    onClick={() => setShowAddProduct(false)}
+                    onClick={() => setShowManualForm(false)}
                     className="text-xs px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
                   >
-                    Cancelar
+                    Volver
                   </button>
                   <button
                     onClick={handleAddProduct}
@@ -239,6 +419,8 @@ export function CheckoutModal({
                     Agregar Item
                   </button>
                 </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -255,6 +437,28 @@ export function CheckoutModal({
                     </p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
+                    {item.itemType === 'product' && (
+                      <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950">
+                        <button
+                          type="button"
+                          onClick={() => handleChangeQuantity(idx, -1)}
+                          disabled={item.quantity <= 1}
+                          className="p-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Quitar una unidad"
+                        >
+                          <Minus size={12} />
+                        </button>
+                        <span className="min-w-[1.25rem] text-center text-xs font-semibold text-zinc-100">{item.quantity}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleChangeQuantity(idx, 1)}
+                          className="p-1 text-zinc-400 hover:text-zinc-100"
+                          title="Agregar una unidad"
+                        >
+                          <Plus size={12} />
+                        </button>
+                      </div>
+                    )}
                     <span className="text-sm font-bold text-xinuco-text">
                       {formatCurrency(item.unitPrice * item.quantity)}
                     </span>
@@ -420,6 +624,59 @@ export function CheckoutModal({
                   />
                 </div>
               </div>
+
+              <div className="space-y-2">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-xinuco-muted mb-1.5">Rápido</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setReceivedAmount(totalAmount)}
+                      className="col-span-2 text-xs font-bold py-2 rounded-lg bg-[var(--primary-color)] text-black hover:opacity-90 transition-opacity"
+                    >
+                      Exacto · {formatCurrency(totalAmount)}
+                    </button>
+                    {suggestedCash.map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setReceivedAmount(amt)}
+                        className={chipClass}
+                      >
+                        {formatCurrency(amt)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-xinuco-muted mb-1.5">Billetes</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {billChips.map((bill) => (
+                      <button
+                        key={bill}
+                        type="button"
+                        onClick={() => setReceivedAmount((Number(receivedAmount) || 0) + bill)}
+                        className={chipClass}
+                      >
+                        +{new Intl.NumberFormat('es-CO').format(bill)}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setReceivedAmount('')}
+                      className={chipClass}
+                    >
+                      Borrar
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {finalReceived > 0 && finalReceived < totalAmount && (
+                <p className="text-xs text-xinuco-muted">
+                  Faltan {formatCurrency(totalAmount - finalReceived)}
+                </p>
+              )}
 
               {finalReceived > 0 && finalReceived >= totalAmount && (
                 <div className="flex items-center justify-between bg-[var(--primary-color)]/[0.05] border border-[var(--primary-color)]/20 p-2.5 rounded-lg text-sm">

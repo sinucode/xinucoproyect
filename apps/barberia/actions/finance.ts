@@ -206,6 +206,8 @@ export interface CheckoutItemInput {
   unitPrice: number
   itemType: 'service' | 'product'
   staffId?: string | null
+  /** Ítem de inventario vinculado (solo UI/servidor; NO se envía al RPC). */
+  inventoryItemId?: string | null
 }
 
 export interface CheckoutAppointmentParams {
@@ -250,6 +252,45 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
   }
   if (items.length === 0) {
     return { error: 'validation_error', message: 'Debe haber al menos un ítem para cobrar.' }
+  }
+
+  // ── Inventario: agregar cantidades por ítem y verificar stock ANTES de cobrar ──
+  const inventoryQty = new Map<string, number>()
+  for (const item of items) {
+    if (!item.inventoryItemId) continue
+    if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+      return { error: 'validation_error', message: 'La cantidad de cada producto debe ser un entero mayor a cero.' }
+    }
+    inventoryQty.set(
+      item.inventoryItemId,
+      (inventoryQty.get(item.inventoryItemId) ?? 0) + item.quantity
+    )
+  }
+
+  if (inventoryQty.size > 0) {
+    const { data: stockRows, error: stockError } = await supabase
+      .from('inventory_items')
+      .select('id, name, current_stock, business_id, is_active')
+      .in('id', Array.from(inventoryQty.keys()))
+
+    if (stockError) {
+      console.error('[checkout] inventory stock check failed', stockError)
+      return { error: 'db_error', message: 'No se pudo verificar el inventario. Intenta de nuevo.' }
+    }
+
+    const stockById = new Map((stockRows ?? []).map((row) => [row.id as string, row]))
+    for (const [itemId, qty] of inventoryQty) {
+      const row = stockById.get(itemId)
+      if (!row || row.business_id !== businessId || row.is_active === false) {
+        return { error: 'validation_error', message: 'Un producto del ticket no existe o no está disponible en el inventario.' }
+      }
+      if ((row.current_stock ?? 0) < qty) {
+        return {
+          error: 'validation_error',
+          message: `Stock insuficiente de ${row.name} (quedan ${row.current_stock ?? 0}).`,
+        }
+      }
+    }
   }
 
   // Mapear camelCase → snake_case para el JSONB del RPC
@@ -314,6 +355,36 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
       // No propagar — el cobro ya fue exitoso
       console.warn('[loyalty] earnPoints failed silently:', loyaltyErr)
     }
+  }
+
+  // ── Descuento de inventario ───────────────────────────────────────────────
+  // Best-effort: un fallo en un movimiento NO revierte el cobro ya realizado.
+  if (inventoryQty.size > 0) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      for (const [itemId, qty] of inventoryQty) {
+        try {
+          const { data: mvData, error: mvError } = await supabase.rpc('record_inventory_movement', {
+            p_business_id:  businessId,
+            p_item_id:      itemId,
+            p_quantity:     -qty,
+            p_type:         'sale',
+            p_notes:        'Venta en cobro de cita',
+            p_reference_id: result.sale_id ?? appointmentId,
+            p_user_id:      user?.id ?? null,
+          })
+          const mvResult = mvData as { error?: string } | null
+          if (mvError || mvResult?.error) {
+            console.error('[checkout] inventory movement failed', { itemId, qty, error: mvError ?? mvResult?.error })
+          }
+        } catch (mvErr) {
+          console.error('[checkout] inventory movement failed', { itemId, qty, error: mvErr })
+        }
+      }
+    } catch (userErr) {
+      console.error('[checkout] inventory movement failed', userErr)
+    }
+    revalidatePath('/[slug]/dashboard/inventory', 'page')
   }
 
   revalidatePath('/[slug]/dashboard', 'page')
