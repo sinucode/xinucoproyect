@@ -1,18 +1,19 @@
 'use client'
 
-import { useState, createContext } from 'react'
+import { useState, useTransition, createContext } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   CalendarDays, Scissors, BarChart2, Settings, ChevronRight,
   Users, Store, Percent, Wallet, Receipt, Gift, LayoutGrid, Shield, UserPlus,
-  BookUser, Package, BookOpen, ShoppingBag, Archive, Lock,
+  BookUser, Package, BookOpen, ShoppingBag, Archive, Lock, LogOut, Loader2,
   type LucideIcon,
 } from 'lucide-react'
 import type { Business, BusinessFeatures } from '@xinuco/types'
 import { useDateTime } from '@/lib/hooks/useDateTime'
 import { useFeatures } from '@/lib/features/context'
 import { useIsAdmin } from '@/lib/features/role-context'
+import { logout } from '@/actions/auth'
 
 export const SidebarContext = createContext<{ isCollapsed: boolean; setIsCollapsed: (val: boolean) => void }>({
   isCollapsed: false,
@@ -70,6 +71,7 @@ export function DashboardSidebar({
   const dateTime = useDateTime()
   const features = useFeatures()
   const isAdmin  = useIsAdmin()
+  const [isPending, startTransition] = useTransition()
   const links    = buildLinks(slug, features).filter(
     (link) => !link.adminOnly || isAdmin
   )
@@ -182,6 +184,29 @@ export function DashboardSidebar({
             )
           })}
         </nav>
+
+        {/* Footer: cerrar sesión */}
+        <div className="border-t px-3 py-4" style={{ borderColor: 'var(--border-color)' }}>
+          <button
+            type="button"
+            onClick={() => startTransition(async () => { await logout() })}
+            disabled={isPending}
+            aria-label="Cerrar sesión"
+            title={isCollapsed ? 'Cerrar sesión' : undefined}
+            className={`flex items-center gap-3 rounded-xl w-full transition-all duration-200
+              ${isCollapsed ? 'justify-center py-3' : 'px-3 py-2.5'}
+              text-red-500 hover:bg-red-500/10`}
+          >
+            {isPending
+              ? <Loader2 size={20} className="animate-spin" />
+              : <LogOut size={20} strokeWidth={1.75} />}
+            {!isCollapsed && (
+              <span className="flex-1 text-left font-medium text-sm whitespace-nowrap">
+                {isPending ? 'Saliendo...' : 'Cerrar sesión'}
+              </span>
+            )}
+          </button>
+        </div>
       </aside>
 
       {/* Main Content Wrapper */}

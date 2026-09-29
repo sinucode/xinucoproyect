@@ -4,6 +4,7 @@ import { getActiveShiftDetails } from '@/actions/finance'
 import { CashShiftManager } from '@/components/finance/CashShiftManager'
 import { RetailSaleButton } from '@/components/finance/RetailSaleButton'
 import { InteractiveAgenda } from './InteractiveAgenda'
+import { roleLabel } from '@/lib/roles'
 
 interface DashboardContentProps {
   slug: string
@@ -84,7 +85,7 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
       {/* Saludo */}
       <section aria-label="Saludo">
         <p className="text-xs text-xinuco-muted uppercase tracking-widest mb-1">
-          {isAdmin ? 'Administrador' : 'Barbero'}
+          {roleLabel(profile?.role)}
         </p>
         <h1 className="text-2xl font-bold text-xinuco-text">
           {greeting}, {firstName} 👋

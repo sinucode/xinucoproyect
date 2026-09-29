@@ -46,12 +46,11 @@ export default async function DashboardLayout({
         <DashboardSidebar slug={slug} business={business}>
           <div className="flex flex-col min-h-screen">
             {/* Header en desktop y mobile */}
-            {business && (
-              <Header
-                business={business}
-                userName={profile?.full_name ?? undefined}
-              />
-            )}
+            <Header
+              business={business}
+              userName={profile?.full_name ?? undefined}
+              role={profile?.role ?? undefined}
+            />
 
             {/* Banner de trial activo — visible solo para admins */}
             <TrialBanner slug={slug} />

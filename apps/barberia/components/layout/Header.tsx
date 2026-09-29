@@ -10,8 +10,10 @@ import { SidebarContext } from '@/components/layout/DashboardSidebar'
 import { useDateTime } from '@/lib/hooks/useDateTime'
 
 interface HeaderProps {
-  business:  Pick<Business, 'name' | 'branding'>
+  business?: Pick<Business, 'name' | 'branding'> | null
   userName?: string
+  /** Rol del usuario (se muestra en el dropdown) */
+  role?:     string
   /** Si true, muestra skeleton del avatar mientras el perfil carga */
   isLoading?: boolean
 }
@@ -25,8 +27,7 @@ interface HeaderProps {
  *
  * Sticky top-0, backdrop-blur, bg-xinuco-bg/80
  */
-export function Header({ business, userName, isLoading = false }: HeaderProps) {
-  const { branding } = business
+export function Header({ business, userName, role, isLoading = false }: HeaderProps) {
   const { isCollapsed } = useContext(SidebarContext)
   const dateTime = useDateTime()
 
@@ -50,7 +51,7 @@ export function Header({ business, userName, isLoading = false }: HeaderProps) {
           {isCollapsed ? (
             <div className="flex items-center gap-2 animate-fade-in whitespace-nowrap overflow-hidden">
               <span className="font-serif font-bold text-sm text-xinuco-text tracking-wide truncate">
-                {business.name}
+                {business?.name ?? 'XINUCO'}
               </span>
               <span className="text-xinuco-muted text-xs mx-1 opacity-50">•</span>
               {dateTime ? (
@@ -72,7 +73,7 @@ export function Header({ business, userName, isLoading = false }: HeaderProps) {
         {isLoading ? (
           <AvatarSkeleton />
         ) : (
-          <UserDropdown initials={initials} userName={userName} />
+          <UserDropdown initials={initials} userName={userName} role={role} />
         )}
       </div>
     </header>

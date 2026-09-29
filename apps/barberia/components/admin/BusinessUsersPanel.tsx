@@ -10,22 +10,17 @@ import {
   setBusinessUserActive, setBusinessUserPassword,
   type BusinessUser,
 } from '@/actions/business-users'
+import { roleLabel } from '@/lib/roles'
 
 // ────────────────────────────────────────────────────────────
 // Config de roles
 // ────────────────────────────────────────────────────────────
 type AssignableRole = 'admin' | 'barber' | 'manicurist'
 
-const ROLE_LABELS: Record<string, string> = {
-  admin:      'Administrador',
-  barber:     'Barbero',
-  manicurist: 'Manicurista',
-}
-
 function RoleBadge({ role }: { role: string }) {
   return (
     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border border-xinuco-border bg-xinuco-surface text-xinuco-text">
-      {ROLE_LABELS[role] ?? role}
+      {roleLabel(role)}
     </span>
   )
 }

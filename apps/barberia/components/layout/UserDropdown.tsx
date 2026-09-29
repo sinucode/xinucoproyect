@@ -3,13 +3,15 @@
 import { useState, useTransition } from 'react'
 import { LogOut, Loader2 } from 'lucide-react'
 import { logout } from '@/actions/auth'
+import { roleLabel } from '@/lib/roles'
 
 interface UserDropdownProps {
   initials: string
   userName?: string
+  role?: string
 }
 
-export function UserDropdown({ initials, userName }: UserDropdownProps) {
+export function UserDropdown({ initials, userName, role }: UserDropdownProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
 
@@ -47,6 +49,9 @@ export function UserDropdown({ initials, userName }: UserDropdownProps) {
           >
             <div className="px-4 py-3 border-b border-xinuco-border" style={{ borderColor: 'var(--surface-color, #333)' }}>
               <p className="text-sm font-semibold text-xinuco-text truncate">{userName || 'Usuario'}</p>
+              {role && (
+                <p className="text-xs text-xinuco-muted truncate">{roleLabel(role)}</p>
+              )}
             </div>
             
             <div className="p-1.5">
