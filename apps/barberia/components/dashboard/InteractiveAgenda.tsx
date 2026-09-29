@@ -12,6 +12,8 @@ interface InteractiveAgendaProps {
   activeShiftId: string | null
   businessId: string
   slug: string
+  /** true si hay filtros activos (fecha/staff/estado) → el estado vacío lo refleja */
+  hasFilters?: boolean
 }
 
 interface StatusConfig {
@@ -80,6 +82,7 @@ export function InteractiveAgenda({
   activeShiftId,
   businessId,
   slug,
+  hasFilters = false,
 }: InteractiveAgendaProps) {
   const [appointments, setAppointments] = useState(initialAppointments)
   const [isPending, startTransition] = useTransition()
@@ -184,8 +187,12 @@ export function InteractiveAgenda({
             <CalendarX size={24} style={{ color: 'var(--primary-color)' }} />
           </div>
           <div>
-            <p className="text-sm font-semibold text-xinuco-text">No hay citas próximas</p>
-            <p className="text-xs text-xinuco-muted mt-1">Cuando alguien reserve, aparecerá aquí.</p>
+            <p className="text-sm font-semibold text-xinuco-text">
+              {hasFilters ? 'No hay citas con estos filtros' : 'No hay citas próximas'}
+            </p>
+            <p className="text-xs text-xinuco-muted mt-1">
+              {hasFilters ? 'Prueba con otra fecha, staff o estado.' : 'Cuando alguien reserve, aparecerá aquí.'}
+            </p>
           </div>
         </div>
       ) : (

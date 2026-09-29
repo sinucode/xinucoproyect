@@ -224,6 +224,34 @@ export interface StaffSchedule {
   end_time:    string   // TIME, ej: '18:00'
 }
 
+// ---------- Tabla: staff_breaks (pausas recurrentes por día de la semana) ----------
+export interface StaffBreak {
+  id:          string
+  business_id: string   // → businesses.id
+  staff_id:    string   // → staff.id
+  day_of_week: number   // 0 = Domingo … 6 = Sábado
+  start_time:  string   // TIME, ej: '12:00:00'
+  end_time:    string   // TIME, ej: '13:00:00'
+  label:       string   // ≤ 60 chars, default 'Almuerzo'
+  created_at:  string
+}
+
+// ---------- Tabla: staff_time_off (bloqueos puntuales) ----------
+export type StaffTimeOffKind = 'permission' | 'vacation' | 'sick' | 'other'
+
+export interface StaffTimeOff {
+  id:          string
+  business_id: string   // → businesses.id
+  staff_id:    string   // → staff.id
+  /** Hora LOCAL del negocio guardada como UTC (ver apps/barberia/lib/agenda-time.ts) */
+  starts_at:   string
+  ends_at:     string
+  kind:        StaffTimeOffKind
+  reason:      string | null   // ≤ 200 chars
+  created_by:  string | null   // → auth.users.id
+  created_at:  string
+}
+
 // ---------- Helpers tipados ----------
 /**
  * Tipo Row genérico para cualquier tabla — facilita la generación de inserts
@@ -278,6 +306,16 @@ export interface Database {
         Row:    StaffSchedule
         Insert: Omit<StaffSchedule, 'id'>
         Update: Partial<Omit<StaffSchedule, 'id'>>
+      }
+      staff_breaks: {
+        Row:    StaffBreak
+        Insert: Omit<StaffBreak, 'id' | 'created_at'>
+        Update: Partial<Omit<StaffBreak, 'id' | 'created_at'>>
+      }
+      staff_time_off: {
+        Row:    StaffTimeOff
+        Insert: Omit<StaffTimeOff, 'id' | 'created_at'>
+        Update: Partial<Omit<StaffTimeOff, 'id' | 'created_at'>>
       }
       cash_register_shifts: {
         Row:    CashRegisterShift
