@@ -679,7 +679,8 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
                           <p className="text-sm font-semibold text-xinuco-text truncate">{item.name}</p>
                           <p className="text-xs text-xinuco-muted flex items-center gap-2">
                             <span className="tabular-nums">{formatCOP(item.unit_price)}</span>
-                            {item.available <= 2 && (
+                            {/* available viene topado al máximo por cita: "pocas" solo si hay menos que ese tope */}
+                            {item.available < maxUnits && (
                               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
                                 Quedan pocas
                               </span>
