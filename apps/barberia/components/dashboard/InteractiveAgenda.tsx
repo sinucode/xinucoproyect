@@ -237,11 +237,11 @@ export function InteractiveAgenda({
 
                 {/* Card de la cita */}
                 <div
-                  className="card flex-1 flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-zinc-900 bg-zinc-950/40 hover:bg-zinc-950/70 transition-colors"
+                  className="card flex-1 min-w-0 flex flex-col xl:flex-row xl:items-center justify-between gap-4 p-4 border border-zinc-900 bg-zinc-950/40 hover:bg-zinc-950/70 transition-colors"
                   style={isActive ? { borderColor: 'color-mix(in srgb, var(--primary-color) 25%, transparent)' } : {}}
                 >
                   {/* Detalles principales */}
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div
                       className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
                       style={{
@@ -271,7 +271,7 @@ export function InteractiveAgenda({
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-xinuco-muted mt-0.5">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-xinuco-muted mt-0.5">
                         <span className="truncate">{serviceName}</span>
                         <span>•</span>
                         <span className="shrink-0">{duration} min</span>
@@ -290,7 +290,7 @@ export function InteractiveAgenda({
                   </div>
 
                   {/* Acciones del Administrador en base al estado actual */}
-                  <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t border-zinc-900/50 sm:border-0">
+                  <div className="flex flex-wrap items-center justify-between xl:justify-end gap-2 shrink-0 pt-2 xl:pt-0 border-t border-zinc-900/50 xl:border-0">
                     {/* Badge de estado estático */}
                     <span
                       className={`badge shrink-0 text-[10px] font-bold uppercase tracking-wider ${cfg.textClass}`}

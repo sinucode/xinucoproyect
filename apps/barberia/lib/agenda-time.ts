@@ -56,3 +56,10 @@ export function dayLabel(dateKey: string, todayKey: string): string {
   const clean = label.replace(/,/g, '').replace(/\bde\b\s*/g, '').replace(/\./g, '').replace(/\s+/g, ' ').trim()
   return clean.charAt(0).toUpperCase() + clean.slice(1)
 }
+
+/** Hora actual (0–23) en la zona del negocio — p. ej. para el saludo del dashboard. */
+export function businessHour(): number {
+  return Number(
+    new Intl.DateTimeFormat('en-US', { timeZone: BUSINESS_TZ, hour: 'numeric', hourCycle: 'h23' }).format(new Date()),
+  )
+}

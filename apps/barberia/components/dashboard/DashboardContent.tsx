@@ -4,7 +4,7 @@ import { getActiveShiftDetails } from '@/actions/finance'
 import { CashShiftManager } from '@/components/finance/CashShiftManager'
 import { RetailSaleButton } from '@/components/finance/RetailSaleButton'
 import { InteractiveAgenda } from './InteractiveAgenda'
-import { businessTodayISODate, addDaysToDateKey } from '@/lib/agenda-time'
+import { businessTodayISODate, addDaysToDateKey, businessHour } from '@/lib/agenda-time'
 import { roleLabel } from '@/lib/roles'
 
 interface DashboardContentProps {
@@ -78,7 +78,7 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
   const hasInProgressAppointments = appointments.some((a) => a.status === 'in_progress')
 
   // 6. Saludo por hora del día
-  const hour = new Date().getHours()
+  const hour = businessHour()
   const greeting =
     hour < 12 ? 'Buenos días' : hour < 19 ? 'Buenas tardes' : 'Buenas noches'
   const firstName = profile?.full_name?.trim().split(/\s+/)[0] ?? 'Equipo'
