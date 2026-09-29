@@ -12,7 +12,8 @@ import {
 import type { Business, BusinessFeatures } from '@xinuco/types'
 import { useDateTime } from '@/lib/hooks/useDateTime'
 import { useFeatures } from '@/lib/features/context'
-import { useIsAdmin } from '@/lib/features/role-context'
+import { useIsAdmin, useRole } from '@/lib/features/role-context'
+import { roleLabel } from '@/lib/roles'
 import { logout } from '@/actions/auth'
 
 export const SidebarContext = createContext<{ isCollapsed: boolean; setIsCollapsed: (val: boolean) => void }>({
@@ -71,6 +72,7 @@ export function DashboardSidebar({
   const dateTime = useDateTime()
   const features = useFeatures()
   const isAdmin  = useIsAdmin()
+  const role     = useRole()
   const [isPending, startTransition] = useTransition()
   const links    = buildLinks(slug, features).filter(
     (link) => !link.adminOnly || isAdmin
@@ -128,6 +130,18 @@ export function DashboardSidebar({
               <div className="flex flex-col items-center">
                 <span className="font-serif font-bold text-base text-xinuco-text tracking-wide whitespace-nowrap">
                   {business?.name || 'XINUCO'}
+                </span>
+
+                {/* Rol del usuario logueado */}
+                <span
+                  className="mt-2 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wider border"
+                  style={{
+                    color:           'var(--primary-color)',
+                    backgroundColor: 'color-mix(in srgb, var(--primary-color) 12%, transparent)',
+                    borderColor:     'color-mix(in srgb, var(--primary-color) 25%, transparent)',
+                  }}
+                >
+                  {roleLabel(role)}
                 </span>
 
                 {/* Reloj en Tiempo Real Independiente */}

@@ -50,7 +50,7 @@ middleware.ts           ← RESERVED_SLUGS, /[slug]→/book, bloqueo cross-tenan
 
 ## Base de datos
 **Supabase BARBERÍA** — datos + auth de tenants. Multi-tenant por `business_id`.  
-RLS con `auth.jwt() ->> 'business_id'`; slug inyectado por RPC `secure_set_user_context`.  
+RLS con `auth.jwt() -> 'app_metadata' ->> 'business_id'` (nunca el nivel superior del JWT: siempre es NULL); slug inyectado por RPC `secure_set_user_context`.  
 El super_admin valida su identidad contra CONTROL (misma cookie/dominio → SSO).  
 En Fase 1 comparte la misma base que `apps/web` (separación en Fase 4).
 
