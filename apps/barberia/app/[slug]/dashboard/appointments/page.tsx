@@ -243,7 +243,7 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
           </div>
         </section>
 
-        <Suspense fallback={null}>
+        <Suspense fallback={<div className="mb-4 h-8" aria-hidden="true" />}>
           <AgendaFilters todayKey={todayKey} staffOptions={staffOptions} showStaff={!isBarber} />
         </Suspense>
 

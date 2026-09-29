@@ -45,7 +45,7 @@ function shortDate(dateKey: string): string {
 
 function selectClass(active: boolean): string {
   return [
-    'h-8 w-auto max-w-[10.5rem] truncate rounded-lg border px-2 text-xs bg-transparent cursor-pointer transition-colors',
+    'h-8 w-auto max-w-[8.5rem] truncate rounded-lg border px-2 text-xs bg-transparent cursor-pointer transition-colors',
     FOCUS_RING,
     active
       ? 'border-[var(--primary-color)] text-[var(--primary-color)]'
