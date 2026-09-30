@@ -21,7 +21,10 @@ import {
   settlementSinceLastPayment,
   type LedgerEntryLike,
   type SettlementSummary,
+  type TeamReceiptResult,
 } from '@/lib/team-payments'
+import { maskEmail } from '@/lib/team-utils'
+import { createServiceClient, resolveStaffEmail, sendTeamPaymentReceipt } from '@/lib/email/notifications'
 
 // ── Tipos públicos ────────────────────────────────────────────────────────────
 
@@ -43,6 +46,13 @@ export interface TeamPaymentsMember {
   total_deductions: number
   current_balance:  number
   last_payment_at:  string | null
+  /** WhatsApp / celular del profesional (para abrir su chat con la liquidación). */
+  phone:            string | null
+  /**
+   * Correo enmascarado (c***s@gmail.com) al que llegan sus recibos: el suyo o el del usuario
+   * vinculado. null = sin correo. Nunca se envía el correo completo al cliente.
+   */
+  receipt_email_masked: string | null
 }
 
 export interface TeamPaymentsOverview {
@@ -98,6 +108,8 @@ export interface TeamMovementInput {
   period_to?:   string | null
   /** Confirma un pago mayor al saldo: la diferencia queda como anticipo. */
   allowOverpay?: boolean
+  /** Anticipo/pago: enviar el recibo por correo al profesional (por defecto true). */
+  sendReceipt?: boolean
 }
 
 export interface TeamMovementResult {
@@ -106,6 +118,8 @@ export interface TeamMovementResult {
   entry?:   StaffLedgerEntry
   /** El pago supera el saldo: la UI debe pedir confirmación y reenviar con allowOverpay. */
   overpay?: { balance: number }
+  /** Anticipo/pago con sendReceipt: resultado del envío del recibo (nunca falla el movimiento). */
+  receipt?: TeamReceiptResult
 }
 
 // ── Constantes ────────────────────────────────────────────────────────────────
@@ -225,6 +239,31 @@ function suggestPeriod(
   return { from, to: today }
 }
 
+/** Correo de recibos por profesional (staff.email o el del usuario vinculado). Best-effort. */
+async function resolveReceiptEmails(rows: Record<string, unknown>[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const pending: { id: string; user_id: string }[] = []
+  for (const row of rows) {
+    const id = String(row.id)
+    const own = typeof row.email === 'string' ? row.email.trim() : ''
+    if (own) out.set(id, own)
+    else if (typeof row.user_id === 'string' && row.user_id) pending.push({ id, user_id: row.user_id })
+  }
+  if (pending.length === 0) return out
+
+  try {
+    const service = createServiceClient()
+    if (!service) return out
+    const resolved = await Promise.all(
+      pending.map(async p => [p.id, await resolveStaffEmail(service, { user_id: p.user_id })] as const),
+    )
+    for (const [id, email] of resolved) if (email) out.set(id, email)
+  } catch {
+    // Sin correo del usuario vinculado: la UI muestra "Sin correo"
+  }
+  return out
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // getTeamPaymentsOverview — página "Pagos al equipo" (admin)
 // ════════════════════════════════════════════════════════════════════════════
@@ -236,7 +275,7 @@ export async function getTeamPaymentsOverview(): Promise<TeamPaymentsOverview | 
 
   const [staffRes, balancesRes, businessRes, shiftRes, paymentsRes] = await Promise.all([
     supabase.from('staff')
-      .select(STAFF_COLS)
+      .select(`${STAFF_COLS}, email, phone`)
       .eq('business_id', businessId)
       .order('full_name', { ascending: true }),
     supabase.from('staff_ledger_balances')
@@ -275,8 +314,14 @@ export async function getTeamPaymentsOverview(): Promise<TeamPaymentsOverview | 
     if (!lastPaymentById.has(p.staff_id)) lastPaymentById.set(p.staff_id, p.created_at)
   }
 
+  const staffRows = (staffRes.data ?? []) as Record<string, unknown>[]
+
+  // Correo de los recibos: el del profesional o, si no tiene, el del usuario vinculado (Auth).
+  // Solo se resuelve (con service role) para quienes aparecen en la lista; al cliente va enmascarado.
+  const emailById = await resolveReceiptEmails(staffRows)
+
   const members: TeamPaymentsMember[] = []
-  for (const row of (staffRes.data ?? []) as Record<string, unknown>[]) {
+  for (const row of staffRows) {
     const staff = toStaffRef(row)
     const b = balanceById.get(staff.id)
     const current = b?.current_balance ?? 0
@@ -291,6 +336,8 @@ export async function getTeamPaymentsOverview(): Promise<TeamPaymentsOverview | 
       total_deductions: b?.total_deductions ?? 0,
       current_balance:  current,
       last_payment_at:  lastPaymentById.get(staff.id) ?? null,
+      phone:            typeof row.phone === 'string' && row.phone.trim() ? row.phone.trim() : null,
+      receipt_email_masked: emailById.get(staff.id) ? maskEmail(emailById.get(staff.id)!) : null,
     })
   }
 
@@ -542,5 +589,18 @@ export async function recordTeamMovement(input: TeamMovementInput): Promise<Team
   revalidatePath('/[slug]/dashboard', 'layout')
   revalidatePath('/[slug]/dashboard/commissions', 'page')
 
-  return { success: true, entry: created as StaffLedgerEntry }
+  const entry = created as StaffLedgerEntry
+
+  // Recibo por correo al profesional (anticipos y pagos): un fallo nunca falla el movimiento
+  if ((type === 'advance' || type === 'payment') && input.sendReceipt !== false) {
+    let receipt: TeamReceiptResult
+    try {
+      receipt = await sendTeamPaymentReceipt({ entryId: entry.id, businessId })
+    } catch {
+      receipt = { sent: false, reason: 'error' }
+    }
+    return { success: true, entry, receipt }
+  }
+
+  return { success: true, entry }
 }

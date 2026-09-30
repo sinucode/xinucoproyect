@@ -11,7 +11,7 @@ import { revalidatePath } from 'next/cache'
 import type { Staff, StaffSchedule, ServiceAudienceOrAll, Json } from '@xinuco/types'
 import { logAction } from './audit'
 import { businessNowHHMM, businessTodayISODate } from '@/lib/agenda-time'
-import { validateWeeklySchedule } from '@/lib/team-utils'
+import { normalizeStaffEmail, normalizeStaffPhone, validateWeeklySchedule } from '@/lib/team-utils'
 import type { StaffStatusNow } from '@/lib/walk-in-wait'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -30,6 +30,10 @@ export interface TeamMember {
   created_at:     string
   /** Usuario (auth) con el que inicia sesión; null = sin usuario. Le da acceso a "Mi cuenta". */
   user_id:        string | null
+  /** Correo opcional: a dónde llegan los recibos de anticipos y pagos. */
+  email:          string | null
+  /** WhatsApp / celular opcional (dígitos, con "+" si trae indicativo). */
+  phone:          string | null
   schedules:      { day_of_week: number; start_time: string; end_time: string }[]
   /** true = sin filas en staff_services → hace TODOS los servicios. */
   does_all_services: boolean
@@ -130,6 +134,23 @@ function validateProfile(data: { full_name: unknown; specialty_role: unknown }):
     return { error: 'El cargo debe tener entre 2 y 40 caracteres.' }
   }
   return { full_name, specialty_role }
+}
+
+/** Correo y celular opcionales (vacío → null) con las mismas reglas que los CHECK de la base. */
+function validateContact(data: { email?: unknown; phone?: unknown }, onlyProvided: boolean):
+  { error: string } | { email?: string | null; phone?: string | null } {
+  const out: { email?: string | null; phone?: string | null } = {}
+  if (!onlyProvided || data.email !== undefined) {
+    const email = normalizeStaffEmail(data.email)
+    if ('error' in email) return { error: email.error }
+    out.email = email.value
+  }
+  if (!onlyProvided || data.phone !== undefined) {
+    const phone = normalizeStaffPhone(data.phone)
+    if ('error' in phone) return { error: phone.error }
+    out.phone = phone.value
+  }
+  return out
 }
 
 /**
@@ -254,7 +275,7 @@ export async function getTeamOverview(): Promise<TeamOverview | { error: string 
 
   const [staffRes, schedRes, ssRes, servicesRes, statusRes, completedRes, upcomingRes, usersRes] = await Promise.all([
     supabase.from('staff')
-      .select('id, full_name, specialty_role, is_active, created_at, user_id')
+      .select('id, full_name, specialty_role, is_active, created_at, user_id, email, phone')
       .eq('business_id', businessId)
       .order('is_active', { ascending: false })
       .order('full_name', { ascending: true }),
@@ -303,7 +324,7 @@ export async function getTeamOverview(): Promise<TeamOverview | { error: string 
   if (firstError) return { error: firstError }
 
   const staffRows = (staffRes.data ?? []) as
-    { id: string; full_name: string; specialty_role: string; is_active: boolean; created_at: string; user_id: string | null }[]
+    { id: string; full_name: string; specialty_role: string; is_active: boolean; created_at: string; user_id: string | null; email: string | null; phone: string | null }[]
   const schedRows = (schedRes.data ?? []) as
     { staff_id: string; day_of_week: number; start_time: string; end_time: string }[]
   const ssRows = (ssRes.data ?? []) as { staff_id: string; service_id: string }[]
@@ -356,6 +377,8 @@ export async function getTeamOverview(): Promise<TeamOverview | { error: string 
       is_active:        s.is_active,
       created_at:       s.created_at,
       user_id:          s.user_id ?? null,
+      email:            s.email ?? null,
+      phone:            s.phone ?? null,
       schedules:        schedulesByStaff.get(s.id) ?? [],
       does_all_services: explicit.length === 0,
       service_ids:      explicit,
@@ -390,6 +413,10 @@ export async function createStaffMember(
   data: {
     full_name: string
     specialty_role: string
+    /** Correo opcional (recibos de anticipos y pagos). Vacío = sin correo. */
+    email?: string | null
+    /** WhatsApp / celular opcional. Vacío = sin celular. */
+    phone?: string | null
     service_ids?: string[] | 'all'
     /** Horario semanal inicial (mismo formato que saveStaffSchedulesBatch). Omitido = sin horario. */
     schedules?: WeeklyScheduleInput[]
@@ -402,6 +429,9 @@ export async function createStaffMember(
 
   const parsed = validateProfile(data)
   if ('error' in parsed) return { error: parsed.error }
+
+  const contact = validateContact(data, false)
+  if ('error' in contact) return { error: contact.error }
 
   // Validar el horario ANTES de crear nada: si es inválido no se crea el profesional.
   const schedules = data.schedules ?? []
@@ -422,6 +452,9 @@ export async function createStaffMember(
       full_name:      parsed.full_name,
       specialty_role: parsed.specialty_role,
       is_active:      true,
+      // Solo si hay dato: así el alta no depende de las columnas cuando no se usan
+      ...(contact.email ? { email: contact.email } : {}),
+      ...(contact.phone ? { phone: contact.phone } : {}),
     })
     .select()
     .single()
@@ -481,6 +514,10 @@ export async function updateStaffMember(
     full_name: string
     specialty_role: string
     service_ids: string[] | 'all'
+    /** Correo: undefined = no cambiar; vacío/null = quitarlo. */
+    email?: string | null
+    /** WhatsApp / celular: undefined = no cambiar; vacío/null = quitarlo. */
+    phone?: string | null
     /**
      * Usuario con el que inicia sesión (para "Mi cuenta"). undefined = no cambiar;
      * null = quitar el vínculo; id = vincular (barbero/manicurista del negocio, libre).
@@ -497,6 +534,9 @@ export async function updateStaffMember(
 
   const parsed = validateProfile(data)
   if ('error' in parsed) return { error: parsed.error }
+
+  const contact = validateContact(data, true)
+  if ('error' in contact) return { error: contact.error }
 
   // Vínculo con un usuario: se valida ANTES de escribir nada
   const changesUser = data.user_id !== undefined
@@ -522,10 +562,16 @@ export async function updateStaffMember(
       full_name: parsed.full_name,
       specialty_role: parsed.specialty_role,
       ...(changesUser ? { user_id: data.user_id ?? null } : {}),
+      ...(contact.email !== undefined ? { email: contact.email } : {}),
+      ...(contact.phone !== undefined ? { phone: contact.phone } : {}),
     })
     .eq('id', staffId)
     .eq('business_id', businessId)
-  if (updError) return { error: updError.message }
+  if (updError) {
+    // Carrera: otro admin vinculó a ese usuario justo antes (índice único uq_staff_business_user)
+    if (updError.code === '23505' && changesUser && data.user_id) return { error: USER_ALREADY_LINKED }
+    return { error: updError.message }
+  }
 
   if (targetIds === 'all') {
     const { error } = await supabase

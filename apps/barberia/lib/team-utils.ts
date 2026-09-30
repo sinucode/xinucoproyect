@@ -24,6 +24,49 @@ export function specialtyLabel(raw: string | null | undefined): string {
   return SPECIALTY_ALIASES[value.toLowerCase()] ?? value
 }
 
+// ── Contacto (correo y WhatsApp) ─────────────────────────────────────────────
+
+// Mismas reglas que los CHECK de staff.email / staff.phone (ver migración 20260929260000).
+const STAFF_EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
+const STAFF_PHONE_RE = /^\+?[0-9]{7,15}$/
+
+export const STAFF_EMAIL_ERROR = 'El correo no es válido. Ej: nombre@correo.com'
+export const STAFF_PHONE_ERROR = 'El celular no es válido. Usa entre 7 y 15 dígitos, con "+" y el indicativo si es de otro país.'
+
+/** Vacío → null (sin correo). Devuelve el correo recortado o un mensaje de error. */
+export function normalizeStaffEmail(raw: unknown): { value: string | null } | { error: string } {
+  if (raw === null || raw === undefined) return { value: null }
+  if (typeof raw !== 'string') return { error: STAFF_EMAIL_ERROR }
+  const value = raw.trim()
+  if (!value) return { value: null }
+  if (value.length > 254 || !STAFF_EMAIL_RE.test(value)) return { error: STAFF_EMAIL_ERROR }
+  return { value }
+}
+
+/**
+ * Vacío → null. Quita espacios, guiones, puntos y paréntesis (conserva un "+" inicial) y deja
+ * solo dígitos. Devuelve el celular normalizado o un mensaje de error.
+ */
+export function normalizeStaffPhone(raw: unknown): { value: string | null } | { error: string } {
+  if (raw === null || raw === undefined) return { value: null }
+  if (typeof raw !== 'string') return { error: STAFF_PHONE_ERROR }
+  const trimmed = raw.trim()
+  if (!trimmed) return { value: null }
+  const value = trimmed.replace(/[\s\-.()]/g, '')
+  if (!STAFF_PHONE_RE.test(value)) return { error: STAFF_PHONE_ERROR }
+  return { value }
+}
+
+/** 'carlos@gmail.com' → 'c***s@gmail.com' (nunca se muestra el correo completo). */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf('@')
+  if (at < 1) return '***'
+  const local = email.slice(0, at)
+  const domain = email.slice(at + 1)
+  const masked = local.length <= 2 ? `${local[0]}***` : `${local[0]}***${local[local.length - 1]}`
+  return `${masked}@${domain}`
+}
+
 // ── Estado actual ────────────────────────────────────────────────────────────
 
 export const STAFF_STATUS_LABELS = {

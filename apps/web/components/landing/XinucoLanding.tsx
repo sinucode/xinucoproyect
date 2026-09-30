@@ -1174,7 +1174,7 @@ const FEATURE_ROWS: { label: string; cat: string; esencial: boolean; profesional
   { label: 'CRM — Expediente de clientes',    cat: 'Base',          esencial: true,  profesional: true,  elite: true  },
   { label: 'MP — Caja POS presencial',        cat: 'Pagos',         esencial: true,  profesional: true,  elite: true  },
   { label: 'Comisiones automáticas',          cat: 'Finanzas',      esencial: false, profesional: true,  elite: true  },
-  { label: 'Billetera Staff',                 cat: 'Finanzas',      esencial: false, profesional: true,  elite: true  },
+  { label: 'Pagos al equipo',                 cat: 'Finanzas',      esencial: false, profesional: true,  elite: true  },
   { label: 'Gastos & P&G',                    cat: 'Finanzas',      esencial: false, profesional: true,  elite: true  },
   { label: 'Ventas Retail',                   cat: 'Finanzas',      esencial: false, profesional: true,  elite: true  },
   { label: 'Reportes financieros avanzados',  cat: 'Finanzas',      esencial: false, profesional: true,  elite: true  },

@@ -160,6 +160,34 @@ describe('Staff Server Actions', () => {
       expect(revalidatePath).toHaveBeenCalled()
     })
 
+    describe('contacto (correo y WhatsApp)', () => {
+      it('guarda correo y celular normalizados', async () => {
+        const { ops } = use({ handlers: { 'staff.insert': { data: { id: 'staff1' }, error: null } } })
+        const result = await createStaffMember('biz1', {
+          full_name: 'John Doe', specialty_role: 'Barbero', email: ' john@correo.com ', phone: '+57 300-123 4567',
+        })
+        expect(result.success).toBe(true)
+        expect(find(ops, 'staff', 'insert')[0].payload).toMatchObject({ email: 'john@correo.com', phone: '+573001234567' })
+      })
+
+      it('vacío no se envía (queda null en la base)', async () => {
+        const { ops } = use({ handlers: { 'staff.insert': { data: { id: 'staff1' }, error: null } } })
+        await createStaffMember('biz1', { full_name: 'John Doe', specialty_role: 'Barbero', email: '  ', phone: '' })
+        const payload = find(ops, 'staff', 'insert')[0].payload
+        expect(payload).not.toHaveProperty('email')
+        expect(payload).not.toHaveProperty('phone')
+      })
+
+      it('rechaza un correo o celular inválidos sin crear nada', async () => {
+        const { ops } = use()
+        const badMail = await createStaffMember('biz1', { full_name: 'John Doe', specialty_role: 'Barbero', email: 'no-es-correo' })
+        expect(badMail.error).toContain('correo no es válido')
+        const badPhone = await createStaffMember('biz1', { full_name: 'John Doe', specialty_role: 'Barbero', phone: '123' })
+        expect(badPhone.error).toContain('celular no es válido')
+        expect(find(ops, 'staff', 'insert')).toHaveLength(0)
+      })
+    })
+
     it('inserta staff_services cuando se eligen servicios', async () => {
       const { ops } = use({
         handlers: {
@@ -323,6 +351,33 @@ describe('Staff Server Actions', () => {
         .toBe('El nombre debe tener entre 2 y 80 caracteres.')
     })
 
+    describe('contacto (correo y WhatsApp)', () => {
+      it('sin email/phone no los toca', async () => {
+        const { ops } = use({ handlers: { 'staff.select': { data: STAFF_ROW, error: null } } })
+        await updateStaffMember('staff1', { ...data, service_ids: 'all' })
+        const payload = find(ops, 'staff', 'update')[0].payload
+        expect(payload).not.toHaveProperty('email')
+        expect(payload).not.toHaveProperty('phone')
+      })
+
+      it('actualiza normalizado y vacío lo quita (null)', async () => {
+        const { ops } = use({ handlers: { 'staff.select': { data: STAFF_ROW, error: null } } })
+        await updateStaffMember('staff1', { ...data, service_ids: 'all', email: ' a@b.co ', phone: '300 123 4567' })
+        expect(find(ops, 'staff', 'update')[0].payload).toMatchObject({ email: 'a@b.co', phone: '3001234567' })
+
+        const second = use({ handlers: { 'staff.select': { data: STAFF_ROW, error: null } } })
+        await updateStaffMember('staff1', { ...data, service_ids: 'all', email: '', phone: null })
+        expect(find(second.ops, 'staff', 'update')[0].payload).toMatchObject({ email: null, phone: null })
+      })
+
+      it('rechaza datos inválidos antes de escribir', async () => {
+        const { ops } = use({ handlers: { 'staff.select': { data: STAFF_ROW, error: null } } })
+        expect((await updateStaffMember('staff1', { ...data, service_ids: 'all', email: 'x@y' })).error).toContain('correo no es válido')
+        expect((await updateStaffMember('staff1', { ...data, service_ids: 'all', phone: 'abc' })).error).toContain('celular no es válido')
+        expect(find(ops, 'staff', 'update')).toHaveLength(0)
+      })
+    })
+
     describe('vincular usuario (Mi cuenta)', () => {
       it('sin user_id no toca el vínculo', async () => {
         const { ops } = use({ handlers: { 'staff.select': { data: STAFF_ROW, error: null } } })
@@ -371,6 +426,18 @@ describe('Staff Server Actions', () => {
         const result = await updateStaffMember('staff1', { ...data, service_ids: 'all', user_id: 'u9' })
         expect(result.error).toBe('Ese usuario ya está vinculado a otro profesional.')
         expect(find(ops, 'staff', 'update')).toHaveLength(0)
+      })
+
+      it('si el índice único salta (carrera), responde que ya está vinculado', async () => {
+        use({
+          handlers: {
+            'staff.select': [{ data: STAFF_ROW, error: null }, { data: [], error: null }],
+            'profiles.select': { data: { id: 'u9' }, error: null },
+            'staff.update': { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "uq_staff_business_user"' } },
+          },
+        })
+        const result = await updateStaffMember('staff1', { ...data, service_ids: 'all', user_id: 'u9' })
+        expect(result.error).toBe('Ese usuario ya está vinculado a otro profesional.')
       })
 
       it('user_id null quita el vínculo sin consultar perfiles', async () => {

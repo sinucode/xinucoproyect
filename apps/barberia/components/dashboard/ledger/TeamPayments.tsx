@@ -15,6 +15,8 @@ import {
   Check,
   X,
   Users,
+  Mail,
+  AlertTriangle,
 } from 'lucide-react'
 import { AdminPageHeader } from '@xinuco/ui'
 import { formatCOP } from '@xinuco/utils'
@@ -22,9 +24,10 @@ import type { StaffAccount, TeamPaymentsOverview } from '@/actions/ledger'
 import { specialtyLabel } from '@/lib/team-utils'
 import {
   buildWhatsAppSettlementText,
+  settlementTextLines,
   shortDateLabel,
   waLink,
-  type SettlementTextLine,
+  type TeamReceiptResult,
 } from '@/lib/team-payments'
 import { AccountHistory, BalanceSummary, useAccountUrl, type AccountViewFilters } from './AccountParts'
 import { TeamMovementSheet, type SavedMovement, type SheetKind } from './TeamMovementSheet'
@@ -42,8 +45,21 @@ interface TeamPaymentsProps {
 interface Receipt {
   staffId:   string
   staffName: string
+  kind:      'payment' | 'advance'
   amount:    number
-  text:      string
+  /** Texto de WhatsApp (solo pagos). */
+  text:      string | null
+  /** Celular del profesional para abrir su chat (null = elegir el contacto en WhatsApp). */
+  phone:     string | null
+  /** Recibo por correo: null si no se pidió enviarlo. */
+  email:     TeamReceiptResult | null
+}
+
+function receiptEmailMessage(result: TeamReceiptResult): { ok: boolean; text: string } {
+  if (result.sent) return { ok: true, text: `Recibo enviado a ${result.to ?? 'su correo'}` }
+  if (result.reason === 'no_email') return { ok: false, text: 'Sin correo: no se envió el recibo.' }
+  if (result.reason === 'email_disabled') return { ok: false, text: 'Los correos del negocio están desactivados: no se envió el recibo.' }
+  return { ok: false, text: 'No se pudo enviar el recibo' }
 }
 
 function money(value: number): string {
@@ -83,24 +99,15 @@ export function TeamPayments({ slug, overview, selectedId, account, accountError
   function handleSaved(saved: SavedMovement) {
     setSheet(null)
     if (saved.kind === 'settle' && account && selected) {
-      const s = account.settlement
-      const lines: SettlementTextLine[] = [
-        { label: 'Comisiones servicios', amount: s.services_commission },
-        { label: 'Comisiones productos', amount: s.products_commission },
-        { label: 'Propinas',             amount: s.tips },
-        { label: 'Bonos / a favor',      amount: s.bonus },
-        { label: 'Descuentos',           amount: -s.deductions },
-        { label: 'Anticipos',            amount: -s.advances },
-      ]
-      // Para que las líneas sumen el total pagado cuando no coincide con "Total a pagar"
-      const diff = saved.entry.amount - s.total_to_pay
-      if (diff > 0) lines.push({ label: 'Saldo de períodos anteriores', amount: diff })
-      if (diff < 0) lines.push({ label: 'Pendiente por pagar', amount: diff })
+      const lines = settlementTextLines(account.settlement, saved.entry.amount)
 
       setReceipt({
         staffId:   selected.staff.id,
         staffName: selected.staff.full_name,
+        kind:      'payment',
         amount:    saved.entry.amount,
+        phone:     selected.phone,
+        email:     saved.receipt,
         text: buildWhatsAppSettlementText({
           businessName: overview.businessName,
           staffName:    selected.staff.full_name,
@@ -112,12 +119,22 @@ export function TeamPayments({ slug, overview, selectedId, account, accountError
         }),
       })
       setCopied(false)
+    } else if (saved.kind === 'advance' && selected) {
+      setReceipt({
+        staffId:   selected.staff.id,
+        staffName: selected.staff.full_name,
+        kind:      'advance',
+        amount:    saved.entry.amount,
+        phone:     selected.phone,
+        email:     saved.receipt,
+        text:      null,
+      })
     }
     router.refresh()
   }
 
   async function copyText() {
-    if (!receipt) return
+    if (!receipt?.text) return
     try {
       await navigator.clipboard.writeText(receipt.text)
     } catch {
@@ -269,11 +286,25 @@ export function TeamPayments({ slug, overview, selectedId, account, accountError
                       </span>
                       <div>
                         <p className="text-sm font-bold text-xinuco-text">
-                          Pago registrado: {formatCOP(receipt.amount)}
+                          {receipt.kind === 'payment' ? 'Pago registrado' : 'Anticipo registrado'}: {formatCOP(receipt.amount)}
                         </p>
-                        <p className="text-xs text-xinuco-muted mt-0.5">
-                          Puedes enviarle el detalle a {receipt.staffName.split(' ')[0]} por WhatsApp.
-                        </p>
+                        {receipt.email && (() => {
+                          const msg = receiptEmailMessage(receipt.email)
+                          return (
+                            <p
+                              className="text-xs mt-0.5 flex items-center gap-1.5"
+                              style={{ color: msg.ok ? '#34d399' : '#fbbf24' }}
+                            >
+                              {msg.ok ? <Mail size={12} className="shrink-0" /> : <AlertTriangle size={12} className="shrink-0" />}
+                              {msg.text}
+                            </p>
+                          )
+                        })()}
+                        {receipt.text && (
+                          <p className="text-xs text-xinuco-muted mt-0.5">
+                            Puedes enviarle el detalle a {receipt.staffName.split(' ')[0]} por WhatsApp.
+                          </p>
+                        )}
                       </div>
                     </div>
                     <button
@@ -285,27 +316,31 @@ export function TeamPayments({ slug, overview, selectedId, account, accountError
                       <X size={16} />
                     </button>
                   </div>
-                  <pre
-                    className="text-xs text-xinuco-muted whitespace-pre-wrap break-words rounded-lg px-3 py-2.5 font-sans"
-                    style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}
-                  >
-                    {receipt.text}
-                  </pre>
-                  <div className="flex flex-wrap gap-2">
-                    <a
-                      href={waLink(null, receipt.text)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn-primary !py-2.5 !px-4 !text-xs"
-                    >
-                      <MessageCircle size={14} />
-                      Enviar por WhatsApp
-                    </a>
-                    <button type="button" onClick={copyText} className="btn-ghost !py-2.5 !px-4 !text-xs">
-                      {copied ? <Check size={14} /> : <Copy size={14} />}
-                      {copied ? 'Copiado' : 'Copiar texto'}
-                    </button>
-                  </div>
+                  {receipt.text && (
+                    <>
+                      <pre
+                        className="text-xs text-xinuco-muted whitespace-pre-wrap break-words rounded-lg px-3 py-2.5 font-sans"
+                        style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}
+                      >
+                        {receipt.text}
+                      </pre>
+                      <div className="flex flex-wrap gap-2">
+                        <a
+                          href={waLink(receipt.phone, receipt.text)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn-primary !py-2.5 !px-4 !text-xs"
+                        >
+                          <MessageCircle size={14} />
+                          Enviar por WhatsApp
+                        </a>
+                        <button type="button" onClick={copyText} className="btn-ghost !py-2.5 !px-4 !text-xs">
+                          {copied ? <Check size={14} /> : <Copy size={14} />}
+                          {copied ? 'Copiado' : 'Copiar texto'}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -334,8 +369,10 @@ export function TeamPayments({ slug, overview, selectedId, account, accountError
       {sheet && selected && account && (
         <TeamMovementSheet
           kind={sheet}
+          slug={slug}
           staffId={selected.staff.id}
           staffName={selected.staff.full_name}
+          receiptEmailMasked={selected.receipt_email_masked}
           balance={account.balance}
           hasActiveShift={overview.activeShift !== null}
           today={today}

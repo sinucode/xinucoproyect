@@ -28,65 +28,33 @@ export async function getActiveShift(businessId: string) {
 }
 
 /**
- * getShiftSummary — Calcula consolidados financieros de ventas y efectivo en el turno.
+ * getShiftSummary — Consolidados financieros de ventas y efectivo del turno.
+ *
+ * Se calcula en el servidor de la base (RPC get_shift_cash_summary, tenant-checked): la RLS de
+ * staff_ledger solo deja leer al administrador, así que sumar los pagos al equipo desde aquí
+ * daría un efectivo esperado incorrecto para el resto de roles.
  */
 export async function getShiftSummary(shiftId: string) {
   const supabase = await createClient()
 
-  // Sumar ventas asociadas a este turno
-  const { data: sales, error: salesError } = await supabase
-    .from('sales')
-    .select('total_amount')
-    .eq('shift_id', shiftId)
+  const { data, error } = await supabase.rpc('get_shift_cash_summary', { p_shift_id: shiftId })
 
-  if (salesError) {
-    console.error('Error fetching sales for summary:', salesError)
+  if (error) {
+    // No tumbar el dashboard: las partes no disponibles quedan en cero
+    console.error('Error fetching shift cash summary:', error)
   }
 
-  // Sumar pagos en efectivo del turno
-  const { data: cashPayments, error: paymentsError } = await supabase
-    .from('payments')
-    .select('amount')
-    .eq('shift_id', shiftId)
-    .eq('payment_method', 'cash')
-
-  if (paymentsError) {
-    console.error('Error fetching cash payments for summary:', paymentsError)
+  const summary = (error || !data || typeof data !== 'object' ? {} : data) as Record<string, unknown>
+  const num = (value: unknown): number => {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : 0
   }
-
-  // Gastos pagados con efectivo de la caja en este turno (salen del cajón)
-  const { data: cashExpenses, error: expensesError } = await supabase
-    .from('expenses')
-    .select('amount')
-    .eq('shift_id', shiftId)
-    .eq('payment_method', 'cash_register')
-
-  if (expensesError) {
-    console.error('Error fetching cash expenses for summary:', expensesError)
-  }
-
-  // Pagos y anticipos al equipo hechos con efectivo de la caja en este turno (también salen del cajón)
-  const { data: cashTeamPayments, error: teamPaymentsError } = await supabase
-    .from('staff_ledger')
-    .select('amount')
-    .eq('shift_id', shiftId)
-    .eq('payment_method', 'cash_register')
-    .in('entry_type', ['advance', 'payment'])
-
-  if (teamPaymentsError) {
-    console.error('Error fetching cash team payments for summary:', teamPaymentsError)
-  }
-
-  const totalSales = (sales ?? []).reduce((sum, s) => sum + (s.total_amount ?? 0), 0)
-  const totalCashCollected = (cashPayments ?? []).reduce((sum, p) => sum + (p.amount ?? 0), 0)
-  const totalCashExpenses = (cashExpenses ?? []).reduce((sum, e) => sum + (e.amount ?? 0), 0)
-  const totalCashTeamPayments = (cashTeamPayments ?? []).reduce((sum, e) => sum + (e.amount ?? 0), 0)
 
   return {
-    totalSales,
-    totalCashCollected,
-    totalCashExpenses,
-    totalCashTeamPayments,
+    totalSales: num(summary.total_sales),
+    totalCashCollected: num(summary.cash_collected),
+    totalCashExpenses: num(summary.cash_expenses),
+    totalCashTeamPayments: num(summary.cash_team_payments),
   }
 }
 

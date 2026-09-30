@@ -4,7 +4,10 @@ import {
   WEEK_DAYS,
   applyQuickSchedule,
   formatHour,
+  maskEmail,
   mostCommonSchedule,
+  normalizeStaffEmail,
+  normalizeStaffPhone,
   scheduleRowsToState,
   specialtyLabel,
   stateToScheduleRows,
@@ -202,5 +205,35 @@ describe('mostCommonSchedule', () => {
   it('devuelve null si nadie tiene horario', () => {
     expect(mostCommonSchedule([])).toBeNull()
     expect(mostCommonSchedule([{ is_active: true, schedules: [] }])).toBeNull()
+  })
+})
+
+describe('contacto del profesional', () => {
+  it('normalizeStaffEmail: vacío es null, recorta y valida el formato', () => {
+    expect(normalizeStaffEmail(undefined)).toEqual({ value: null })
+    expect(normalizeStaffEmail(null)).toEqual({ value: null })
+    expect(normalizeStaffEmail('   ')).toEqual({ value: null })
+    expect(normalizeStaffEmail(' carlos@gmail.com ')).toEqual({ value: 'carlos@gmail.com' })
+    expect('error' in normalizeStaffEmail('carlos@gmail')).toBe(true)
+    expect('error' in normalizeStaffEmail('car los@gmail.com')).toBe(true)
+    expect('error' in normalizeStaffEmail(`${'a'.repeat(250)}@x.com`)).toBe(true)
+    expect('error' in normalizeStaffEmail(123)).toBe(true)
+  })
+
+  it('normalizeStaffPhone: quita separadores, conserva el + inicial y valida los dígitos', () => {
+    expect(normalizeStaffPhone('')).toEqual({ value: null })
+    expect(normalizeStaffPhone(' 300 123-4567 ')).toEqual({ value: '3001234567' })
+    expect(normalizeStaffPhone('+57 (300) 123 4567')).toEqual({ value: '+573001234567' })
+    expect('error' in normalizeStaffPhone('12345')).toBe(true)
+    expect('error' in normalizeStaffPhone('300abc4567')).toBe(true)
+    expect('error' in normalizeStaffPhone('3001234567890123')).toBe(true)
+    expect('error' in normalizeStaffPhone('30+0123456')).toBe(true)
+  })
+
+  it('maskEmail nunca muestra el correo completo', () => {
+    expect(maskEmail('carlos@gmail.com')).toBe('c***s@gmail.com')
+    expect(maskEmail('ab@x.co')).toBe('a***@x.co')
+    expect(maskEmail('a@x.co')).toBe('a***@x.co')
+    expect(maskEmail('sin-arroba')).toBe('***')
   })
 })

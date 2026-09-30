@@ -8,7 +8,7 @@ import { useState, useTransition, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus, X, Loader2, Users, Scissors, Clock, CalendarCheck, CalendarClock,
-  Pencil, CalendarDays, AlertTriangle, UserCheck, UserX,
+  Pencil, CalendarDays, AlertTriangle, UserCheck, UserX, Mail, Phone,
 } from 'lucide-react'
 import { createStaffMember, updateStaffMember, toggleStaffStatus } from '@/actions/staff'
 import type { TeamMember, TeamOverview, LinkableUser } from '@/actions/staff'
@@ -25,6 +25,8 @@ import {
   DEFAULT_WORK_DAYS,
   applyQuickSchedule,
   mostCommonSchedule,
+  normalizeStaffEmail,
+  normalizeStaffPhone,
   scheduleRowsToState,
   specialtyLabel,
   stateToScheduleRows,
@@ -317,6 +319,16 @@ function StaffCard({
           {member.user_id ? <UserCheck size={11} /> : <UserX size={11} />}
           {member.user_id ? 'Tiene usuario' : 'Sin usuario'}
         </span>
+        {member.email && (
+          <span className="inline-flex items-center text-xinuco-muted" title={`Correo: ${member.email}`} aria-label={`Correo: ${member.email}`}>
+            <Mail size={11} />
+          </span>
+        )}
+        {member.phone && (
+          <span className="inline-flex items-center text-xinuco-muted" title={`WhatsApp: ${member.phone}`} aria-label={`WhatsApp: ${member.phone}`}>
+            <Phone size={11} />
+          </span>
+        )}
       </div>
 
       {error && (
@@ -496,6 +508,9 @@ function StaffSheet({
   const [copyFrom, setCopyFrom] = useState('')
   // Usuario para iniciar sesión ('' = sin usuario). Solo al editar.
   const [userId, setUserId] = useState(member?.user_id ?? '')
+  // Contacto opcional: el correo recibe los recibos de anticipos y pagos; el celular abre su WhatsApp
+  const [email, setEmail] = useState(member?.email ?? '')
+  const [phone, setPhone] = useState(member?.phone ?? '')
   const [formError, setFormError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
@@ -541,6 +556,11 @@ function StaffSheet({
       return setFormError('Elige al menos un servicio o "Todos los servicios".')
     }
 
+    const emailResult = normalizeStaffEmail(email)
+    if ('error' in emailResult) return setFormError(emailResult.error)
+    const phoneResult = normalizeStaffPhone(phone)
+    if ('error' in phoneResult) return setFormError(phoneResult.error)
+
     const serviceIds: string[] | 'all' = servicesMode === 'all' ? 'all' : Array.from(selected)
 
     const scheduleRows = stateToScheduleRows(scheduleState)
@@ -556,10 +576,15 @@ function StaffSheet({
               full_name: fullName,
               specialty_role: role,
               service_ids: serviceIds,
+              email: emailResult.value,
+              phone: phoneResult.value,
               // Solo se envía si cambió: así editar el nombre no toca el vínculo
               ...((member.user_id ?? '') !== userId ? { user_id: userId || null } : {}),
             })
-          : await createStaffMember(businessId, { full_name: fullName, specialty_role: role, service_ids: serviceIds, schedules: scheduleRows })
+          : await createStaffMember(businessId, {
+              full_name: fullName, specialty_role: role, email: emailResult.value, phone: phoneResult.value,
+              service_ids: serviceIds, schedules: scheduleRows,
+            })
 
         if (result.error) {
           setFormError(result.error)
@@ -652,6 +677,48 @@ function StaffSheet({
                 className="input-base"
               />
             )}
+          </div>
+
+          {/* Contacto (opcional) */}
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <label htmlFor="staff-email" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
+                Correo
+              </label>
+              <input
+                id="staff-email"
+                type="email"
+                inputMode="email"
+                autoComplete="off"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Ej: carlos@correo.com"
+                maxLength={254}
+                className="input-base"
+              />
+              <p className="text-xs text-xinuco-muted">
+                Opcional. Aquí le llegan los recibos de sus anticipos y pagos.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <label htmlFor="staff-phone" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
+                WhatsApp / celular
+              </label>
+              <input
+                id="staff-phone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="off"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="Ej: 300 123 4567"
+                maxLength={24}
+                className="input-base"
+              />
+              <p className="text-xs text-xinuco-muted">
+                Opcional. Se usa para enviarle su liquidación directo por WhatsApp.
+              </p>
+            </div>
           </div>
 
           {/* Servicios */}

@@ -6,6 +6,7 @@ import {
 } from '../ledger'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { createServiceClient, resolveStaffEmail, sendTeamPaymentReceipt } from '@/lib/email/notifications'
 
 jest.mock('@xinuco/supabase/server', () => ({
   createClient: jest.fn(),
@@ -13,6 +14,12 @@ jest.mock('@xinuco/supabase/server', () => ({
 
 jest.mock('next/cache', () => ({
   revalidatePath: jest.fn(),
+}))
+
+jest.mock('@/lib/email/notifications', () => ({
+  sendTeamPaymentReceipt: jest.fn(),
+  createServiceClient: jest.fn(),
+  resolveStaffEmail: jest.fn(),
 }))
 
 type Result = { data?: any; error?: any; count?: number | null }
@@ -70,7 +77,10 @@ const bonus = { staffId: 's1', type: 'bonus' as const, amount: 5000, notes: 'Met
 const payment = { staffId: 's1', type: 'payment' as const, amount: 10000, payment_method: 'transfer' as const }
 
 describe('Pagos al equipo — recordTeamMovement', () => {
-  beforeEach(() => jest.clearAllMocks())
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(sendTeamPaymentReceipt as jest.Mock).mockResolvedValue({ sent: true, to: 'c***s@gmail.com' })
+  })
 
   describe('permisos', () => {
     it.each(['barber', 'manicurist', 'cashier'])('el rol %s no puede registrar', async (role) => {
@@ -158,7 +168,7 @@ describe('Pagos al equipo — recordTeamMovement', () => {
       })
       const r = await recordTeamMovement({ staffId: 's1', type: 'advance', amount: 20000, notes: ' Adelanto ', payment_method: 'cash_register' })
 
-      expect(r).toEqual({ success: true, entry: created })
+      expect(r).toEqual({ success: true, entry: created, receipt: { sent: true, to: 'c***s@gmail.com' } })
       expect(opsOf(calls, 'staff_ledger', 'insert')[0].args[0]).toEqual({
         business_id: 'biz1',
         staff_id: 's1',
@@ -248,6 +258,55 @@ describe('Pagos al equipo — recordTeamMovement', () => {
       const r = await recordTeamMovement({ staffId: 's1', type: 'advance', amount: 99000, notes: 'Adelanto', payment_method: 'transfer' })
       expect(r.success).toBe(true)
       expect(calls.some(c => c.table === 'staff_ledger_balances')).toBe(false)
+    })
+  })
+
+  describe('recibo por correo', () => {
+    const advance = { staffId: 's1', type: 'advance' as const, amount: 10000, notes: 'Adelanto', payment_method: 'transfer' as const }
+
+    it('anticipo y pago envían el recibo del movimiento creado y devuelven el resultado', async () => {
+      setup('admin', { staff: [staffOk, staffOk], staff_ledger: [{ data: { id: 'l1' }, error: null }, { data: { id: 'l2' }, error: null }] })
+
+      const r1 = await recordTeamMovement(advance)
+      expect(sendTeamPaymentReceipt).toHaveBeenLastCalledWith({ entryId: 'l1', businessId: 'biz1' })
+      expect(r1.receipt).toEqual({ sent: true, to: 'c***s@gmail.com' })
+
+      const r2 = await recordTeamMovement({ ...payment, allowOverpay: true })
+      expect(sendTeamPaymentReceipt).toHaveBeenLastCalledWith({ entryId: 'l2', businessId: 'biz1' })
+      expect(r2.receipt?.sent).toBe(true)
+    })
+
+    it('sendReceipt=false no envía nada ni devuelve receipt', async () => {
+      setup('admin', { staff: [staffOk], staff_ledger: [{ data: { id: 'l1' }, error: null }] })
+      const r = await recordTeamMovement({ ...advance, sendReceipt: false })
+      expect(r.success).toBe(true)
+      expect(r.receipt).toBeUndefined()
+      expect(sendTeamPaymentReceipt).not.toHaveBeenCalled()
+    })
+
+    it('bono y descuento nunca envían recibo', async () => {
+      setup('admin', { staff: [staffOk], staff_ledger: [{ data: { id: 'l1' }, error: null }] })
+      const r = await recordTeamMovement(bonus)
+      expect(r.receipt).toBeUndefined()
+      expect(sendTeamPaymentReceipt).not.toHaveBeenCalled()
+    })
+
+    it('si el recibo falla o lanza, el movimiento igual queda registrado', async () => {
+      setup('admin', { staff: [staffOk, staffOk], staff_ledger: [{ data: { id: 'l1' }, error: null }, { data: { id: 'l2' }, error: null }] })
+
+      ;(sendTeamPaymentReceipt as jest.Mock).mockResolvedValueOnce({ sent: false, reason: 'no_email' })
+      const r1 = await recordTeamMovement(advance)
+      expect(r1).toMatchObject({ success: true, receipt: { sent: false, reason: 'no_email' } })
+
+      ;(sendTeamPaymentReceipt as jest.Mock).mockRejectedValueOnce(new Error('boom'))
+      const r2 = await recordTeamMovement(advance)
+      expect(r2).toMatchObject({ success: true, receipt: { sent: false, reason: 'error' } })
+    })
+
+    it('no envía recibo si el movimiento no se registró', async () => {
+      setup('admin', { staff: [staffOk], staff_ledger: [{ data: null, error: { message: 'boom' } }] })
+      expect(await recordTeamMovement(advance)).toEqual({ error: 'boom' })
+      expect(sendTeamPaymentReceipt).not.toHaveBeenCalled()
     })
   })
 
@@ -402,6 +461,41 @@ describe('Pagos al equipo — lectura', () => {
       expect(r.businessName).toBe('Barbería X')
       expect(r.members[0].last_payment_at).toBe('2026-09-25T00:00:00Z')
       expect(r.members[1].last_payment_at).toBeNull()
+    })
+
+    it('expone solo el correo enmascarado: el del profesional o el del usuario vinculado', async () => {
+      const service = { id: 'svc' }
+      ;(createServiceClient as jest.Mock).mockReturnValue(service)
+      ;(resolveStaffEmail as jest.Mock).mockImplementation(async (_svc, staff) =>
+        staff.user_id === 'u2' ? 'beto.login@correo.com' : null)
+
+      setup('admin', {
+        staff: [{
+          data: [
+            { id: 's1', full_name: 'Ana', specialty_role: 'Barbero', is_active: true, user_id: null, email: 'carlos@gmail.com' },
+            { id: 's2', full_name: 'Beto', specialty_role: 'Barbero', is_active: true, user_id: 'u2', email: null },
+            { id: 's3', full_name: 'Cami', specialty_role: 'Barbero', is_active: true, user_id: null, email: null },
+          ],
+          error: null,
+        }],
+        staff_ledger_balances: [{
+          data: [
+            { staff_id: 's1', total_earned: 1, total_advances: 0, total_paid_out: 0, current_balance: 1 },
+            { staff_id: 's2', total_earned: 1, total_advances: 0, total_paid_out: 0, current_balance: 1 },
+            { staff_id: 's3', total_earned: 1, total_advances: 0, total_paid_out: 0, current_balance: 1 },
+          ],
+          error: null,
+        }],
+      })
+      const r = await getTeamPaymentsOverview()
+      if ('error' in r) throw new Error(r.error)
+
+      expect(r.members.map(m => m.receipt_email_masked)).toEqual(['c***s@gmail.com', 'b***n@correo.com', null])
+      // El profesional con correo propio no consulta Auth; el resto solo por su usuario vinculado
+      expect(resolveStaffEmail).toHaveBeenCalledTimes(1)
+      // Nunca viaja un correo completo al cliente
+      expect(JSON.stringify(r)).not.toContain('carlos@gmail.com')
+      expect(JSON.stringify(r)).not.toContain('beto.login@correo.com')
     })
 
     it('incluye a un inactivo con saldo distinto de cero', async () => {

@@ -45,51 +45,49 @@ describe('Finance Server Actions', () => {
   })
 
   describe('getShiftSummary', () => {
-    it('calculates total sales and cash correctly', async () => {
-      // Mock sales sum
-      mockSupabase.eq.mockResolvedValueOnce({ 
-        data: [{ total_amount: 100 }, { total_amount: 200 }], error: null 
-      })
-      // Mock payments sum
-      mockSupabase.eq.mockReturnValueOnce({ 
-        eq: jest.fn().mockResolvedValueOnce({ data: [{ amount: 50 }], error: null }) 
-      })
-
-      // Mock gastos pagados con efectivo de la caja
-      mockSupabase.eq.mockReturnValueOnce({
-        eq: jest.fn().mockResolvedValueOnce({ data: [{ amount: 20 }, { amount: 5 }], error: null })
-      })
-
-      // Mock pagos y anticipos al equipo pagados con efectivo de la caja
-      mockSupabase.eq.mockReturnValueOnce({
-        eq: jest.fn().mockReturnValueOnce({
-          in: jest.fn().mockResolvedValueOnce({ data: [{ amount: 10 }, { amount: 7 }], error: null }),
-        }),
+    it('mapea el resumen del RPC get_shift_cash_summary', async () => {
+      mockSupabase.rpc.mockResolvedValueOnce({
+        data: { total_sales: 300, cash_collected: 50, cash_expenses: 25, cash_team_payments: 17 },
+        error: null,
       })
 
       const summary = await getShiftSummary('shift1')
-      expect(summary.totalSales).toBe(300)
-      expect(summary.totalCashCollected).toBe(50)
-      expect(summary.totalCashExpenses).toBe(25)
-      expect(summary.totalCashTeamPayments).toBe(17)
-      expect(mockSupabase.from).toHaveBeenCalledWith('expenses')
-      expect(mockSupabase.from).toHaveBeenCalledWith('staff_ledger')
+      expect(mockSupabase.rpc).toHaveBeenCalledWith('get_shift_cash_summary', { p_shift_id: 'shift1' })
+      expect(summary).toEqual({
+        totalSales: 300,
+        totalCashCollected: 50,
+        totalCashExpenses: 25,
+        totalCashTeamPayments: 17,
+      })
     })
 
-    it('getActiveShiftDetails resta pagos al equipo del efectivo esperado', async () => {
+    it('convierte a número los valores que llegan como texto (numeric de Postgres)', async () => {
+      mockSupabase.rpc.mockResolvedValueOnce({
+        data: { total_sales: '300.00', cash_collected: '50', cash_expenses: null, cash_team_payments: 'x' },
+        error: null,
+      })
+      expect(await getShiftSummary('shift1')).toEqual({
+        totalSales: 300, totalCashCollected: 50, totalCashExpenses: 0, totalCashTeamPayments: 0,
+      })
+    })
+
+    it('si el RPC falla registra el error y devuelve ceros (no rompe el dashboard)', async () => {
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'function does not exist' } })
+
+      expect(await getShiftSummary('shift1')).toEqual({
+        totalSales: 0, totalCashCollected: 0, totalCashExpenses: 0, totalCashTeamPayments: 0,
+      })
+      expect(spy).toHaveBeenCalled()
+      spy.mockRestore()
+    })
+
+    it('getActiveShiftDetails resta gastos y pagos al equipo del efectivo esperado', async () => {
       // Turno abierto (maybeSingle del getActiveShift)
       mockSupabase.maybeSingle.mockResolvedValueOnce({ data: { id: 'shift1', opening_balance: 100 }, error: null })
-      // los dos .eq() de getActiveShift encadenan
-      mockSupabase.eq.mockReturnValueOnce(mockSupabase).mockReturnValueOnce(mockSupabase)
-      // ventas del turno
-      mockSupabase.eq.mockResolvedValueOnce({ data: [{ total_amount: 300 }], error: null })
-      // cobros en efectivo = 50
-      mockSupabase.eq.mockReturnValueOnce({ eq: jest.fn().mockResolvedValueOnce({ data: [{ amount: 50 }], error: null }) })
-      // gastos de la caja = 20
-      mockSupabase.eq.mockReturnValueOnce({ eq: jest.fn().mockResolvedValueOnce({ data: [{ amount: 20 }], error: null }) })
-      // pagos al equipo desde la caja = 17
-      mockSupabase.eq.mockReturnValueOnce({
-        eq: jest.fn().mockReturnValueOnce({ in: jest.fn().mockResolvedValueOnce({ data: [{ amount: 17 }], error: null }) }),
+      mockSupabase.rpc.mockResolvedValueOnce({
+        data: { total_sales: 300, cash_collected: 50, cash_expenses: 20, cash_team_payments: 17 },
+        error: null,
       })
 
       const details = await getActiveShiftDetails('b1')

@@ -1,7 +1,7 @@
 // lib/email/notifications.ts — Xinuco RF18: Funciones de alto nivel para notificaciones por correo
 // Todas las funciones son best-effort: nunca lanzan, nunca bloquean la operación principal.
 
-import type { SupabaseClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@xinuco/types'
 import { formatCOP }                        from '@xinuco/utils'
 import { sendEmail }                       from './resend'
@@ -10,8 +10,16 @@ import {
   appointmentReminderEmail,
   appointmentCancellationEmail,
   recurringExpenseReminderEmail,
+  teamPaymentReceiptEmail,
   type EmailBrand,
 } from './templates'
+import { maskEmail } from '@/lib/team-utils'
+import {
+  formatMoneyPlain,
+  receiptBreakdown,
+  type LedgerEntryLike,
+  type TeamReceiptResult,
+} from '@/lib/team-payments'
 
 // ── Tipo de cliente Supabase tipado con el esquema de Xinuco ─────────────────
 type XinucoSupabase = SupabaseClient<Database>
@@ -406,5 +414,183 @@ export async function sendRecurringExpenseReminder(params: {
   } catch (err) {
     console.error('[recurring-expenses] Error enviando el aviso:', err)
     return { recipients: 0, sent: 0 }
+  }
+}
+
+// ── 5. Recibo de anticipo / pago al profesional ────────────────────────────────
+
+/**
+ * Cliente con service role (bypass RLS, necesario para leer el correo de Auth de un usuario).
+ * null si faltan las variables de entorno. Solo para uso en el servidor.
+ */
+export function createServiceClient(): XinucoSupabase | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) return null
+  return createClient<Database>(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
+}
+
+/**
+ * Correo del profesional: el suyo (staff.email) o, si no tiene, el del usuario vinculado
+ * (staff.user_id → Auth). Requiere cliente service-role. Best-effort: null si algo falla.
+ */
+export async function resolveStaffEmail(
+  service: XinucoSupabase,
+  staff: { email?: string | null; user_id?: string | null },
+): Promise<string | null> {
+  const own = staff.email?.trim()
+  if (own) return own
+  if (!staff.user_id) return null
+  try {
+    const { data } = await (service as any).auth.admin.getUserById(staff.user_id)
+    const email = (data?.user?.email as string | undefined)?.trim()
+    return email || null
+  } catch {
+    return null
+  }
+}
+
+const RECEIPT_METHOD_LABELS: Record<string, string> = {
+  cash_register: 'Efectivo',
+  transfer:      'Transferencia',
+  other:         'Otro',
+}
+
+/** '29 de septiembre de 2026, 3:45 p. m.' en hora de Colombia. */
+function formatReceiptDateTime(iso: string): string {
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota', day: 'numeric', month: 'long', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(new Date(iso))
+}
+
+const RECEIPT_FETCH_SIZE = 1000
+const RECEIPT_MAX_PAGES  = 50
+
+/**
+ * Envía al profesional el recibo de un anticipo o el comprobante de un pago.
+ * Lo carga todo en el servidor con service role (el correo de Auth no es legible con RLS).
+ * `businessId`, si se pasa, se contrasta con el del movimiento (defensa en profundidad).
+ * Best-effort: nunca lanza; devuelve { sent, to (enmascarado), reason }.
+ */
+export async function sendTeamPaymentReceipt(params: {
+  entryId:     string
+  businessId?: string
+}): Promise<TeamReceiptResult> {
+  try {
+    const service = createServiceClient()
+    if (!service) {
+      console.error('[team-receipt] Faltan NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY')
+      return { sent: false, reason: 'error' }
+    }
+    const db = service as any
+
+    // 1. El movimiento (solo anticipos y pagos llevan recibo)
+    const { data: entry } = await db
+      .from('staff_ledger')
+      .select('id, business_id, staff_id, entry_type, amount, notes, payment_method, period_from, period_to, created_at, created_by')
+      .eq('id', params.entryId)
+      .maybeSingle() as {
+        data: {
+          id: string; business_id: string; staff_id: string; entry_type: string; amount: number
+          notes: string | null; payment_method: string | null; period_from: string | null
+          period_to: string | null; created_at: string; created_by: string | null
+        } | null
+      }
+    if (!entry) return { sent: false, reason: 'error' }
+    if (entry.entry_type !== 'advance' && entry.entry_type !== 'payment') return { sent: false, reason: 'error' }
+    if (params.businessId && params.businessId !== entry.business_id) return { sent: false, reason: 'error' }
+    const businessId = entry.business_id
+
+    // 2. El profesional (del mismo negocio del movimiento) y a dónde enviarle el recibo
+    const { data: staff } = await db
+      .from('staff')
+      .select('id, full_name, email, user_id')
+      .eq('id', entry.staff_id)
+      .eq('business_id', businessId)
+      .maybeSingle() as { data: { id: string; full_name: string; email: string | null; user_id: string | null } | null }
+    if (!staff) return { sent: false, reason: 'error' }
+
+    const to = await resolveStaffEmail(service, staff)
+    if (!to) return { sent: false, reason: 'no_email' }
+
+    // 3. El negocio debe tener los correos habilitados
+    if (!(await isEmailEnabled(service, businessId))) return { sent: false, reason: 'email_disabled' }
+
+    // 4. Movimientos del profesional hasta este (para el saldo y el desglose del pago)
+    const entries: LedgerEntryLike[] = []
+    for (let page = 0; page < RECEIPT_MAX_PAGES; page++) {
+      const { data, error } = await db
+        .from('staff_ledger')
+        .select('id, entry_type, amount, created_at, sale_item:sale_item_id(item_type)')
+        .eq('business_id', businessId)
+        .eq('staff_id', staff.id)
+        .lte('created_at', entry.created_at)
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
+        .range(page * RECEIPT_FETCH_SIZE, page * RECEIPT_FETCH_SIZE + RECEIPT_FETCH_SIZE - 1)
+      if (error) {
+        console.error('[team-receipt] Error leyendo movimientos:', error.message)
+        return { sent: false, reason: 'error' }
+      }
+      const batch = (data ?? []) as {
+        id: string; entry_type: LedgerEntryLike['entry_type']; amount: number; created_at: string
+        sale_item: { item_type: string | null } | { item_type: string | null }[] | null
+      }[]
+      for (const r of batch) {
+        const item = Array.isArray(r.sale_item) ? r.sale_item[0] : r.sale_item
+        entries.push({
+          id: r.id, entry_type: r.entry_type, amount: r.amount, created_at: r.created_at,
+          item_type: item?.item_type === 'product' ? 'product' : item?.item_type === 'service' ? 'service' : null,
+        })
+      }
+      if (batch.length < RECEIPT_FETCH_SIZE) break
+    }
+    const breakdown = receiptBreakdown(entries, entry.id)
+    if (!breakdown) return { sent: false, reason: 'error' }
+
+    // 5. Marca del negocio y quién lo registró
+    const { business, brand } = await loadBusinessBrand(service, businessId)
+    const businessName = business?.name ?? 'Xinuco'
+
+    let adminName: string | null = null
+    if (entry.created_by) {
+      const { data: admin } = await db
+        .from('profiles')
+        .select('full_name')
+        .eq('id', entry.created_by)
+        .eq('business_id', businessId)
+        .maybeSingle() as { data: { full_name: string | null } | null }
+      adminName = admin?.full_name?.trim() || null
+    }
+
+    // 6. Construir y enviar
+    const kind = entry.entry_type as 'advance' | 'payment'
+    const html = teamPaymentReceiptEmail({
+      kind,
+      businessName,
+      staffName:     staff.full_name,
+      amount:        entry.amount,
+      dateTime:      formatReceiptDateTime(entry.created_at),
+      methodLabel:   RECEIPT_METHOD_LABELS[entry.payment_method ?? ''] ?? 'Otro',
+      notes:         entry.notes,
+      periodFrom:    kind === 'payment' ? entry.period_from : null,
+      periodTo:      kind === 'payment' ? entry.period_to : null,
+      lines:         breakdown.lines,
+      balanceAfter:  breakdown.balanceAfter,
+      receiptNumber: entry.id.slice(0, 8).toUpperCase(),
+      adminName,
+      brand,
+    })
+    const subject = `${kind === 'payment' ? 'Comprobante de pago' : 'Recibo de anticipo'} · ${formatMoneyPlain(entry.amount)} · ${businessName}`
+
+    const result = await sendEmail({ to, subject, html })
+    if (!result.success) return { sent: false, reason: 'error' }
+
+    console.info(`[team-receipt] Enviado: negocio=${businessId} movimiento=${entry.id} tipo=${kind}`)
+    return { sent: true, to: maskEmail(to) }
+  } catch (err) {
+    console.error('[team-receipt] Error enviando el recibo:', err)
+    return { sent: false, reason: 'error' }
   }
 }

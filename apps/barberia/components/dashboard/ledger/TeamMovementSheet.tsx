@@ -6,11 +6,12 @@
 //  - 'adjust'  → Ajuste (bono / a favor o descuento, con motivo obligatorio)
 
 import { useEffect, useRef, useState, useTransition } from 'react'
+import Link from 'next/link'
 import { X, Loader2, Info, AlertTriangle } from 'lucide-react'
 import type { StaffLedgerEntry, TeamPaymentMethod } from '@xinuco/types'
 import { formatCOP } from '@xinuco/utils'
 import { recordTeamMovement, type TeamMovementInput } from '@/actions/ledger'
-import { TEAM_METHOD_LABELS, TEAM_PAYMENT_METHODS } from '@/lib/team-payments'
+import { TEAM_METHOD_LABELS, TEAM_PAYMENT_METHODS, type TeamReceiptResult } from '@/lib/team-payments'
 import { METHOD_ICONS } from './AccountParts'
 
 export type SheetKind = 'settle' | 'advance' | 'adjust'
@@ -31,12 +32,16 @@ export interface SavedMovement {
   method:      TeamPaymentMethod | null
   periodFrom:  string | null
   periodTo:    string | null
+  /** Resultado del recibo por correo (solo anticipo/pago con "Enviar recibo" marcado). */
+  receipt:     TeamReceiptResult | null
 }
 
 export function TeamMovementSheet({
   kind,
+  slug,
   staffId,
   staffName,
+  receiptEmailMasked,
   balance,
   hasActiveShift,
   today,
@@ -45,8 +50,11 @@ export function TeamMovementSheet({
   onSaved,
 }: {
   kind:            SheetKind
+  slug:            string
   staffId:         string
   staffName:       string
+  /** Correo enmascarado al que llegan los recibos del profesional; null = sin correo. */
+  receiptEmailMasked: string | null
   /** Saldo total actual del profesional (puede ser negativo). */
   balance:         number
   hasActiveShift:  boolean
@@ -66,6 +74,8 @@ export function TeamMovementSheet({
   const [formError, setFormError] = useState<string | null>(null)
   /** Pago mayor al saldo: espera confirmación del administrador. */
   const [overpay, setOverpay] = useState<{ balance: number } | null>(null)
+  // Recibo por correo: marcado por defecto cuando el profesional tiene correo
+  const [sendReceipt, setSendReceipt] = useState(true)
   const [isPending, startTransition] = useTransition()
 
   const needsMethod = kind === 'settle' || kind === 'advance'
@@ -119,6 +129,7 @@ export function TeamMovementSheet({
       payment_method: needsMethod ? method : null,
       ...(kind === 'settle' ? { period_from: periodFrom, period_to: periodTo } : {}),
       ...(allowOverpay ? { allowOverpay: true } : {}),
+      ...(needsMethod ? { sendReceipt: !!receiptEmailMasked && sendReceipt } : {}),
     }
 
     startTransition(async () => {
@@ -140,6 +151,7 @@ export function TeamMovementSheet({
           method: needsMethod ? method : null,
           periodFrom: kind === 'settle' ? periodFrom : null,
           periodTo:   kind === 'settle' ? periodTo : null,
+          receipt:    result.receipt ?? null,
         })
       } catch {
         setOverpay(null)
@@ -348,6 +360,39 @@ export function TeamMovementSheet({
               className="input-base"
             />
           </div>
+
+          {/* Recibo por correo (anticipo y liquidación) */}
+          {needsMethod && (
+            receiptEmailMasked ? (
+              <label className="flex items-start gap-2.5 text-xs text-xinuco-text cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sendReceipt}
+                  onChange={e => setSendReceipt(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Enviar recibo por correo a{' '}
+                  <span className="font-semibold tabular-nums">{receiptEmailMasked}</span>
+                </span>
+              </label>
+            ) : (
+              <p className="text-xs text-xinuco-muted flex items-start gap-1.5">
+                <Info size={12} className="shrink-0 mt-0.5" />
+                <span>
+                  Sin correo: agrégalo en{' '}
+                  <Link
+                    href={`/${slug}/dashboard/staff`}
+                    className="underline hover:text-xinuco-text"
+                    style={{ color: 'var(--primary-color)' }}
+                  >
+                    Equipo
+                  </Link>{' '}
+                  para enviarle recibos.
+                </span>
+              </p>
+            )
+          )}
 
           {/* Confirmación de pago mayor al saldo */}
           {overpay && (

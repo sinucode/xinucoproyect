@@ -205,6 +205,8 @@ export interface Staff {
   id:             string
   business_id:    string
   user_id?:       string | null  // UUID → auth.users.id (null si el empleado no tiene cuenta)
+  email?:         string | null  // opcional: a dónde llegan los recibos de anticipos y pagos
+  phone?:         string | null  // opcional: WhatsApp / celular (dígitos, '+' opcional)
   name?:          string         // deprecado (mantener por compatibilidad temporal si es necesario)
   full_name:      string
   specialty_role: string
@@ -486,6 +488,12 @@ export interface Database {
           online_payments:     boolean   // = features_enabled.mercadopago_booking
           email_notifications: boolean   // = features_enabled.notifications_email
         }[]
+      }
+      // RPC Caja — totales del turno calculados en el servidor (ventas, cobros en efectivo,
+      // gastos y pagos al equipo pagados con efectivo de la caja)
+      get_shift_cash_summary: {
+        Args: { p_shift_id: string }
+        Returns: Json
       }
       // RPC P&G (RF16) — Calcula el estado de resultados de un negocio en un período
       get_profit_loss: {

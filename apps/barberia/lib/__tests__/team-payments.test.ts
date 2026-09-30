@@ -7,7 +7,9 @@ import {
   computeBalance,
   formatMoneyPlain,
   isRealDateKey,
+  receiptBreakdown,
   settlementSinceLastPayment,
+  settlementTextLines,
   waLink,
   type LedgerEntryLike,
 } from '../team-payments'
@@ -142,6 +144,61 @@ describe('settlementSinceLastPayment', () => {
   })
 })
 
+describe('settlementTextLines', () => {
+  const summary = settlementSinceLastPayment([
+    { id: 'x1', entry_type: 'commission', amount: 32500, created_at: '2026-09-22T15:00:00Z', item_type: 'service' },
+    { id: 'x2', entry_type: 'advance', amount: 10000, created_at: '2026-09-23T15:00:00Z' },
+  ])
+
+  it('desglosa con signo y cuadra lo pagado con lo que salía', () => {
+    expect(settlementTextLines(summary, 22500).filter(l => l.amount)).toEqual([
+      { label: 'Comisiones servicios', amount: 32500 },
+      { label: 'Anticipos', amount: -10000 },
+    ])
+  })
+
+  it('agrega saldo anterior si se pagó más y pendiente si se pagó menos', () => {
+    expect(settlementTextLines(summary, 30000).at(-1)).toEqual({ label: 'Saldo de períodos anteriores', amount: 7500 })
+    expect(settlementTextLines(summary, 20000).at(-1)).toEqual({ label: 'Pendiente por pagar', amount: -2500 })
+  })
+})
+
+describe('receiptBreakdown', () => {
+  const entries: LedgerEntryLike[] = [
+    { id: 'a1', entry_type: 'commission', amount: 10000, created_at: '2026-09-20T15:00:00Z', item_type: 'service' },
+    { id: 'a2', entry_type: 'payment', amount: 10000, created_at: '2026-09-21T15:00:00Z' },
+    { id: 'a3', entry_type: 'commission', amount: 32500, created_at: '2026-09-22T15:00:00Z', item_type: 'service' },
+    { id: 'a4', entry_type: 'commission', amount: 3600, created_at: '2026-09-22T16:00:00Z', item_type: 'product' },
+    { id: 'a5', entry_type: 'advance', amount: 10000, created_at: '2026-09-23T15:00:00Z' },
+    { id: 'a6', entry_type: 'payment', amount: 26100, created_at: '2026-09-24T15:00:00Z' },
+    { id: 'a7', entry_type: 'commission', amount: 5000, created_at: '2026-09-25T15:00:00Z', item_type: 'service' },
+  ]
+
+  it('un anticipo: solo el saldo después de ese movimiento', () => {
+    expect(receiptBreakdown(entries, 'a5')).toEqual({ balanceAfter: 26100, lines: [] })
+  })
+
+  it('un pago: el desglose es lo posterior al pago anterior y hasta este; el saldo excluye lo posterior', () => {
+    const r = receiptBreakdown(entries, 'a6')!
+    expect(r.balanceAfter).toBe(0)
+    expect(r.lines.filter(l => l.amount)).toEqual([
+      { label: 'Comisiones servicios', amount: 32500 },
+      { label: 'Comisiones productos', amount: 3600 },
+      { label: 'Anticipos', amount: -10000 },
+    ])
+  })
+
+  it('el primer pago cuenta desde el principio', () => {
+    const r = receiptBreakdown(entries, 'a2')!
+    expect(r.balanceAfter).toBe(0)
+    expect(r.lines.filter(l => l.amount)).toEqual([{ label: 'Comisiones servicios', amount: 10000 }])
+  })
+
+  it('un movimiento inexistente da null', () => {
+    expect(receiptBreakdown(entries, 'zzz')).toBeNull()
+  })
+})
+
 describe('buildWhatsAppSettlementText', () => {
   it('arma el mensaje y omite las líneas en cero (menos el total)', () => {
     const text = buildWhatsAppSettlementText({
@@ -160,7 +217,7 @@ describe('buildWhatsAppSettlementText', () => {
     })
     expect(text).toBe(
       [
-        'Hola Carlos 👋',
+        'Hola Carlos Ramírez 👋',
         'Tu liquidación en Barbería X (22 sept – 29 sept):',
         '• Comisiones servicios: $32.500',
         '• Comisiones productos: $3.600',
@@ -169,6 +226,12 @@ describe('buildWhatsAppSettlementText', () => {
         '¡Gracias por tu trabajo!',
       ].join('\n'),
     )
+  })
+
+  it('saluda con el nombre completo', () => {
+    expect(buildWhatsAppSettlementText({
+      businessName: 'B', staffName: '  Demo   Carlos Ruiz ', lines: [], total: 0,
+    })).toContain('Hola Demo Carlos Ruiz 👋')
   })
 
   it('sin período ni medio de pago', () => {
@@ -193,6 +256,25 @@ describe('waLink', () => {
 
   it('con teléfono deja solo los dígitos', () => {
     expect(waLink('+57 300 123 4567', 'x')).toBe('https://wa.me/573001234567?text=x')
+  })
+
+  it('un celular colombiano de 10 dígitos que empieza por 3 lleva el prefijo 57', () => {
+    expect(waLink('3001234567', 'x')).toBe('https://wa.me/573001234567?text=x')
+    expect(waLink('300 123 4567', 'x')).toBe('https://wa.me/573001234567?text=x')
+  })
+
+  it('con "+" usa los dígitos tal cual (otro país)', () => {
+    expect(waLink('+1 305 555 0100', 'x')).toBe('https://wa.me/13055550100?text=x')
+    expect(waLink('+3001234567', 'x')).toBe('https://wa.me/3001234567?text=x')
+  })
+
+  it('un número que no es celular colombiano de 10 dígitos se deja tal cual', () => {
+    expect(waLink('573001234567', 'x')).toBe('https://wa.me/573001234567?text=x')
+    expect(waLink('6011234567', 'x')).toBe('https://wa.me/6011234567?text=x')
+  })
+
+  it('un teléfono sin dígitos cae en la forma sin número', () => {
+    expect(waLink('  ', 'x')).toBe('https://wa.me/?text=x')
   })
 })
 

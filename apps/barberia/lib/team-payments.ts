@@ -54,6 +54,18 @@ export function isTeamPaymentMethod(value: unknown): value is TeamPaymentMethod 
   return typeof value === 'string' && (TEAM_PAYMENT_METHODS as string[]).includes(value)
 }
 
+// ── Recibo por correo ────────────────────────────────────────────────────────
+
+export type TeamReceiptFailure = 'no_email' | 'email_disabled' | 'error'
+
+/** Resultado del envío del recibo de un anticipo/pago (nunca trae el correo completo). */
+export interface TeamReceiptResult {
+  sent:    boolean
+  /** Correo enmascarado (c***s@gmail.com). */
+  to?:     string
+  reason?: TeamReceiptFailure
+}
+
 // ── Liquidación desde el último pago ─────────────────────────────────────────
 
 /** Lo mínimo que necesita el cálculo de un movimiento (el historial trae más campos). */
@@ -151,6 +163,57 @@ export function settlementSinceLastPayment(entries: LedgerEntryLike[]): Settleme
   return out
 }
 
+export interface SettlementTextLine {
+  label:  string
+  /** Con signo: negativo = resta (descuentos, anticipos). Las líneas en cero se omiten. */
+  amount: number
+}
+
+/**
+ * Líneas del desglose de una liquidación (mensaje de WhatsApp y recibo por correo).
+ * Si lo pagado no coincide con "total a pagar" se agrega una línea que cuadra la diferencia.
+ */
+export function settlementTextLines(s: SettlementSummary, paid: number): SettlementTextLine[] {
+  const lines: SettlementTextLine[] = [
+    { label: 'Comisiones servicios', amount: s.services_commission },
+    { label: 'Comisiones productos', amount: s.products_commission },
+    { label: 'Propinas',             amount: s.tips },
+    { label: 'Bonos / a favor',      amount: s.bonus },
+    { label: 'Descuentos',           amount: -s.deductions },
+    { label: 'Anticipos',            amount: -s.advances },
+  ]
+  const diff = paid - s.total_to_pay
+  if (diff > 0) lines.push({ label: 'Saldo de períodos anteriores', amount: diff })
+  if (diff < 0) lines.push({ label: 'Pendiente por pagar', amount: diff })
+  return lines
+}
+
+/**
+ * Datos del recibo de UN movimiento (anticipo o pago) sobre todos los movimientos del profesional:
+ *  - balanceAfter: saldo sobre los movimientos hasta ese (incluido).
+ *  - lines: solo pagos; el desglose propio del pago = lo posterior al pago anterior y hasta este.
+ * Devuelve null si el movimiento no está en la lista.
+ */
+export function receiptBreakdown(
+  entries: LedgerEntryLike[],
+  entryId: string,
+): { balanceAfter: number; lines: SettlementTextLine[] } | null {
+  const sorted = [...entries].sort(byCreatedThenId)
+  const idx = sorted.findIndex(e => e.id === entryId)
+  if (idx < 0) return null
+
+  const entry = sorted[idx]
+  const balanceAfter = computeBalance(sorted.slice(0, idx + 1))
+  if (entry.entry_type !== 'payment') return { balanceAfter, lines: [] }
+
+  let prev = -1
+  for (let i = idx - 1; i >= 0; i--) {
+    if (sorted[i].entry_type === 'payment') { prev = i; break }
+  }
+  const own = settlementSinceLastPayment(sorted.slice(prev + 1, idx))
+  return { balanceAfter, lines: settlementTextLines(own, entry.amount) }
+}
+
 // ── Fechas (hora de Colombia) ────────────────────────────────────────────────
 
 const BUSINESS_TZ = 'America/Bogota'
@@ -206,12 +269,6 @@ export function formatMoneyPlain(amount: number): string {
   return `$${String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`
 }
 
-export interface SettlementTextLine {
-  label:  string
-  /** Con signo: negativo = resta (descuentos, anticipos). Las líneas en cero se omiten. */
-  amount: number
-}
-
 export interface SettlementTextInput {
   businessName: string
   staffName:    string
@@ -229,13 +286,13 @@ const METHOD_IN_TEXT: Record<TeamPaymentMethod, string> = {
 }
 
 export function buildWhatsAppSettlementText(input: SettlementTextInput): string {
-  const firstName = input.staffName.trim().split(/\s+/)[0] || input.staffName
+  const fullName = input.staffName.trim().replace(/\s+/g, ' ') || input.staffName
   const period = input.fromLabel && input.toLabel
     ? ` (${input.fromLabel} – ${input.toLabel})`
     : input.toLabel ? ` (hasta ${input.toLabel})` : ''
 
   const out: string[] = [
-    `Hola ${firstName} 👋`,
+    `Hola ${fullName} 👋`,
     `Tu liquidación en ${input.businessName}${period}:`,
   ]
 
@@ -252,10 +309,22 @@ export function buildWhatsAppSettlementText(input: SettlementTextInput): string 
 }
 
 /**
- * Enlace de WhatsApp con el texto ya escrito. Del profesional no se guarda el teléfono:
- * la UI siempre pasa null y el administrador elige el contacto en WhatsApp.
+ * Dígitos para wa.me a partir del celular guardado del profesional. Con "+" se respeta tal cual;
+ * un celular colombiano de 10 dígitos que empieza por 3 lleva el prefijo 57. Vacío → ''.
+ */
+export function whatsappDigits(phone: string | null | undefined): string {
+  const raw = (phone ?? '').trim()
+  const digits = raw.replace(/\D/g, '')
+  if (!digits) return ''
+  if (raw.startsWith('+')) return digits
+  if (digits.length === 10 && digits.startsWith('3')) return `57${digits}`
+  return digits
+}
+
+/**
+ * Enlace de WhatsApp con el texto ya escrito. Con el celular del profesional abre su chat;
+ * sin él, el administrador elige el contacto en WhatsApp.
  */
 export function waLink(phone: string | null | undefined, text: string): string {
-  const digits = (phone ?? '').replace(/\D/g, '')
-  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`
+  return `https://wa.me/${whatsappDigits(phone)}?text=${encodeURIComponent(text)}`
 }

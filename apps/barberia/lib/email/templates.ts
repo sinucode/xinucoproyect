@@ -5,6 +5,7 @@
 // Idioma: Español (Colombia)
 
 import { formatCOP } from '@xinuco/utils'
+import { formatMoneyPlain } from '@/lib/team-payments'
 
 // ── Marca del negocio ─────────────────────────────────────────────────────────
 
@@ -423,6 +424,95 @@ export function recurringExpenseReminderEmail(data: {
       theme,
     )}
     ${buttonBlock('Ver gastos', escapeHtml(data.expensesUrl), theme)}`
+
+  return emailLayout(theme, content)
+}
+
+// ── 5. Recibo de anticipo / comprobante de pago (para el profesional) ────────
+
+/** '2026-09-29' → '29 de septiembre' (sin corrimientos de zona horaria). */
+function formatDayMonth(dateKey: string): string {
+  const d = new Date(`${dateKey}T00:00:00Z`)
+  return `${d.getUTCDate()} de ${MESES[d.getUTCMonth()]}`
+}
+
+export function teamPaymentReceiptEmail(data: {
+  kind:         'advance' | 'payment'
+  businessName: string
+  staffName:    string
+  /** Entero COP > 0. */
+  amount:       number
+  /** Fecha y hora ya formateadas en hora de Colombia. */
+  dateTime:     string
+  /** 'Efectivo' | 'Transferencia' | 'Otro'. */
+  methodLabel:  string
+  /** Motivo (anticipo) o nota (pago). */
+  notes?:       string | null
+  /** Período liquidado 'YYYY-MM-DD' (solo pagos). */
+  periodFrom?:  string | null
+  periodTo?:    string | null
+  /** Desglose de la liquidación (solo pagos): con signo, las líneas en cero se omiten. */
+  lines?:       { label: string; amount: number }[]
+  /** Saldo del profesional después de este movimiento (positivo = se le debe). */
+  balanceAfter: number
+  /** Primeros 8 caracteres del id del movimiento, en mayúsculas. */
+  receiptNumber: string
+  /** Quién lo registró (administrador). */
+  adminName?:   string | null
+  brand?:       EmailBrand
+}): string {
+  const theme = buildTheme(data.brand, data.businessName)
+  const isPayment = data.kind === 'payment'
+  const title = isPayment ? 'Comprobante de pago' : 'Recibo de anticipo'
+  const intro = isPayment
+    ? `Hola ${escapeHtml(data.staffName)}, te registramos un pago en <strong style="color:${theme.accentText};">${escapeHtml(theme.name)}</strong>.`
+    : `Hola ${escapeHtml(data.staffName)}, registramos un anticipo a tu cuenta en <strong style="color:${theme.accentText};">${escapeHtml(theme.name)}</strong>.`
+
+  const signed = (n: number) => `${n < 0 ? '−' : ''}${formatMoneyPlain(n)}`
+
+  const rows: { label: string; value: string; highlight?: boolean }[] = [
+    { label: 'Fecha y hora', value: escapeHtml(data.dateTime) },
+    { label: 'Medio', value: escapeHtml(data.methodLabel) },
+  ]
+  const notes = data.notes?.trim()
+  if (notes) rows.push({ label: isPayment ? 'Nota' : 'Motivo', value: escapeHtml(notes) })
+  if (isPayment && data.periodFrom && data.periodTo) {
+    rows.push({
+      label: 'Período',
+      value: `Del ${escapeHtml(formatDayMonth(data.periodFrom))} al ${escapeHtml(formatDayMonth(data.periodTo))}`,
+    })
+  }
+  if (isPayment) {
+    for (const line of data.lines ?? []) {
+      if (!line.amount) continue
+      rows.push({ label: escapeHtml(line.label), value: signed(line.amount) })
+    }
+  }
+
+  const balance = data.balanceAfter
+  const balanceHint = balance > 0 ? 'te debemos' : balance < 0 ? 'anticipo por descontar' : 'cuenta al día'
+  rows.push({
+    label: 'Saldo después de este movimiento',
+    value: `${signed(balance)} <span style="font-weight:400;color:${C.muted};font-size:12px;">· ${balanceHint}</span>`,
+    highlight: true,
+  })
+  rows.push({ label: 'Recibo N°', value: escapeHtml(data.receiptNumber) })
+
+  const amountBlock = `
+    <div style="margin-top:22px;padding:18px 16px;background-color:${C.soft};border:1px solid ${C.border};border-radius:10px;text-align:center;">
+      <p style="margin:0 0 4px 0;font-size:12px;color:${C.muted};text-transform:uppercase;letter-spacing:0.6px;">${isPayment ? 'Total pagado' : 'Anticipo'}</p>
+      <p style="margin:0;font-size:32px;font-weight:800;color:${theme.accentText};line-height:1.2;">${escapeHtml(formatMoneyPlain(data.amount))}</p>
+    </div>`
+
+  const registeredBy = data.adminName?.trim()
+    ? `Registrado por ${escapeHtml(data.adminName.trim())} · ${escapeHtml(theme.name)}`
+    : escapeHtml(theme.name)
+
+  const content = `
+    ${heading(title, intro)}
+    ${amountBlock}
+    ${appointmentDetailsBlock(rows, theme)}
+    ${noteBlock(registeredBy, theme)}`
 
   return emailLayout(theme, content)
 }
