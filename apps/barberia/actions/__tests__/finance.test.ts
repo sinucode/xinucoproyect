@@ -2,7 +2,6 @@ import { getShiftSummary, getActiveShiftDetails, openShift, closeShift, checkout
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { logAction } from '../audit'
-import { earnPoints } from '../loyalty'
 
 jest.mock('@xinuco/supabase/server', () => ({
   createClient: jest.fn(),
@@ -14,10 +13,6 @@ jest.mock('next/cache', () => ({
 
 jest.mock('../audit', () => ({
   logAction: jest.fn(),
-}))
-
-jest.mock('../loyalty', () => ({
-  earnPoints: jest.fn().mockResolvedValue(true),
 }))
 
 describe('Finance Server Actions', () => {
@@ -146,11 +141,8 @@ describe('Finance Server Actions', () => {
       expect(result.error).toBe('validation_error')
     })
 
-    it('calls the RPC and awards loyalty points if successful', async () => {
-      // Mock RPC success
+    it('calls the checkout RPC; earning loyalty is the DB trigger, not the app', async () => {
       mockSupabase.rpc.mockResolvedValueOnce({ data: { success: true, sale_id: 'sale1' }, error: null })
-      // Mock getting customer id for loyalty
-      mockSupabase.maybeSingle.mockResolvedValueOnce({ data: { customer_id: 'c1' }, error: null })
 
       const result = await checkoutAppointment({
         appointmentId: 'apt1', businessId: 'b1', shiftId: 'sh1',
@@ -159,8 +151,152 @@ describe('Finance Server Actions', () => {
       })
 
       expect(result.success).toBe(true)
-      expect(mockSupabase.rpc).toHaveBeenCalledWith('checkout_appointment', expect.any(Object))
-      expect(earnPoints).toHaveBeenCalledWith('b1', 'c1', 110, 'sale1') // 100 (subtotal) + 10 (tip) - 0
+      expect(result.saleId).toBe('sale1')
+      expect(result.loyalty).toBeUndefined()
+      expect(mockSupabase.rpc).toHaveBeenCalledTimes(1)
+      expect(mockSupabase.rpc).toHaveBeenCalledWith('checkout_appointment', expect.objectContaining({
+        p_discount_amount: 0,
+      }))
+      // Sin canje solicitado no se toca la lealtad
+      expect(mockSupabase.from).not.toHaveBeenCalledWith('appointments')
+    })
+  })
+
+  describe('checkoutAppointment — canje de lealtad', () => {
+    const pointsLoyalty = {
+      enabled: true, mode: 'points', balance: 1240, expiring_30d: 0, point_value_cop: 50, value_cop: 62000,
+      min_redeem: 100, stamps_required: 10, stamp_max_reward_cop: 0, can_redeem: true,
+    }
+    const stampsLoyalty = {
+      enabled: true, mode: 'stamps', balance: 10, expiring_30d: 0, point_value_cop: 50, value_cop: null,
+      min_redeem: 0, stamps_required: 10, stamp_max_reward_cop: 30000, can_redeem: true,
+    }
+    const base = {
+      appointmentId: 'apt1', businessId: 'b1', shiftId: 'sh1',
+      paymentMethod: 'cash' as const, receivedAmount: 100000, tipAmount: 0, discountAmount: 0,
+      items: [{ description: 'Corte', quantity: 1, unitPrice: 45000, itemType: 'service' as const }],
+    }
+
+    let redeemResult: { data: any; error: any }
+    const rpcNames = () => mockSupabase.rpc.mock.calls.map((c: any[]) => c[0])
+    const rpcCall = (name: string) => mockSupabase.rpc.mock.calls.find((c: any[]) => c[0] === name)
+
+    function setLoyalty(loyalty: any, customerId: string | null = 'c1') {
+      mockSupabase.maybeSingle.mockResolvedValue({ data: customerId ? { customer_id: customerId } : null, error: null })
+      mockSupabase.rpc.mockImplementation((fn: string) => {
+        if (fn === 'get_customer_loyalty') return Promise.resolve({ data: loyalty, error: null })
+        if (fn === 'checkout_appointment') return Promise.resolve({ data: { success: true, sale_id: 'sale1' }, error: null })
+        if (fn === 'redeem_loyalty_for_sale') return Promise.resolve(redeemResult)
+        return Promise.resolve({ data: null, error: null })
+      })
+    }
+
+    beforeEach(() => {
+      redeemResult = { data: { redeemed: 500, balance: 740 }, error: null }
+    })
+
+    it('puntos: el descuento se calcula en el servidor y se registra el canje después del cobro', async () => {
+      setLoyalty(pointsLoyalty)
+      const result = await checkoutAppointment({ ...base, discountAmount: 1000, loyaltyRedeem: { units: 500 } })
+
+      // 500 puntos × $50 = $25.000 (sumado al descuento manual de $1.000)
+      expect(rpcCall('checkout_appointment')[1].p_discount_amount).toBe(26000)
+      expect(rpcCall('redeem_loyalty_for_sale')[1]).toEqual({ p_sale_id: 'sale1', p_units: 500, p_discount_cop: 25000 })
+      expect(rpcNames().indexOf('redeem_loyalty_for_sale')).toBeGreaterThan(rpcNames().indexOf('checkout_appointment'))
+      expect(result.success).toBe(true)
+      expect(result.loyalty).toEqual({ redeemed_units: 500, discount_cop: 25000 })
+      expect(result.loyaltyWarning).toBeUndefined()
+    })
+
+    it('nunca confía en un monto de descuento que mande el cliente', async () => {
+      setLoyalty(pointsLoyalty)
+      await checkoutAppointment({ ...base, loyaltyRedeem: { units: 100, discountCop: 999999 } as any })
+      expect(rpcCall('checkout_appointment')[1].p_discount_amount).toBe(5000)
+      expect(rpcCall('redeem_loyalty_for_sale')[1].p_discount_cop).toBe(5000)
+    })
+
+    it('puntos: el descuento se limita al total menos el descuento manual', async () => {
+      setLoyalty({ ...pointsLoyalty, balance: 5000 })
+      const result = await checkoutAppointment({ ...base, discountAmount: 5000, loyaltyRedeem: { units: 3000 } })
+      // 3000 × 50 = 150.000, pero solo quedan 40.000 por pagar
+      expect(rpcCall('checkout_appointment')[1].p_discount_amount).toBe(45000)
+      expect(result.loyalty).toEqual({ redeemed_units: 800, discount_cop: 40000 })   // solo se gastan los puntos que caben
+    })
+
+    it.each([
+      ['cero', 0],
+      ['negativas', -5],
+      ['decimales', 150.5],
+      ['menos del mínimo', 50],
+      ['más que el saldo', 1241],
+    ])('puntos: rechaza unidades %s sin cobrar', async (_label, units) => {
+      setLoyalty(pointsLoyalty)
+      const result = await checkoutAppointment({ ...base, loyaltyRedeem: { units } })
+      expect(result.error).toBe('validation_error')
+      expect(rpcNames()).not.toContain('checkout_appointment')
+      expect(rpcNames()).not.toContain('redeem_loyalty_for_sale')
+    })
+
+    it('sellos: servicio gratis con el tope del negocio', async () => {
+      setLoyalty(stampsLoyalty)
+      const result = await checkoutAppointment({
+        ...base,
+        items: [
+          { description: 'Corte + barba', quantity: 1, unitPrice: 45000, itemType: 'service' },
+          { description: 'Cera', quantity: 1, unitPrice: 20000, itemType: 'product' },
+        ],
+        loyaltyRedeem: { stamps: true },
+      })
+      // Precio del servicio $45.000 con tope $30.000
+      expect(rpcCall('checkout_appointment')[1].p_discount_amount).toBe(30000)
+      expect(rpcCall('redeem_loyalty_for_sale')[1]).toEqual({ p_sale_id: 'sale1', p_units: 10, p_discount_cop: 30000 })
+      expect(result.loyalty).toEqual({ redeemed_units: 10, discount_cop: 30000 })
+    })
+
+    it('sellos: rechaza si el cliente aún no completa los sellos', async () => {
+      setLoyalty({ ...stampsLoyalty, balance: 7, can_redeem: false })
+      const result = await checkoutAppointment({ ...base, loyaltyRedeem: { stamps: true } })
+      expect(result.error).toBe('validation_error')
+      expect(rpcNames()).not.toContain('checkout_appointment')
+    })
+
+    it('rechaza canjear puntos si el negocio usa sellos (y al revés)', async () => {
+      setLoyalty(stampsLoyalty)
+      expect((await checkoutAppointment({ ...base, loyaltyRedeem: { units: 100 } })).error).toBe('validation_error')
+      setLoyalty(pointsLoyalty)
+      expect((await checkoutAppointment({ ...base, loyaltyRedeem: { stamps: true } })).error).toBe('validation_error')
+      expect(rpcNames()).not.toContain('checkout_appointment')
+    })
+
+    it('rechaza si la lealtad está desactivada o la cita no tiene cliente', async () => {
+      setLoyalty({ ...pointsLoyalty, enabled: false })
+      expect((await checkoutAppointment({ ...base, loyaltyRedeem: { units: 100 } })).error).toBe('validation_error')
+
+      setLoyalty(pointsLoyalty, null)
+      expect((await checkoutAppointment({ ...base, loyaltyRedeem: { units: 100 } })).error).toBe('validation_error')
+      expect(rpcNames()).not.toContain('checkout_appointment')
+    })
+
+    it('no permite canjear con MercadoPago', async () => {
+      setLoyalty(pointsLoyalty)
+      const result = await checkoutAppointment({ ...base, paymentMethod: 'mercadopago', loyaltyRedeem: { units: 100 } })
+      expect(result.error).toBe('validation_error')
+      expect(result.message).toMatch(/efectivo, tarjeta o transferencia/)
+      expect(rpcNames()).not.toContain('checkout_appointment')
+    })
+
+    it('si el canje falla después del cobro, la venta se queda y se devuelve un aviso', async () => {
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      redeemResult = { data: null, error: { message: 'insufficient_balance' } }
+      setLoyalty(pointsLoyalty)
+      const result = await checkoutAppointment({ ...base, loyaltyRedeem: { units: 100 } })
+
+      expect(result.success).toBe(true)
+      expect(result.saleId).toBe('sale1')
+      expect(result.loyalty).toBeUndefined()
+      expect(result.loyaltyWarning).toMatch(/lealtad/i)
+      expect(spy).toHaveBeenCalled()
+      spy.mockRestore()
     })
   })
 })

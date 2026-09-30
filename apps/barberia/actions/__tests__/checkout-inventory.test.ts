@@ -14,10 +14,6 @@ jest.mock('../audit', () => ({
   logAction: jest.fn(),
 }))
 
-jest.mock('../loyalty', () => ({
-  earnPoints: jest.fn().mockResolvedValue(true),
-}))
-
 const baseParams = {
   appointmentId: 'apt1',
   businessId: 'b1',
@@ -65,7 +61,7 @@ describe('checkoutAppointment — inventario', () => {
         if (table === 'inventory_items') {
           return { select: jest.fn().mockReturnValue({ in: inBuilder }) }
         }
-        // appointments (lealtad)
+        // appointments
         return {
           select: jest.fn().mockReturnValue({
             eq: jest.fn().mockReturnValue({

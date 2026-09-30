@@ -1,959 +1,533 @@
 'use client'
 
-import { useState, useTransition, useRef, useEffect } from 'react'
+import { useEffect, useState, useTransition } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   Gift,
   Search,
   X,
   Loader2,
-  Edit2,
   Check,
   AlertCircle,
-  TrendingUp,
   Users,
   Award,
+  Coins,
+  Stamp,
+  SlidersHorizontal,
+  History,
+  Settings,
 } from 'lucide-react'
 import {
-  updateLoyaltySettings,
-  getClientLoyaltyBalance,
-  redeemPoints,
+  adjustCustomerLoyalty,
+  applyPendingLoyalty,
+  findCustomerLoyalty,
 } from '@/actions/loyalty'
-import type { LoyaltySettings, LoyaltyHistoryEntry, LoyaltyBalanceResult } from '@/actions/loyalty'
-import type { Customer } from '@xinuco/types'
+import type { CustomerLoyaltyResult, LoyaltyOverview } from '@/actions/loyalty'
+import {
+  describeRule,
+  formatMoney,
+  formatUnits,
+  type CustomerLoyalty,
+  type LoyaltyMode,
+  type LoyaltyMovement,
+} from '@/lib/loyalty-utils'
+import { StampDots } from './StampDots'
 import { AdminPageHeader } from '@xinuco/ui'
-import { formatCOP } from '@xinuco/utils'
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface LoyaltyDashboardProps {
-  businessId:      string
-  initialSettings: LoyaltySettings
-  initialHistory:  LoyaltyHistoryEntry[]
-  slug:            string
+  slug:     string
+  overview: LoyaltyOverview
+  /** Solo un administrador puede ajustar saldos y aplicar a ventas anteriores. */
+  isAdmin:  boolean
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const dateFmt = new Intl.DateTimeFormat('es-CO', {
+  timeZone:  'America/Bogota',
+  day:       '2-digit',
+  month:     'short',
+  year:      'numeric',
+  hour:      '2-digit',
+  minute:    '2-digit',
+  hourCycle: 'h23',
+})
+
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('es-CO', {
-    day:   '2-digit',
-    month: 'short',
-    year:  'numeric',
-  })
+  return dateFmt.format(new Date(iso))
 }
+
+const unitWord = (mode: LoyaltyMode, n: number) =>
+  mode === 'points' ? (n === 1 ? 'punto' : 'puntos') : (n === 1 ? 'sello' : 'sellos')
+
+const CARD_STYLE = { border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }
 
 // ════════════════════════════════════════════════════════════════════════════
 // COMPONENTE PRINCIPAL — LoyaltyDashboard
 // ════════════════════════════════════════════════════════════════════════════
 
-export function LoyaltyDashboard({
-  businessId,
-  initialSettings,
-  initialHistory,
-}: LoyaltyDashboardProps) {
-  const [settings, setSettings]       = useState<LoyaltySettings>(initialSettings)
-  const [history]                     = useState<LoyaltyHistoryEntry[]>(initialHistory)
-  const [redeemOpen, setRedeemOpen]   = useState(false)
-  const [selectedClient, setSelectedClient] = useState<Pick<Customer, 'id' | 'full_name' | 'phone'> | null>(null)
-  const [clientBalance, setClientBalance]   = useState<LoyaltyBalanceResult | null>(null)
-  const [settingsMsg, setSettingsMsg]       = useState<string | null>(null)
-
-  // Estadísticas calculadas desde el historial
-  const stats = computeStats(history)
+export function LoyaltyDashboard({ slug, overview, isAdmin }: LoyaltyDashboardProps) {
+  const { settings, summary, movements } = overview
+  const mode = settings.loyalty_mode
 
   return (
     <>
       <AdminPageHeader
-        title="Programa de Lealtad"
-        subtitle="Tus clientes ganan puntos en cada cita. Canjéalos como descuento."
-        hasData={true}
+        title="Lealtad"
+        subtitle={describeRule(settings)}
+        hasData={isAdmin}
         actionButton={
-          <button
-            type="button"
-            onClick={() => setRedeemOpen(true)}
-            className="btn-primary flex items-center gap-2"
+          <Link
+            href={`/${slug}/dashboard/settings/loyalty`}
+            className="btn-ghost flex items-center gap-2 !py-2 !px-3 text-xs"
           >
-            <Gift size={16} />
-            <span className="hidden sm:inline">Redimir Puntos</span>
-            <span className="sm:hidden">Redimir</span>
-          </button>
+            <Settings size={14} />
+            Cambiar en Configuración
+          </Link>
         }
       />
 
-      {/* Settings card */}
-      <LoyaltySettingsCard
-        businessId={businessId}
-        settings={settings}
-        onSaved={(updated) => {
-          setSettings(updated)
-          setSettingsMsg('Configuración guardada.')
-          setTimeout(() => setSettingsMsg(null), 3000)
-        }}
-      />
-
-      {settingsMsg && (
-        <p
-          role="status"
-          className="text-xs px-4 py-2.5 rounded-lg border animate-fade-in"
-          style={{
-            background:  'rgba(197,160,89,0.08)',
-            borderColor: 'rgba(197,160,89,0.2)',
-            color:       'var(--primary-color)',
-          }}
-        >
-          {settingsMsg}
-        </p>
-      )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* KPIs */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           icon={<Users size={18} />}
-          label="Clientes con puntos"
-          value={stats.uniqueClients.toString()}
+          label="Clientes con saldo"
+          value={formatUnits(summary.customers_with_balance)}
         />
         <StatCard
-          icon={<TrendingUp size={18} />}
-          label="Puntos activos totales"
-          value={stats.totalActive.toLocaleString('es-CO')}
+          icon={mode === 'points' ? <Coins size={18} /> : <Stamp size={18} />}
+          label={mode === 'points' ? 'Puntos vigentes' : 'Sellos vigentes'}
+          value={formatUnits(summary.total_balance)}
+          hint={mode === 'points' ? `Equivalen a ${formatMoney(summary.total_balance * settings.loyalty_point_value_cop)}` : undefined}
+        />
+        <StatCard
+          icon={<Gift size={18} />}
+          label="Listos para canjear"
+          value={formatUnits(summary.customers_ready)}
+          hint={mode === 'stamps' ? 'tienen su servicio gratis' : 'clientes con saldo para canjear'}
         />
         <StatCard
           icon={<Award size={18} />}
-          label="Puntos canjeados totales"
-          value={stats.totalRedeemed.toLocaleString('es-CO')}
+          label="Canjeado"
+          value={`${formatUnits(summary.redeemed_total)} ${unitWord(mode, summary.redeemed_total)}`}
+          hint={`${formatMoney(summary.discount_given_cop)} en descuentos`}
         />
       </div>
 
-      {/* Búsqueda de cliente */}
-      <ClientSearch
-        businessId={businessId}
-        settings={settings}
-        onClientSelected={(client, balance) => {
-          setSelectedClient(client)
-          setClientBalance(balance)
-          setRedeemOpen(true)
-        }}
-      />
+      {isAdmin && <ApplyPending />}
 
-      {/* Historial reciente */}
-      <LoyaltyHistoryTable history={history} settings={settings} />
+      <CustomerLookup mode={mode} isAdmin={isAdmin} />
 
-      {/* Sheet de redención */}
-      {redeemOpen && (
-        <RedeemSheet
-          businessId={businessId}
-          settings={settings}
-          preselectedClient={selectedClient}
-          preselectedBalance={clientBalance}
-          onClose={() => {
-            setRedeemOpen(false)
-            setSelectedClient(null)
-            setClientBalance(null)
-          }}
-        />
-      )}
+      <MovementsTable movements={movements} mode={mode} />
     </>
   )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// CARD DE CONFIGURACIÓN — Edición inline de valores
-// ════════════════════════════════════════════════════════════════════════════
-
-function LoyaltySettingsCard({
-  businessId,
-  settings,
-  onSaved,
-}: {
-  businessId: string
-  settings:   LoyaltySettings
-  onSaved:    (updated: LoyaltySettings) => void
-}) {
-  const [editing, setEditing]       = useState(false)
-  const [pointValue, setPointValue] = useState(settings.loyalty_point_value_cop.toString())
-  const [expiry, setExpiry]         = useState(settings.loyalty_expiry_months.toString())
-  const [formError, setFormError]   = useState<string | null>(null)
-  const [isPending, startTransition] = useTransition()
-
-  function handleEdit() {
-    setPointValue(settings.loyalty_point_value_cop.toString())
-    setExpiry(settings.loyalty_expiry_months.toString())
-    setFormError(null)
-    setEditing(true)
-  }
-
-  function handleCancel() {
-    setEditing(false)
-    setFormError(null)
-  }
-
-  function handleSave() {
-    setFormError(null)
-    const pv = parseInt(pointValue, 10)
-    const ex = parseInt(expiry, 10)
-
-    if (isNaN(pv) || pv <= 0) {
-      return setFormError('El valor del punto debe ser mayor a 0.')
-    }
-    if (isNaN(ex) || ex < 1 || ex > 60) {
-      return setFormError('Los meses deben estar entre 1 y 60.')
-    }
-
-    startTransition(async () => {
-      const result = await updateLoyaltySettings(businessId, {
-        loyalty_point_value_cop: pv,
-        loyalty_expiry_months:   ex,
-      })
-      if (result.error) {
-        setFormError(result.error)
-        return
-      }
-      onSaved({ loyalty_point_value_cop: pv, loyalty_expiry_months: ex })
-      setEditing(false)
-    })
-  }
-
-  return (
-    <div
-      className="rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-8"
-      style={{ border: '1px solid var(--border-color)', background: 'rgba(197,160,89,0.04)' }}
-    >
-      <Gift size={28} style={{ color: 'var(--primary-color)', flexShrink: 0 }} />
-
-      <div className="flex-1 flex flex-col sm:flex-row gap-4 sm:gap-8">
-        {/* Valor del punto */}
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-            Valor del punto
-          </span>
-          {editing ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-xinuco-muted">1 pto = $</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                step={500}
-                value={pointValue}
-                onChange={e => setPointValue(e.target.value)}
-                className="input-base w-28 text-sm"
-                aria-label="Valor del punto en COP"
-              />
-              <span className="text-xs text-xinuco-muted">COP</span>
-            </div>
-          ) : (
-            <span className="text-sm font-bold" style={{ color: 'var(--primary-color)' }}>
-              1 punto = {formatCOP(settings.loyalty_point_value_cop)}
-            </span>
-          )}
-        </div>
-
-        {/* Vencimiento */}
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-            Vencimiento
-          </span>
-          {editing ? (
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={60}
-                value={expiry}
-                onChange={e => setExpiry(e.target.value)}
-                className="input-base w-20 text-sm"
-                aria-label="Meses de vencimiento"
-              />
-              <span className="text-xs text-xinuco-muted">meses</span>
-            </div>
-          ) : (
-            <span className="text-sm font-bold text-xinuco-text">
-              Vencen en {settings.loyalty_expiry_months} mes
-              {settings.loyalty_expiry_months !== 1 ? 'es' : ''}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Error de edición */}
-      {formError && (
-        <p className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
-          {formError}
-        </p>
-      )}
-
-      {/* Botones de acción */}
-      <div className="flex items-center gap-2 shrink-0">
-        {editing ? (
-          <>
-            <button
-              type="button"
-              onClick={handleCancel}
-              disabled={isPending}
-              className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
-              aria-label="Cancelar"
-            >
-              <X size={16} />
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isPending}
-              className="btn-primary flex items-center gap-2 !py-2 !px-3 text-xs"
-              aria-label="Guardar configuración"
-            >
-              {isPending ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-              Guardar
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            onClick={handleEdit}
-            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
-            aria-label="Editar configuración de lealtad"
-          >
-            <Edit2 size={16} />
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// STAT CARD — Mini tarjeta estadística
+// STAT CARD
 // ════════════════════════════════════════════════════════════════════════════
 
 function StatCard({
   icon,
   label,
   value,
+  hint,
 }: {
   icon:  React.ReactNode
   label: string
   value: string
+  hint?: string
 }) {
   return (
-    <div
-      className="rounded-xl p-5 flex flex-col gap-2"
-      style={{ border: '1px solid var(--border-color)' }}
-    >
+    <div className="rounded-xl p-5 flex flex-col gap-2" style={{ border: '1px solid var(--border-color)' }}>
       <div className="flex items-center gap-2 text-xinuco-muted">
         {icon}
         <span className="text-xs font-semibold uppercase tracking-wider">{label}</span>
       </div>
-      <span
-        className="text-2xl font-bold tabular-nums"
-        style={{ color: 'var(--primary-color)' }}
-      >
+      <span className="text-2xl font-bold tabular-nums" style={{ color: 'var(--primary-color)' }}>
         {value}
       </span>
+      {hint && <span className="text-xs text-xinuco-muted">{hint}</span>}
     </div>
   )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// CLIENT SEARCH — Buscar cliente por teléfono y mostrar saldo
+// APLICAR A VENTAS ANTERIORES (admin)
 // ════════════════════════════════════════════════════════════════════════════
 
-function ClientSearch({
-  businessId,
-  settings,
-  onClientSelected,
-}: {
-  businessId:       string
-  settings:         LoyaltySettings
-  onClientSelected: (client: Pick<Customer, 'id' | 'full_name' | 'phone'>, balance: LoyaltyBalanceResult) => void
-}) {
-  const [phone, setPhone]                 = useState('')
-  const [searching, setSearching]         = useState(false)
-  const [searchResult, setSearchResult]   = useState<{
-    client:  Pick<Customer, 'id' | 'full_name' | 'phone'>
-    balance: LoyaltyBalanceResult
-  } | null>(null)
-  const [searchError, setSearchError]     = useState<string | null>(null)
-  const [isPending, startTransition]      = useTransition()
+function ApplyPending() {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
 
-  async function handleSearch(e: React.FormEvent) {
-    e.preventDefault()
-    if (!phone.trim()) return
-
-    setSearching(true)
-    setSearchError(null)
-    setSearchResult(null)
-
+  function handleApply() {
+    setMessage(null)
     startTransition(async () => {
-      try {
-        // Dynamic import to avoid circular dep with server action
-        const { createClient } = await import('@/lib/supabase/client')
-        const supabase = createClient()
-
-        const { data: customer, error } = await supabase
-          .from('customers')
-          .select('id, full_name, phone')
-          .eq('business_id', businessId)
-          .ilike('phone', `%${phone.trim()}%`)
-          .limit(1)
-          .maybeSingle()
-
-        if (error) {
-          setSearchError('Error al buscar el cliente.')
-          setSearching(false)
-          return
-        }
-        if (!customer) {
-          setSearchError('No se encontró un cliente con ese teléfono.')
-          setSearching(false)
-          return
-        }
-
-        const balance = await getClientLoyaltyBalance(businessId, customer.id)
-        setSearchResult({ client: customer, balance })
-      } catch {
-        setSearchError('Error inesperado al buscar el cliente.')
-      } finally {
-        setSearching(false)
+      const res = await applyPendingLoyalty()
+      if (res.error) {
+        setMessage({ ok: false, text: res.error })
+        return
       }
+      const sales = res.sales ?? 0
+      setMessage({
+        ok: true,
+        text: sales === 0
+          ? 'No había ventas pendientes este mes: todo estaba al día.'
+          : `Se aplicó a ${formatUnits(sales)} ${sales === 1 ? 'venta' : 'ventas'} (${formatUnits(res.units ?? 0)} en total).`,
+      })
+      router.refresh()
     })
   }
 
   return (
-    <section
-      className="rounded-xl p-5 flex flex-col gap-4"
-      style={{ border: '1px solid var(--border-color)' }}
-    >
-      <h3 className="text-sm font-semibold text-xinuco-text">Consultar saldo de cliente</h3>
+    <div className="rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3" style={CARD_STYLE}>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-xinuco-text">Ventas anteriores</p>
+        <p className="text-xs text-xinuco-muted">
+          Da lealtad a las ventas pagadas de este mes que aún no la tienen. No duplica las que ya la recibieron.
+        </p>
+        {message && (
+          <p
+            role={message.ok ? 'status' : 'alert'}
+            className={`text-xs mt-2 ${message.ok ? 'text-emerald-400' : 'text-red-400'}`}
+          >
+            {message.text}
+          </p>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={handleApply}
+        disabled={isPending}
+        className="btn-ghost flex items-center gap-2 !py-2 !px-3 text-xs shrink-0"
+      >
+        {isPending ? <Loader2 size={13} className="animate-spin" /> : <History size={13} />}
+        Aplicar a ventas anteriores
+      </button>
+    </div>
+  )
+}
 
-      <form onSubmit={handleSearch} className="flex gap-2">
-        <input
-          type="tel"
-          value={phone}
-          onChange={e => setPhone(e.target.value)}
-          placeholder="Teléfono del cliente…"
-          className="input-base flex-1"
-          aria-label="Teléfono del cliente"
-        />
-        <button
-          type="submit"
-          disabled={isPending || !phone.trim()}
-          className="btn-primary flex items-center gap-2"
-        >
-          {isPending ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
-          <span className="hidden sm:inline">Buscar</span>
+// ════════════════════════════════════════════════════════════════════════════
+// BUSCAR CLIENTE — por teléfono o nombre
+// ════════════════════════════════════════════════════════════════════════════
+
+function CustomerLookup({ mode, isAdmin }: { mode: LoyaltyMode; isAdmin: boolean }) {
+  const [query, setQuery]       = useState('')
+  const [lastQuery, setLastQuery] = useState('')
+  const [results, setResults]   = useState<CustomerLoyaltyResult[] | null>(null)
+  const [error, setError]       = useState<string | null>(null)
+  const [adjusting, setAdjusting] = useState<CustomerLoyaltyResult | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  function search(q: string) {
+    startTransition(async () => {
+      const res = await findCustomerLoyalty(q)
+      setError(res.error ?? null)
+      setResults(res.error ? null : res.results)
+    })
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const q = query.trim()
+    if (q.length < 2) {
+      setError('Escribe al menos 2 letras del nombre o números del teléfono.')
+      setResults(null)
+      return
+    }
+    setLastQuery(q)
+    search(q)
+  }
+
+  return (
+    <section className="rounded-xl p-5 flex flex-col gap-4" style={CARD_STYLE} aria-label="Buscar cliente">
+      <div>
+        <h2 className="text-sm font-bold text-xinuco-text">Consultar un cliente</h2>
+        <p className="text-xs text-xinuco-muted">Busca por teléfono o nombre para ver su saldo.</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="flex gap-2">
+        <div className="relative flex-1">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-xinuco-muted pointer-events-none" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Teléfono o nombre"
+            className="input-base !pl-9 !py-2.5"
+            aria-label="Buscar cliente por teléfono o nombre"
+          />
+        </div>
+        <button type="submit" disabled={isPending} className="btn-primary !py-2.5 !px-4 text-sm">
+          {isPending ? <Loader2 size={15} className="animate-spin" /> : 'Buscar'}
         </button>
       </form>
 
-      {searchError && (
-        <p className="text-xs text-red-400 flex items-center gap-2">
-          <AlertCircle size={13} />
-          {searchError}
+      {error && (
+        <p role="alert" className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+          {error}
         </p>
       )}
 
-      {searchResult && !searching && (
-        <div
-          className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 rounded-xl animate-fade-in"
-          style={{ background: 'rgba(197,160,89,0.06)', border: '1px solid rgba(197,160,89,0.15)' }}
-        >
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-xinuco-text">
-              {searchResult.client.full_name}
-            </p>
-            <p className="text-xs text-xinuco-muted mt-0.5">
-              {searchResult.client.phone}
-            </p>
-            <p className="text-xs text-xinuco-muted mt-1">
-              Saldo:{' '}
-              <span className="font-bold" style={{ color: 'var(--primary-color)' }}>
-                {searchResult.balance.total_points.toLocaleString('es-CO')} puntos
-              </span>
-              {' '}({formatCOP(searchResult.balance.points_value_cop)})
-              {searchResult.balance.expires_soon > 0 && (
-                <span className="text-amber-400 ml-2">
-                  · {searchResult.balance.expires_soon} pts por vencer pronto
-                </span>
-              )}
-            </p>
-          </div>
-          {searchResult.balance.total_points > 0 && (
-            <button
-              type="button"
-              onClick={() =>
-                onClientSelected(searchResult.client, searchResult.balance)
-              }
-              className="btn-primary text-xs flex items-center gap-2 shrink-0"
-            >
-              <Gift size={13} />
-              Redimir Puntos
-            </button>
-          )}
-        </div>
+      {results && results.length === 0 && !error && (
+        <p className="text-sm text-xinuco-muted">No se encontró ningún cliente con «{lastQuery}».</p>
+      )}
+
+      {results && results.length > 0 && (
+        <ul className="flex flex-col gap-2">
+          {results.map((r) => (
+            <li key={r.customer.id}>
+              <CustomerCard result={r} mode={mode} canAdjust={isAdmin} onAdjust={() => setAdjusting(r)} />
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {adjusting && adjusting.loyalty && (
+        <AdjustSheet
+          customer={adjusting.customer}
+          loyalty={adjusting.loyalty}
+          onClose={() => setAdjusting(null)}
+          onDone={() => {
+            setAdjusting(null)
+            search(lastQuery)
+          }}
+        />
       )}
     </section>
   )
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// HISTORIAL — Tabla de movimientos recientes
-// ════════════════════════════════════════════════════════════════════════════
-
-function LoyaltyHistoryTable({
-  history,
-  settings,
+function CustomerCard({
+  result,
+  mode,
+  canAdjust,
+  onAdjust,
 }: {
-  history:  LoyaltyHistoryEntry[]
-  settings: LoyaltySettings
+  result:    CustomerLoyaltyResult
+  mode:      LoyaltyMode
+  canAdjust: boolean
+  onAdjust:  () => void
 }) {
-  if (history.length === 0) {
-    return (
-      <div
-        className="rounded-xl px-5 py-12 text-center"
-        style={{ border: '1px solid var(--border-color)' }}
-      >
-        <Gift size={28} className="mx-auto mb-3 text-xinuco-muted" />
-        <p className="text-sm text-xinuco-muted">
-          Aún no hay movimientos de puntos. Los puntos se acumulan automáticamente al cobrar una cita.
-        </p>
-      </div>
-    )
-  }
+  const { customer, loyalty } = result
 
   return (
-    <section aria-label="Historial de puntos de lealtad">
-      <h3 className="text-sm font-semibold text-xinuco-text mb-3">Actividad reciente</h3>
-      <div
-        className="overflow-x-auto rounded-xl"
-        style={{ border: '1px solid var(--border-color)' }}
-      >
-        <table className="w-full text-sm" aria-label="Tabla de historial de lealtad">
-          <thead>
-            <tr
-              style={{
-                borderBottom: '1px solid var(--border-color)',
-                background:   'var(--surface-color, rgba(255,255,255,0.03))',
-              }}
-            >
-              <th className="px-5 py-3.5 text-left text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-                Cliente
-              </th>
-              <th className="px-5 py-3.5 text-center text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-                Puntos
-              </th>
-              <th className="px-5 py-3.5 text-center text-xs font-semibold text-xinuco-muted uppercase tracking-wider hidden sm:table-cell">
-                Tipo
-              </th>
-              <th className="px-5 py-3.5 text-center text-xs font-semibold text-xinuco-muted uppercase tracking-wider hidden md:table-cell">
-                Equivalente
-              </th>
-              <th className="px-5 py-3.5 text-right text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-                Fecha
-              </th>
-            </tr>
-          </thead>
+    <div
+      className="flex items-center justify-between gap-3 rounded-xl p-3"
+      style={{ border: '1px solid var(--border-color)' }}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-xinuco-text truncate">{customer.full_name}</p>
+        <p className="text-xs text-xinuco-muted tabular-nums">{customer.phone}</p>
 
-          <tbody>
-            {history.map(entry => {
-              const isEarn   = entry.points_added > 0
-              const points   = isEarn ? entry.points_added : entry.points_redeemed
-              const valueCOP = points * settings.loyalty_point_value_cop
-
-              return (
-                <tr
-                  key={entry.id}
-                  className="transition-all duration-200 hover:bg-white/[0.02]"
-                  style={{ borderTop: '1px solid var(--border-color)' }}
-                >
-                  <td className="px-5 py-4">
-                    <p className="font-medium text-xinuco-text text-sm leading-tight">
-                      {entry.customer?.full_name ?? 'Cliente desconocido'}
-                    </p>
-                    <p className="text-xs text-xinuco-muted mt-0.5">
-                      {entry.customer?.phone ?? '—'}
-                    </p>
-                  </td>
-
-                  <td className="px-5 py-4 text-center">
-                    <span
-                      className={`text-sm font-bold tabular-nums ${
-                        isEarn ? 'text-emerald-400' : 'text-amber-400'
-                      }`}
-                    >
-                      {isEarn ? '+' : '-'}{points.toLocaleString('es-CO')}
-                    </span>
-                  </td>
-
-                  <td className="px-5 py-4 text-center hidden sm:table-cell">
-                    <span
-                      className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${
-                        isEarn
-                          ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
-                          : 'text-amber-400 bg-amber-400/10 border-amber-400/20'
-                      }`}
-                    >
-                      {isEarn ? 'Acumulado' : 'Canjeado'}
-                    </span>
-                  </td>
-
-                  <td className="px-5 py-4 text-center hidden md:table-cell">
-                    <span className="text-xs text-xinuco-muted tabular-nums">
-                      {formatCOP(valueCOP)}
-                    </span>
-                  </td>
-
-                  <td className="px-5 py-4 text-right text-xs text-xinuco-muted tabular-nums whitespace-nowrap">
-                    {formatDate(entry.created_at)}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-
-          <tfoot>
-            <tr style={{ borderTop: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}>
-              <td colSpan={5} className="px-5 py-3 text-xs text-xinuco-muted">
-                {history.length} movimiento{history.length !== 1 ? 's' : ''} reciente
-                {history.length !== 1 ? 's' : ''} · Mostrando últimos 100
-              </td>
-            </tr>
-          </tfoot>
-        </table>
+        {!loyalty ? (
+          <p className="text-xs text-red-400 mt-1">No se pudo cargar el saldo.</p>
+        ) : loyalty.mode === 'points' ? (
+          <div className="mt-1.5">
+            <p className="text-sm font-bold tabular-nums" style={{ color: 'var(--primary-color)' }}>
+              {formatUnits(loyalty.balance)} {unitWord('points', loyalty.balance)}
+              <span className="text-xinuco-muted font-normal">
+                {' '}· {formatMoney(loyalty.value_cop ?? loyalty.balance * loyalty.point_value_cop)}
+              </span>
+            </p>
+            {loyalty.expiring_30d > 0 && (
+              <p className="text-xs text-amber-400">
+                {formatUnits(loyalty.expiring_30d)} {unitWord('points', loyalty.expiring_30d)} vencen en los próximos 30 días
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+            <StampDots balance={loyalty.balance} required={loyalty.stamps_required} />
+            <span className="text-xs font-semibold text-xinuco-text tabular-nums">
+              {loyalty.balance}/{loyalty.stamps_required}
+            </span>
+            {loyalty.can_redeem && (
+              <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-400/10 border-emerald-400/20">
+                Servicio gratis listo
+              </span>
+            )}
+          </div>
+        )}
       </div>
-    </section>
+
+      {canAdjust && loyalty && (
+        <button
+          type="button"
+          onClick={onAdjust}
+          className="btn-ghost flex items-center gap-1.5 !py-2 !px-3 text-xs shrink-0"
+          aria-label={`Ajustar ${mode === 'points' ? 'puntos' : 'sellos'} de ${customer.full_name}`}
+        >
+          <SlidersHorizontal size={13} />
+          Ajustar
+        </button>
+      )}
+    </div>
   )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// REDEEM SHEET — Panel lateral de canje de puntos
+// AJUSTAR SALDO (admin) — panel lateral: sumar / restar + motivo obligatorio
 // ════════════════════════════════════════════════════════════════════════════
 
-function RedeemSheet({
-  businessId,
-  settings,
-  preselectedClient,
-  preselectedBalance,
+function AdjustSheet({
+  customer,
+  loyalty,
   onClose,
+  onDone,
 }: {
-  businessId:         string
-  settings:           LoyaltySettings
-  preselectedClient:  Pick<Customer, 'id' | 'full_name' | 'phone'> | null
-  preselectedBalance: LoyaltyBalanceResult | null
-  onClose:            () => void
+  customer: CustomerLoyaltyResult['customer']
+  loyalty:  CustomerLoyalty
+  onClose:  () => void
+  onDone:   () => void
 }) {
-  const backdropRef                         = useRef<HTMLDivElement>(null)
-  const [phone, setPhone]                   = useState(preselectedClient?.phone ?? '')
-  const [foundClient, setFoundClient]       = useState<Pick<Customer, 'id' | 'full_name' | 'phone'> | null>(preselectedClient)
-  const [balance, setBalance]               = useState<LoyaltyBalanceResult | null>(preselectedBalance)
-  const [pointsInput, setPointsInput]       = useState('')
-  const [searchError, setSearchError]       = useState<string | null>(null)
-  const [redeemError, setRedeemError]       = useState<string | null>(null)
-  const [redeemSuccess, setRedeemSuccess]   = useState<string | null>(null)
-  const [isPendingSearch, startSearch]      = useTransition()
-  const [isPendingRedeem, startRedeem]      = useTransition()
+  const router = useRouter()
+  const [sign, setSign]     = useState<1 | -1>(1)
+  const [amount, setAmount] = useState('')
+  const [reason, setReason] = useState('')
+  const [error, setError]   = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
 
-  // Cerrar con ESC
+  // Cerrar con ESC y bloquear el scroll del fondo
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
   }, [onClose])
 
-  // Bloquear scroll del body
-  useEffect(() => {
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = '' }
-  }, [])
+  const n = Math.floor(Number(amount)) || 0
+  const delta = sign * n
+  const newBalance = loyalty.balance + delta
+  const word = unitWord(loyalty.mode, 2)
 
-  const pointsToRedeem = parseInt(pointsInput, 10) || 0
-  const discountCOP    = pointsToRedeem * settings.loyalty_point_value_cop
-  const maxPoints      = balance?.total_points ?? 0
+  function handleSave() {
+    setError(null)
+    if (n <= 0) return setError(`Ingresa cuántos ${word} ${sign === 1 ? 'sumar' : 'restar'}.`)
+    if (newBalance < 0) return setError('No puedes restar más de lo que tiene el cliente.')
+    if (reason.trim().length < 3) return setError('Escribe el motivo del ajuste (mínimo 3 letras).')
 
-  function handleSearchClient(e: React.FormEvent) {
-    e.preventDefault()
-    if (!phone.trim()) return
-    setSearchError(null)
-    setFoundClient(null)
-    setBalance(null)
-    setRedeemSuccess(null)
-
-    startSearch(async () => {
-      try {
-        const { createClient } = await import('@/lib/supabase/client')
-        const supabase = createClient()
-
-        const { data: customer, error } = await supabase
-          .from('customers')
-          .select('id, full_name, phone')
-          .eq('business_id', businessId)
-          .ilike('phone', `%${phone.trim()}%`)
-          .limit(1)
-          .maybeSingle()
-
-        if (error || !customer) {
-          setSearchError('No se encontró un cliente con ese teléfono.')
-          return
-        }
-
-        const bal = await getClientLoyaltyBalance(businessId, customer.id)
-        setFoundClient(customer)
-        setBalance(bal)
-      } catch {
-        setSearchError('Error al buscar el cliente.')
-      }
-    })
-  }
-
-  function handleRedeem() {
-    if (!foundClient || pointsToRedeem <= 0) return
-    setRedeemError(null)
-    setRedeemSuccess(null)
-
-    if (pointsToRedeem > maxPoints) {
-      setRedeemError(`Saldo insuficiente. El cliente tiene ${maxPoints} puntos.`)
-      return
-    }
-
-    startRedeem(async () => {
-      const result = await redeemPoints(
-        businessId,
-        foundClient.id,
-        pointsToRedeem,
-        crypto.randomUUID()
-      )
-
-      if (!result.success) {
-        const msgs: Record<string, string> = {
-          insufficient_points:   `Saldo insuficiente. El cliente tiene ${maxPoints} puntos.`,
-          points_must_be_positive: 'Debes indicar al menos 1 punto.',
-        }
-        setRedeemError(msgs[result.error ?? ''] ?? result.error ?? 'Error al canjear puntos.')
-        return
-      }
-
-      setBalance(prev => prev
-        ? { ...prev, total_points: result.remaining_balance, points_value_cop: result.remaining_balance * settings.loyalty_point_value_cop }
-        : null
-      )
-      setPointsInput('')
-      setRedeemSuccess(
-        `Canje exitoso: ${pointsToRedeem.toLocaleString('es-CO')} pts → descuento de ${formatCOP(result.discount_amount_cop)}`
-      )
+    startTransition(async () => {
+      const res = await adjustCustomerLoyalty(customer.id, delta, reason)
+      if (res.error) return setError(res.error)
+      router.refresh()
+      onDone()
     })
   }
 
   return (
     <div
-      ref={backdropRef}
-      className="fixed inset-0 z-50 flex justify-end"
-      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => { if (e.target === backdropRef.current) onClose() }}
+      className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Ajustar ${word} de ${customer.full_name}`}
     >
       <div
-        className="h-full overflow-y-auto animate-slide-in-right w-[95vw] sm:w-[420px]"
-        style={{ background: 'var(--bg-color)', borderLeft: '1px solid var(--border-color)' }}
+        className="w-full max-w-sm h-full overflow-y-auto p-5 flex flex-col gap-5 border-l"
+        style={{ background: 'var(--bg-color)', borderColor: 'var(--border-color)' }}
       >
-        {/* Header */}
-        <div
-          className="sticky top-0 z-10 flex items-center justify-between px-6 py-5"
-          style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-color)' }}
-        >
-          <div>
-            <h2 className="text-lg font-bold text-xinuco-text">Redimir Puntos</h2>
-            <p className="text-xs text-xinuco-muted mt-0.5">
-              Busca al cliente y aplica el descuento.
-            </p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-lg font-bold text-xinuco-text">Ajustar saldo</h2>
+            <p className="text-xs text-xinuco-muted truncate">{customer.full_name} · {customer.phone}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
-            aria-label="Cerrar panel"
+            className="p-1 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            aria-label="Cerrar"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
-        <div className="p-6 flex flex-col gap-5">
+        <p className="text-sm text-xinuco-text">
+          Saldo actual: <span className="font-bold tabular-nums">{formatUnits(loyalty.balance)}</span>{' '}
+          {unitWord(loyalty.mode, loyalty.balance)}
+        </p>
 
-          {/* Búsqueda de cliente */}
-          {!foundClient && (
-            <form onSubmit={handleSearchClient} className="flex flex-col gap-3">
-              <label
-                htmlFor="redeem-phone"
-                className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider"
-              >
-                Teléfono del cliente
-              </label>
-              <div className="flex gap-2">
-                <input
-                  id="redeem-phone"
-                  type="tel"
-                  value={phone}
-                  onChange={e => setPhone(e.target.value)}
-                  placeholder="Ej: 3001234567"
-                  className="input-base flex-1"
-                  autoFocus
-                />
-                <button
-                  type="submit"
-                  disabled={isPendingSearch || !phone.trim()}
-                  className="btn-primary flex items-center gap-2"
-                >
-                  {isPendingSearch ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
-                </button>
-              </div>
-              {searchError && (
-                <p className="text-xs text-red-400 flex items-center gap-2">
-                  <AlertCircle size={13} />
-                  {searchError}
-                </p>
-              )}
-            </form>
+        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Tipo de ajuste">
+          {([[1, 'Sumar (+)'], [-1, 'Restar (−)']] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={sign === value}
+              onClick={() => setSign(value)}
+              className="rounded-xl border py-2.5 text-sm font-semibold transition-colors"
+              style={{
+                borderColor:     sign === value ? 'var(--primary-color)' : 'var(--border-color)',
+                color:           sign === value ? 'var(--primary-color)' : 'var(--text-color, #F4F4F4)',
+                backgroundColor: sign === value ? 'color-mix(in srgb, var(--primary-color) 8%, transparent)' : 'transparent',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="adjust-amount" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wide">
+            Cantidad de {word}
+          </label>
+          <input
+            id="adjust-amount"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            step={1}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="input-base"
+          />
+          {n > 0 && (
+            <p className="text-xs text-xinuco-muted">
+              Quedará en <span className="font-semibold text-xinuco-text tabular-nums">{formatUnits(Math.max(0, newBalance))}</span>
+              {loyalty.mode === 'points' && ` (${formatMoney(Math.max(0, newBalance) * loyalty.point_value_cop)})`}
+            </p>
           )}
+        </div>
 
-          {/* Datos del cliente y saldo */}
-          {foundClient && balance && (
-            <>
-              <div
-                className="flex items-center justify-between px-4 py-3 rounded-xl"
-                style={{ background: 'rgba(197,160,89,0.06)', border: '1px solid rgba(197,160,89,0.15)' }}
-              >
-                <div>
-                  <p className="text-sm font-semibold text-xinuco-text">
-                    {foundClient.full_name}
-                  </p>
-                  <p className="text-xs text-xinuco-muted">{foundClient.phone}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => { setFoundClient(null); setBalance(null); setRedeemSuccess(null) }}
-                  className="p-1.5 rounded-lg text-xinuco-muted hover:text-xinuco-text transition-colors"
-                  aria-label="Cambiar cliente"
-                >
-                  <X size={15} />
-                </button>
-              </div>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="adjust-reason" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wide">
+            Motivo (obligatorio)
+          </label>
+          <textarea
+            id="adjust-reason"
+            rows={3}
+            maxLength={200}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Ej: Cortesía por la espera"
+            className="input-base resize-none"
+          />
+        </div>
 
-              {/* Saldo disponible */}
-              <div className="flex flex-col gap-1 text-center">
-                <span className="text-xs text-xinuco-muted uppercase tracking-wider">Saldo disponible</span>
-                <span
-                  className="text-3xl font-bold tabular-nums"
-                  style={{ color: 'var(--primary-color)' }}
-                >
-                  {balance.total_points.toLocaleString('es-CO')}
-                  <span className="text-base font-medium ml-1">pts</span>
-                </span>
-                <span className="text-xs text-xinuco-muted">
-                  Equivale a {formatCOP(balance.points_value_cop)}
-                </span>
-                {balance.expires_soon > 0 && (
-                  <span className="text-xs text-amber-400 mt-1">
-                    {balance.expires_soon} pts vencen en los próximos 30 días
-                  </span>
-                )}
-              </div>
-
-              {balance.total_points === 0 ? (
-                <p className="text-sm text-xinuco-muted text-center py-4">
-                  Este cliente no tiene puntos disponibles para canjear.
-                </p>
-              ) : (
-                <>
-                  <div style={{ borderTop: '1px solid var(--border-color)' }} />
-
-                  {/* Input de puntos a canjear */}
-                  <div className="flex flex-col gap-2">
-                    <label
-                      htmlFor="points-to-redeem"
-                      className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider"
-                    >
-                      Puntos a canjear
-                    </label>
-                    <input
-                      id="points-to-redeem"
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      max={maxPoints}
-                      value={pointsInput}
-                      onChange={e => setPointsInput(e.target.value)}
-                      placeholder={`Máx. ${maxPoints}`}
-                      className="input-base"
-                    />
-                    {pointsToRedeem > 0 && (
-                      <p className="text-xs" style={{ color: 'var(--primary-color)' }}>
-                        Descuento: {formatCOP(discountCOP)}
-                      </p>
-                    )}
-                  </div>
-
-                  {redeemError && (
-                    <p
-                      role="alert"
-                      className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2.5 animate-fade-in"
-                    >
-                      {redeemError}
-                    </p>
-                  )}
-
-                  {redeemSuccess && (
-                    <p
-                      role="status"
-                      className="text-xs px-4 py-2.5 rounded-lg border animate-fade-in"
-                      style={{
-                        background:  'rgba(52,211,153,0.08)',
-                        borderColor: 'rgba(52,211,153,0.2)',
-                        color:       '#34d399',
-                      }}
-                    >
-                      {redeemSuccess}
-                    </p>
-                  )}
-
-                  {/* Botón de confirmar canje */}
-                  <div className="flex gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={onClose}
-                      className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
-                      style={{ borderColor: 'var(--border-color)' }}
-                    >
-                      Cerrar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleRedeem}
-                      disabled={isPendingRedeem || pointsToRedeem <= 0 || pointsToRedeem > maxPoints}
-                      className="flex-1 btn-primary !py-3 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {isPendingRedeem ? (
-                        <>
-                          <Loader2 size={15} className="animate-spin" />
-                          Canjeando…
-                        </>
-                      ) : (
-                        <>
-                          <Gift size={15} />
-                          Confirmar Canje
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-
-          {/* Nota informativa */}
-          <p
-            className="text-[11px] text-xinuco-muted text-center px-2"
-            style={{ lineHeight: '1.5' }}
-          >
-            1 punto = {formatCOP(settings.loyalty_point_value_cop)} · Puntos vencen a los{' '}
-            {settings.loyalty_expiry_months} meses de ser ganados.
+        {error && (
+          <p role="alert" className="flex items-start gap-2 text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+            <AlertCircle size={14} className="shrink-0 mt-0.5" />
+            <span>{error}</span>
           </p>
+        )}
+
+        <div className="flex gap-2 mt-auto">
+          <button type="button" onClick={onClose} disabled={isPending} className="btn-ghost flex-1 !py-2.5 text-sm">
+            Cancelar
+          </button>
+          <button type="button" onClick={handleSave} disabled={isPending} className="btn-primary flex-1 !py-2.5 text-sm">
+            {isPending ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+            Guardar ajuste
+          </button>
         </div>
       </div>
     </div>
@@ -961,25 +535,95 @@ function RedeemSheet({
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Helpers de cálculo de estadísticas
+// ACTIVIDAD RECIENTE
 // ════════════════════════════════════════════════════════════════════════════
 
-function computeStats(history: LoyaltyHistoryEntry[]) {
-  const clientSet = new Set<string>()
-  let totalActive  = 0
-  let totalRedeemed = 0
+const TYPE_BADGE: Record<LoyaltyMovement['entry_type'], { label: string; className: string }> = {
+  earn:   { label: 'Ganó',   className: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' },
+  redeem: { label: 'Canjeó', className: 'text-amber-400 bg-amber-400/10 border-amber-400/20' },
+  adjust: { label: 'Ajuste', className: 'text-sky-400 bg-sky-400/10 border-sky-400/20' },
+}
 
-  for (const entry of history) {
-    if (entry.points_added > 0) {
-      clientSet.add(entry.client_id)
-      totalActive += entry.points_added
-    }
-    totalRedeemed += entry.points_redeemed
-  }
+function MovementsTable({ movements, mode }: { movements: LoyaltyMovement[]; mode: LoyaltyMode }) {
+  const unitsLabel = mode === 'points' ? 'Puntos' : 'Sellos'
 
-  return {
-    uniqueClients: clientSet.size,
-    totalActive:   Math.max(0, totalActive - totalRedeemed),
-    totalRedeemed,
-  }
+  return (
+    <section aria-label="Actividad reciente" className="flex flex-col gap-3">
+      <h2 className="text-sm font-bold text-xinuco-text">Actividad reciente</h2>
+
+      {movements.length === 0 ? (
+        <div
+          className="flex flex-col items-center justify-center py-14 text-center rounded-xl"
+          style={{ border: '1px dashed var(--border-color)' }}
+        >
+          <Gift size={30} className="text-xinuco-muted mb-3 opacity-40" />
+          <p className="text-sm text-xinuco-muted">
+            Aún no hay movimientos. Se generan solos cuando cobras a un cliente registrado.
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-xl overflow-x-auto" style={{ border: '1px solid var(--border-color)' }}>
+          <table className="w-full text-left min-w-[640px]">
+            <thead>
+              <tr style={{ background: 'var(--surface-color, rgba(255,255,255,0.02))' }}>
+                {['Cliente', 'Tipo', unitsLabel, 'Equivale a', 'Fecha', 'Nota'].map((h, i) => (
+                  <th
+                    key={h}
+                    scope="col"
+                    className={`px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-xinuco-muted ${i === 2 || i === 3 ? 'text-right' : ''}`}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {movements.map((m) => {
+                const badge = TYPE_BADGE[m.entry_type]
+                return (
+                  <tr
+                    key={m.id}
+                    className="transition-colors hover:bg-white/[0.02]"
+                    style={{ borderTop: '1px solid var(--border-color)' }}
+                  >
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-medium text-xinuco-text leading-tight">
+                        {m.customer?.full_name ?? 'Cliente desconocido'}
+                      </p>
+                      <p className="text-xs text-xinuco-muted tabular-nums">{m.customer?.phone ?? '—'}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${badge.className}`}>
+                        {badge.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <span className={`text-sm font-bold tabular-nums ${m.units >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {m.units >= 0 ? '+' : '−'}{formatUnits(Math.abs(m.units))}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right text-xs text-xinuco-muted tabular-nums whitespace-nowrap">
+                      {m.entry_type === 'redeem' && m.discount_cop != null ? formatMoney(m.discount_cop) : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-xinuco-muted tabular-nums whitespace-nowrap">
+                      {formatDate(m.created_at)}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-xinuco-muted max-w-[220px] truncate" title={m.notes ?? undefined}>
+                      {m.notes ?? '—'}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          <p
+            className="px-4 py-3 text-xs text-xinuco-muted"
+            style={{ borderTop: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+          >
+            Últimos {movements.length} {movements.length === 1 ? 'movimiento' : 'movimientos'} (máximo 100)
+          </p>
+        </div>
+      )}
+    </section>
+  )
 }

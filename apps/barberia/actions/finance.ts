@@ -4,7 +4,7 @@ import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { PaymentMethod, CashRegisterShift, Sale, SaleItem, Payment, Json } from '@xinuco/types'
 import { logAction } from './audit'
-import { earnPoints } from '@/actions/loyalty'
+import { loyaltyErrorMessage, stampRewardCop, type CustomerLoyalty } from '@/lib/loyalty-utils'
 import { businessTodayISODate, apptDateKey, dayLabel, formatApptTime } from '@/lib/agenda-time'
 import { parseReservations, type InventoryReservation } from '@/lib/inventory-reservations'
 
@@ -222,6 +222,77 @@ export interface CheckoutAppointmentParams {
   tipAmount: number
   discountAmount: number
   items: CheckoutItemInput[]
+  /**
+   * Canje de lealtad en este cobro (solo métodos inmediatos, no MercadoPago):
+   * puntos → `{ units }`; sellos → `{ stamps: true }` (servicio gratis).
+   * El descuento NUNCA viene del cliente: se calcula aquí con el saldo real.
+   */
+  loyaltyRedeem?: { units: number } | { stamps: true }
+}
+
+/** Descuento de lealtad calculado en el servidor a partir del saldo real del cliente. */
+interface LoyaltyRedemption {
+  units:       number
+  discountCop: number
+}
+
+/**
+ * resolveLoyaltyRedemption — Valida el canje pedido y calcula el descuento.
+ * Puntos: units entre el mínimo y el saldo; descuento = min(units × valor, total − descuento manual).
+ * Sellos: requiere can_redeem; descuento = precio del primer servicio del ticket (con tope).
+ */
+async function resolveLoyaltyRedemption(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  appointmentId: string,
+  request: NonNullable<CheckoutAppointmentParams['loyaltyRedeem']>,
+  items: CheckoutItemInput[],
+  manualDiscount: number,
+): Promise<LoyaltyRedemption | { error: string; message: string }> {
+  const invalid = (message: string) => ({ error: 'validation_error', message })
+
+  const { data: appt } = await supabase
+    .from('appointments')
+    .select('customer_id')
+    .eq('id', appointmentId)
+    .maybeSingle()
+  const customerId = (appt as { customer_id?: string | null } | null)?.customer_id
+  if (!customerId) return invalid('La cita no tiene un cliente: no se puede canjear lealtad.')
+
+  const { data: raw, error: loyaltyError } = await supabase.rpc('get_customer_loyalty', {
+    p_customer_id: customerId,
+  })
+  if (loyaltyError || !raw) {
+    console.error('[checkout] get_customer_loyalty failed', loyaltyError)
+    return { error: 'db_error', message: loyaltyErrorMessage(loyaltyError?.message, 'No se pudo verificar el saldo de lealtad.') }
+  }
+  const loyalty = raw as CustomerLoyalty
+  if (!loyalty.enabled) return invalid('La lealtad no está activa en este negocio.')
+
+  const subtotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
+  const payable  = Math.max(0, subtotal - Math.max(0, manualDiscount || 0))
+  if (payable <= 0) return invalid('No hay valor pendiente sobre el cual aplicar lealtad.')
+
+  if ('stamps' in request) {
+    if (loyalty.mode !== 'stamps') return invalid('El programa del negocio no es de sellos.')
+    if (!loyalty.can_redeem) return invalid('El cliente aún no completa sus sellos.')
+    const service = items.find((item) => item.itemType === 'service')
+    if (!service) return invalid('El ticket no tiene un servicio para canjear.')
+    const discountCop = Math.min(stampRewardCop(service.unitPrice, loyalty.stamp_max_reward_cop), payable)
+    if (discountCop <= 0) return invalid('El servicio no tiene valor para descontar.')
+    return { units: loyalty.stamps_required, discountCop }
+  }
+
+  if (loyalty.mode !== 'points') return invalid('El programa del negocio no es de puntos.')
+  const units = request.units
+  if (!Number.isInteger(units) || units <= 0) return invalid('La cantidad de puntos a canjear no es válida.')
+  if (units < loyalty.min_redeem) return invalid(`El mínimo para canjear es de ${loyalty.min_redeem} puntos.`)
+  if (units > loyalty.balance) return invalid('El cliente no tiene esa cantidad de puntos.')
+  // Nunca se gastan más puntos de los que el ticket puede absorber
+  const usable = Math.min(units, Math.floor(payable / Math.max(loyalty.point_value_cop, 1)))
+  const discountCop = usable * loyalty.point_value_cop
+  if (usable <= 0 || discountCop <= 0) return invalid('Los puntos no tienen valor para descontar.')
+  if (usable < loyalty.min_redeem) return invalid(`El mínimo para canjear es de ${loyalty.min_redeem} puntos.`)
+  return { units: usable, discountCop }
 }
 
 /**
@@ -292,6 +363,7 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
     tipAmount,
     discountAmount,
     items,
+    loyaltyRedeem,
   } = params
 
   // Validaciones de entrada en el servidor (antes del RPC)
@@ -300,6 +372,17 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
   }
   if (items.length === 0) {
     return { error: 'validation_error', message: 'Debe haber al menos un ítem para cobrar.' }
+  }
+
+  // ── Lealtad: calcular el descuento aquí (nunca se confía en un monto del cliente) ──
+  let loyaltyRedemption: LoyaltyRedemption | null = null
+  if (loyaltyRedeem) {
+    if (paymentMethod === 'mercadopago') {
+      return { error: 'validation_error', message: 'Para usar puntos elige efectivo, tarjeta o transferencia.' }
+    }
+    const resolved = await resolveLoyaltyRedemption(supabase, appointmentId, loyaltyRedeem, items, discountAmount)
+    if ('error' in resolved) return resolved
+    loyaltyRedemption = resolved
   }
 
   // ── Inventario: agregar cantidades por ítem y verificar stock ANTES de cobrar ──
@@ -393,7 +476,7 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
     p_shift_id:        shiftId,
     p_payment_method:  paymentMethod,
     p_tip_amount:      tipAmount,
-    p_discount_amount: discountAmount,
+    p_discount_amount: discountAmount + (loyaltyRedemption?.discountCop ?? 0),
     p_items:           rpcItems,
   })
 
@@ -413,32 +496,43 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
     return { error: result.error, message: result.message }
   }
 
-  // ── Programa de Lealtad (RF17) ────────────────────────────────────────────
-  // Otorgar puntos al cliente si la cita tiene customer_id.
-  // Operación best-effort: un fallo aquí NO revierte el cobro.
-  if (result.sale_id) {
-    try {
-      const { data: appt } = await supabase
-        .from('appointments')
-        .select('customer_id')
-        .eq('id', appointmentId)
-        .maybeSingle()
-
-      if (appt?.customer_id) {
-        // Base de puntos = total cobrado (subtotal + tip - discount)
-        const saleAmount = items.reduce(
-          (sum, item) => sum + item.unitPrice * item.quantity,
-          0
-        ) + tipAmount - discountAmount
-
-        if (saleAmount > 0) {
-          await earnPoints(businessId, appt.customer_id, saleAmount, result.sale_id)
+  // ── Programa de Lealtad ───────────────────────────────────────────────────
+  // Ganar es automático (trigger de BD al pagar la venta). Aquí solo se registra el
+  // canje, DESPUÉS del cobro. Si falla (carrera, saldo cambió) la venta se queda y se
+  // avisa: un fallo aquí NO revierte el cobro.
+  let loyaltyWarning: string | undefined
+  let loyaltyApplied: { redeemed_units: number; discount_cop: number } | undefined
+  if (loyaltyRedemption) {
+    const warning =
+      'El cobro se registró, pero no se pudo descontar el saldo de lealtad del cliente. Ajústalo manualmente en Lealtad.'
+    if (!result.sale_id) {
+      loyaltyWarning = warning
+    } else {
+      try {
+        const { data: redeemData, error: redeemError } = await supabase.rpc('redeem_loyalty_for_sale', {
+          p_sale_id:      result.sale_id,
+          p_units:        loyaltyRedemption.units,
+          p_discount_cop: loyaltyRedemption.discountCop,
+        })
+        const redeemResult = redeemData as { error?: string } | null
+        if (redeemError || redeemResult?.error) {
+          console.error('[loyalty] redeem_loyalty_for_sale failed', {
+            saleId: result.sale_id,
+            error: redeemError ?? redeemResult?.error,
+          })
+          loyaltyWarning = warning
+        } else {
+          loyaltyApplied = {
+            redeemed_units: loyaltyRedemption.units,
+            discount_cop:   loyaltyRedemption.discountCop,
+          }
         }
+      } catch (redeemErr) {
+        console.error('[loyalty] redeem_loyalty_for_sale failed', { saleId: result.sale_id, error: redeemErr })
+        loyaltyWarning = warning
       }
-    } catch (loyaltyErr) {
-      // No propagar — el cobro ya fue exitoso
-      console.warn('[loyalty] earnPoints failed silently:', loyaltyErr)
     }
+    revalidatePath('/[slug]/dashboard/loyalty', 'page')
   }
 
   // ── Descuento de inventario ───────────────────────────────────────────────
@@ -472,5 +566,5 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
   }
 
   revalidatePath('/[slug]/dashboard', 'page')
-  return { success: true, saleId: result.sale_id }
+  return { success: true, saleId: result.sale_id, loyalty: loyaltyApplied, loyaltyWarning }
 }

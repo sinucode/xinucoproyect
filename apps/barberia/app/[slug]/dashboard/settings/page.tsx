@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { Clock, Bell, Palette, Users, CreditCard, ShoppingBag, ChevronRight, type LucideIcon } from 'lucide-react'
+import { Clock, Bell, Palette, Users, CreditCard, ShoppingBag, Gift, ChevronRight, type LucideIcon } from 'lucide-react'
 import { detectCurrentPlan, PLAN_BUNDLES } from '@xinuco/billing-catalog'
 import type { Business, BusinessFeatures, Profile } from '@xinuco/types'
 
@@ -144,6 +144,14 @@ export default async function SettingsPage({
       href:        './booking',
       icon:        ShoppingBag,
     },
+    ...(features.loyalty
+      ? [{
+          label:       'Lealtad',
+          description: 'Puntos o sellos para premiar a tus clientes',
+          href:        './loyalty',
+          icon:        Gift,
+        }]
+      : []),
     {
       label:       'Notificaciones',
       description: 'Email y recordatorios automáticos',

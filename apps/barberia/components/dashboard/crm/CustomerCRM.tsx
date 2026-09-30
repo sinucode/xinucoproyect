@@ -23,6 +23,7 @@ import {
   Pencil,
   Send,
   ShoppingBag,
+  Gift,
 } from 'lucide-react'
 import {
   getCustomerExpediente,
@@ -35,6 +36,10 @@ import type {
   CustomerExpediente,
   CustomerNoteWithAuthor,
 } from '@/actions/crm'
+import { getCustomerLoyalty } from '@/actions/loyalty'
+import { useFeature } from '@/lib/features/context'
+import { formatMoney, formatUnits, type CustomerLoyalty } from '@/lib/loyalty-utils'
+import { StampDots } from '@/components/dashboard/loyalty/StampDots'
 import { formatCOP } from '@xinuco/utils'
 import { AdminPageHeader } from '@xinuco/ui'
 import { CustomerFilters } from './CustomerFilters'
@@ -447,6 +452,8 @@ function ExpedienteView({
 
       <StatsRow expediente={expediente} />
 
+      <LoyaltyLine customerId={expediente.customer.id} />
+
       {expediente.upcoming.length > 0 && <UpcomingAppointments expediente={expediente} />}
 
       <PreferredBarberSelector expediente={expediente} onRefresh={onRefresh} />
@@ -456,6 +463,50 @@ function ExpedienteView({
       {expediente.purchased_products.length > 0 && <PurchasedProducts expediente={expediente} />}
 
       <VisitHistory expediente={expediente} />
+    </div>
+  )
+}
+
+// ── Lealtad del cliente (línea liviana; solo si el negocio tiene la función) ──
+
+function LoyaltyLine({ customerId }: { customerId: string }) {
+  const enabled = useFeature('loyalty')
+  const [loyalty, setLoyalty] = useState<CustomerLoyalty | null>(null)
+
+  useEffect(() => {
+    if (!enabled) return
+    let cancelled = false
+    setLoyalty(null)
+    getCustomerLoyalty(customerId)
+      .then(({ loyalty: data }) => {
+        if (!cancelled && data?.enabled) setLoyalty(data)
+      })
+      .catch(() => { /* sin lealtad: no se muestra nada */ })
+    return () => { cancelled = true }
+  }, [enabled, customerId])
+
+  if (!enabled || !loyalty) return null
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap text-sm text-xinuco-text -mt-2">
+      <Gift size={14} className="shrink-0" style={{ color: 'var(--primary-color)' }} />
+      {loyalty.mode === 'points' ? (
+        <span>
+          Lealtad: <span className="font-semibold tabular-nums">{formatUnits(loyalty.balance)}</span>{' '}
+          {loyalty.balance === 1 ? 'punto' : 'puntos'}{' '}
+          <span className="text-xinuco-muted">
+            ({formatMoney(loyalty.value_cop ?? loyalty.balance * loyalty.point_value_cop)})
+          </span>
+        </span>
+      ) : (
+        <>
+          <span>
+            Lealtad: <span className="font-semibold tabular-nums">{loyalty.balance}/{loyalty.stamps_required}</span> sellos
+          </span>
+          <StampDots balance={loyalty.balance} required={loyalty.stamps_required} size={8} />
+          {loyalty.can_redeem && <span className="text-xs text-emerald-400">· servicio gratis listo</span>}
+        </>
+      )}
     </div>
   )
 }

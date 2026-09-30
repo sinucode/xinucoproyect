@@ -1,9 +1,19 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import { Plus, Minus, Trash, CreditCard, Banknote, Landmark, X, Loader2, DollarSign, Percent, QrCode } from 'lucide-react'
+import { Plus, Minus, Trash, CreditCard, Banknote, Landmark, X, Loader2, DollarSign, Percent, QrCode, Gift } from 'lucide-react'
 import { checkoutAppointment, getAppointmentProducts, type CheckoutItemInput } from '@/actions/finance'
 import { getInventoryItems, getInventoryReservations } from '@/actions/inventory'
+import { getCustomerLoyalty } from '@/actions/loyalty'
+import { useFeature } from '@/lib/features/context'
+import {
+  formatMoney,
+  formatUnits,
+  maxRedeemablePoints,
+  stampRewardCop,
+  type CustomerLoyalty,
+} from '@/lib/loyalty-utils'
+import { StampDots } from '@/components/dashboard/loyalty/StampDots'
 import { reservedByItem, type InventoryReservation } from '@/lib/inventory-reservations'
 import type { PaymentMethod, InventoryItem } from '@xinuco/types'
 import { MPPaymentPanel } from '@/components/pos/MPPaymentPanel'
@@ -74,12 +84,48 @@ export function CheckoutModal({
 
   // Validaciones
   const [validationError, setValidationError] = useState<string | null>(null)
+  // Cobro hecho pero el canje de lealtad no se pudo registrar: se avisa antes de cerrar
+  const [loyaltyWarning, setLoyaltyWarning] = useState<string | null>(null)
+
+  // Lealtad: saldo del cliente (solo si el negocio tiene la función y la cita tiene cliente)
+  const loyaltyFeature = useFeature('loyalty')
+  const [loyalty, setLoyalty] = useState<CustomerLoyalty | null>(null)
+  const [useLoyalty, setUseLoyalty] = useState(false)
+  const [pointsInput, setPointsInput] = useState<number | ''>('')
 
   // Totales
   const subtotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
   const finalTip = Number(tipAmount) || 0
   const finalDiscount = Number(discountAmount) || 0
-  const totalAmount = Math.max(0, subtotal - finalDiscount + finalTip)
+
+  // Lealtad: el descuento se muestra aquí; el servidor lo recalcula con el saldo real.
+  // Solo métodos inmediatos: con el QR de MercadoPago el monto ya está fijado.
+  const amountAfterManual = Math.max(0, subtotal - finalDiscount)
+  const isMercadoPago = paymentMethod === 'mercadopago'
+  const firstServicePrice = items.find((it) => it.itemType === 'service')?.unitPrice ?? 0
+
+  let pointsCap = 0        // tope de puntos usables en este ticket (saldo y monto)
+  let pointsToUse = 0
+  let loyaltyDiscount = 0
+  if (loyalty) {
+    if (loyalty.mode === 'points') {
+      pointsCap = Math.min(loyalty.balance, Math.floor(amountAfterManual / (loyalty.point_value_cop || 1)))
+      pointsToUse = Math.max(0, Math.min(Number(pointsInput) || 0, pointsCap))
+      if (useLoyalty && !isMercadoPago && pointsToUse >= Math.max(loyalty.min_redeem, 1)) {
+        loyaltyDiscount = pointsToUse * loyalty.point_value_cop
+      }
+    } else if (useLoyalty && !isMercadoPago && loyalty.can_redeem) {
+      loyaltyDiscount = Math.min(stampRewardCop(firstServicePrice, loyalty.stamp_max_reward_cop), amountAfterManual)
+    }
+  }
+  const stampReward = loyalty?.mode === 'stamps'
+    ? Math.min(stampRewardCop(firstServicePrice, loyalty.stamp_max_reward_cop), amountAfterManual)
+    : 0
+  const pointsMax = loyalty?.mode === 'points'
+    ? maxRedeemablePoints(loyalty.balance, loyalty.point_value_cop, amountAfterManual, loyalty.min_redeem)
+    : 0
+
+  const totalAmount = Math.max(0, subtotal - finalDiscount - loyaltyDiscount + finalTip)
 
   // Cambio/Vuelto
   const finalReceived = Number(receivedAmount) || 0
@@ -94,6 +140,18 @@ export function CheckoutModal({
   for (const inv of inventory ?? []) {
     stockById[inv.id] = Math.max(0, inv.current_stock - (reservedOthers[inv.id] ?? 0))
   }
+
+  // Cargar el saldo de lealtad del cliente de la cita
+  useEffect(() => {
+    if (!loyaltyFeature || !appointment.customer_id) return
+    let cancelled = false
+    getCustomerLoyalty(appointment.customer_id)
+      .then(({ loyalty: data }) => {
+        if (!cancelled && data?.enabled) setLoyalty(data)
+      })
+      .catch(() => { /* sin lealtad: el cobro sigue normal */ })
+    return () => { cancelled = true }
+  }, [loyaltyFeature, appointment.customer_id])
 
   // Precargar los productos apartados de esta cita (el cajero puede quitarlos/ajustarlos)
   useEffect(() => {
@@ -244,6 +302,21 @@ export function CheckoutModal({
       return
     }
 
+    if (useLoyalty && loyalty?.mode === 'points' && loyaltyDiscount <= 0) {
+      setValidationError(
+        loyalty.min_redeem > 0
+          ? `Para canjear puntos ingresa al menos ${formatUnits(loyalty.min_redeem)} puntos, o desactiva «Usar puntos».`
+          : 'Ingresa los puntos a canjear o desactiva «Usar puntos».',
+      )
+      return
+    }
+
+    // Lo que se canjea (el servidor recalcula el descuento con el saldo real)
+    const loyaltyRedeem =
+      useLoyalty && loyalty && loyaltyDiscount > 0
+        ? loyalty.mode === 'stamps' ? { stamps: true as const } : { units: pointsToUse }
+        : undefined
+
     setValidationError(null)
 
     startTransition(async () => {
@@ -256,10 +329,13 @@ export function CheckoutModal({
         tipAmount: finalTip,
         discountAmount: finalDiscount,
         items,
+        loyaltyRedeem,
       })
 
       if (result.error) {
         setValidationError(result.message || 'Ocurrió un error al procesar el cobro.')
+      } else if (result.loyaltyWarning) {
+        setLoyaltyWarning(result.loyaltyWarning)
       } else {
         onSuccess()
       }
@@ -305,7 +381,7 @@ export function CheckoutModal({
             </p>
           </div>
           <button
-            onClick={onClose}
+            onClick={loyaltyWarning ? onSuccess : onClose}
             className="p-1 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
             title="Cerrar modal"
           >
@@ -528,6 +604,109 @@ export function CheckoutModal({
             </ul>
           </div>
 
+          {/* Lealtad: saldo del cliente y canje */}
+          {loyalty && (
+            <div
+              className="rounded-xl border p-3 space-y-2.5 animate-fade-in"
+              style={{ borderColor: 'var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Gift size={16} className="shrink-0" style={{ color: 'var(--primary-color)' }} />
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-xinuco-muted">Lealtad</p>
+                    {loyalty.mode === 'points' ? (
+                      <p className="text-sm font-semibold text-xinuco-text">
+                        Tiene {formatUnits(loyalty.balance)} {loyalty.balance === 1 ? 'punto' : 'puntos'}{' '}
+                        <span className="text-xinuco-muted font-normal">({formatMoney(loyalty.value_cop ?? loyalty.balance * loyalty.point_value_cop)})</span>
+                      </p>
+                    ) : (
+                      <p className="text-sm font-semibold text-xinuco-text">
+                        {loyalty.balance} de {loyalty.stamps_required} sellos
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {(loyalty.mode === 'points' ? pointsMax > 0 : loyalty.can_redeem) && (
+                  <label
+                    className={`flex items-center gap-2 text-xs font-semibold shrink-0 ${
+                      isMercadoPago || isPending ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                    } text-xinuco-text`}
+                  >
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      checked={useLoyalty && !isMercadoPago}
+                      disabled={isMercadoPago || isPending}
+                      onChange={(e) => {
+                        setUseLoyalty(e.target.checked)
+                        if (e.target.checked && loyalty.mode === 'points') setPointsInput(pointsMax)
+                        setValidationError(null)
+                      }}
+                      className="h-4 w-4 rounded accent-[var(--primary-color)]"
+                    />
+                    {loyalty.mode === 'points'
+                      ? 'Usar puntos'
+                      : `Usar servicio gratis (−${formatMoney(stampReward)})`}
+                  </label>
+                )}
+              </div>
+
+              {loyalty.mode === 'stamps' && (
+                <div className="flex flex-col gap-1">
+                  <StampDots balance={loyalty.balance} required={loyalty.stamps_required} />
+                  {!loyalty.can_redeem && (
+                    <p className="text-xs text-xinuco-muted">
+                      Le {loyalty.stamps_required - loyalty.balance === 1 ? 'falta 1 sello' : `faltan ${loyalty.stamps_required - loyalty.balance} sellos`} para su servicio gratis.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {loyalty.mode === 'points' && loyalty.balance > 0 && loyalty.balance < loyalty.min_redeem && (
+                <p className="text-xs text-xinuco-muted">
+                  Puede canjear desde {formatUnits(loyalty.min_redeem)} puntos.
+                </p>
+              )}
+              {loyalty.mode === 'points' && loyalty.balance >= loyalty.min_redeem && loyalty.balance > 0 && pointsMax === 0 && (
+                <p className="text-xs text-xinuco-muted">
+                  El total a pagar es muy bajo para canjear puntos.
+                </p>
+              )}
+
+              {loyalty.mode === 'points' && useLoyalty && !isMercadoPago && pointsMax > 0 && (
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <label htmlFor="loyalty-points" className="block text-xs font-semibold text-xinuco-muted mb-1">
+                      Puntos a usar (máx. {formatUnits(pointsMax)})
+                    </label>
+                    <input
+                      id="loyalty-points"
+                      type="number"
+                      inputMode="numeric"
+                      min={Math.max(loyalty.min_redeem, 1)}
+                      max={pointsCap}
+                      value={pointsInput}
+                      onChange={(e) => setPointsInput(e.target.value === '' ? '' : Math.floor(Number(e.target.value)))}
+                      onBlur={() => setPointsInput(pointsToUse)}
+                      className="w-full text-sm bg-zinc-900/50 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-100 focus:outline-none focus:border-zinc-700"
+                    />
+                  </div>
+                  <p className="text-sm font-bold text-[var(--primary-color)] tabular-nums pt-5">
+                    −{formatMoney(loyaltyDiscount)}
+                  </p>
+                </div>
+              )}
+
+              {isMercadoPago && (loyalty.mode === 'points' ? pointsMax > 0 : loyalty.can_redeem) && (
+                <p className="text-xs text-amber-400">
+                  Para usar {loyalty.mode === 'points' ? 'puntos' : 'el servicio gratis'} elige efectivo, tarjeta o transferencia.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Descuento y Propina */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -606,7 +785,7 @@ export function CheckoutModal({
               </button>
               <button
                 type="button"
-                onClick={() => { setPaymentMethod('mercadopago'); setValidationError(null); setReceivedAmount('') }}
+                onClick={() => { setPaymentMethod('mercadopago'); setValidationError(null); setReceivedAmount(''); setUseLoyalty(false) }}
                 className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all gap-1.5
                   ${paymentMethod === 'mercadopago'
                     ? 'border-[var(--primary-color)] bg-[var(--primary-color)]/[0.08] text-[var(--primary-color)]'
@@ -764,6 +943,12 @@ export function CheckoutModal({
                 <span>-{formatCurrency(finalDiscount)}</span>
               </div>
             )}
+            {loyaltyDiscount > 0 && (
+              <div className="flex justify-between text-xs text-[var(--primary-color)]">
+                <span>Descuento lealtad:</span>
+                <span>-{formatCurrency(loyaltyDiscount)}</span>
+              </div>
+            )}
             {finalTip > 0 && (
               <div className="flex justify-between text-xs text-[var(--primary-color)]">
                 <span>Propina agregada:</span>
@@ -776,7 +961,22 @@ export function CheckoutModal({
             </div>
           </div>
 
-          {paymentMethod !== 'mercadopago' && (
+          {loyaltyWarning && (
+            <div className="space-y-3 animate-fade-in">
+              <div className="p-3 bg-amber-950/40 border border-amber-900/30 rounded-xl text-amber-400 text-xs leading-relaxed">
+                {loyaltyWarning}
+              </div>
+              <button
+                type="button"
+                onClick={onSuccess}
+                className="btn-primary w-full flex items-center justify-center gap-2 h-11 text-sm font-bold shrink-0"
+              >
+                Entendido
+              </button>
+            </div>
+          )}
+
+          {paymentMethod !== 'mercadopago' && !loyaltyWarning && (
             <button
               onClick={handleConfirmCheckout}
               disabled={isPending}
