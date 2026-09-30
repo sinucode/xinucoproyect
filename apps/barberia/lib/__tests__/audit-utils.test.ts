@@ -209,6 +209,16 @@ describe('summarizeAlerts', () => {
 })
 
 describe('diffRows', () => {
+  it('traduce campos de un gasto borrado y la categoría por defecto', () => {
+    const rows = diffRows({ category: 'rent', is_recurring: false, auto_registered: false, amount: 1000 }, null)
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ campo: 'Categoría', antes: 'Arriendo' }),
+      expect.objectContaining({ campo: 'Gasto fijo mensual', antes: 'No' }),
+      expect.objectContaining({ campo: 'Registrado automáticamente', antes: 'No' }),
+      expect.objectContaining({ campo: 'Monto', antes: '$1.000' }),
+    ]))
+  })
+
   it('omite ids, marcas de tiempo, uuids y lo que no cambió', () => {
     const rows = diffRows(
       { id: 'a', business_id: 'b', created_at: 'x', usuario: '123e4567-e89b-12d3-a456-426614174000', nombre: 'Cera', precio: 10000, estado: 'open' },

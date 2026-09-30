@@ -5,6 +5,7 @@ import type { AuditCategory, AuditLog } from '@xinuco/types'
 import { addDaysToDateKey } from '@/lib/agenda-time'
 import { formatMoney } from '@/lib/loyalty-utils'
 import { bogotaDateKey, isRealDateKey } from '@/lib/team-payments'
+import { DEFAULT_EXPENSE_CATEGORIES } from '@/lib/expense-utils'
 
 export type { AuditCategory }
 
@@ -364,6 +365,12 @@ const FIELD_LABEL: Record<string, string> = {
   payment_method: 'Medio de pago',
   specialty_role: 'Especialidad',
   servicios: 'Servicios',
+  is_recurring: 'Gasto fijo mensual',
+  auto_registered: 'Registrado automáticamente',
+  notes: 'Nota',
+  duration_minutes: 'Duración (min)',
+  price_cop: 'Precio',
+  is_active: 'Activo',
 }
 
 const MONEY_KEYS = new Set([
@@ -381,6 +388,11 @@ const VALUE_LABEL: Record<string, string> = {
   cash: 'efectivo', cash_register: 'efectivo de la caja', transfer: 'transferencia', other: 'otro',
   todos: 'todos',
 }
+
+// Categorías de gasto por defecto: slug → nombre (las propias del negocio se muestran tal cual)
+const EXPENSE_CATEGORY_NAME: Record<string, string> = Object.fromEntries(
+  DEFAULT_EXPENSE_CATEGORIES.map(c => [c.slug, c.name]),
+)
 
 const TRANSLATED_VALUE_KEYS = new Set(['estado', 'status', 'tipo', 'payment_method'])
 
@@ -405,6 +417,7 @@ function formatValue(key: string, v: unknown): string {
   }
   if (typeof v === 'boolean') return v ? 'Sí' : 'No'
   if (typeof v === 'string') {
+    if (key === 'categoria' || key === 'category') return EXPENSE_CATEGORY_NAME[v] ?? v
     return TRANSLATED_VALUE_KEYS.has(key) ? (VALUE_LABEL[v] ?? v) : v
   }
   if (typeof v === 'number') return String(v)
