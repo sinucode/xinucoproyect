@@ -59,7 +59,7 @@ function SummaryCard({
           <Icon size={14} style={{ color: 'var(--primary-color)' }} />
         </div>
       </div>
-      <span className={`${big ? 'text-2xl' : 'text-xl'} font-bold text-xinuco-text tabular-nums break-words`}>{value}</span>
+      <span className={`${big ? 'text-2xl sm:text-xl lg:text-2xl' : 'text-lg lg:text-xl'} font-bold text-xinuco-text tabular-nums whitespace-nowrap`}>{value}</span>
       {hint && <span className="text-[11px] text-xinuco-muted">{hint}</span>}
     </div>
   )
