@@ -392,6 +392,20 @@ export async function cancelMPSaaSSubscription(
     return { error: 'Acceso denegado.' }
   }
 
+  // Solo el administrador del negocio puede cancelar la suscripción
+  const { data: cancelProfile } = await supabase
+    .from('profiles')
+    .select('role, business_id')
+    .eq('id', user.id)
+    .single()
+  if (
+    !cancelProfile ||
+    cancelProfile.business_id !== businessId ||
+    (cancelProfile.role !== 'admin' && cancelProfile.role !== 'super_admin')
+  ) {
+    return { error: 'Solo un administrador puede cancelar la suscripción.' }
+  }
+
   if (!process.env.MP_ACCESS_TOKEN || process.env.MP_ACCESS_TOKEN === 'APP_USR-...') {
     return { error: 'MercadoPago no está configurado.' }
   }
