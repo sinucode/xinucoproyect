@@ -191,9 +191,12 @@ export const MOVEMENTS_CSV_HEADER = [
 ]
 
 export function movementsCsv(rows: MoneyMovement[]): string {
+  // Orden cronológico (los que solo tienen fecha van al inicio de su día)
+  const sorted = [...rows].sort((a, b) =>
+    a.occurred_on.localeCompare(b.occurred_on) || (a.occurred_time ?? '').localeCompare(b.occurred_time ?? ''))
   return toCsv([
     MOVEMENTS_CSV_HEADER,
-    ...rows.map(r => [
+    ...sorted.map(r => [
       r.occurred_on,
       r.occurred_time,
       r.kind === 'in' ? 'Entrada' : 'Salida',

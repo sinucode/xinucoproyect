@@ -147,6 +147,17 @@ describe('toCsv', () => {
 })
 
 describe('movementsCsv', () => {
+  it('ordena por fecha y hora', () => {
+    const csv = movementsCsv([
+      mv({ occurred_on: '2026-09-30', occurred_time: '09:00', description: 'C' }),
+      mv({ occurred_on: '2026-09-05', occurred_time: null, description: 'A' }),
+      mv({ occurred_on: '2026-09-30', occurred_time: '07:00', description: 'B' }),
+    ])
+    const order = ['A', 'B', 'C'].map(d => csv.indexOf(`;${d};`))
+    expect(order[0]).toBeLessThan(order[1])
+    expect(order[1]).toBeLessThan(order[2])
+  })
+
   it('encabezado y filas', () => {
     const csv = movementsCsv([
       mv({ amount: 50000, tip: 5000, method: 'mercadopago' }),
