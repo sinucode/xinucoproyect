@@ -826,6 +826,101 @@ export interface ProfitLossResult {
   margin_pct:   number | null
 }
 
+// ---------- Reporte gerencial (retorno de get_management_report RPC) ----------
+export interface ManagementReportPeriod {
+  from:      string   // 'YYYY-MM-DD'
+  to:        string
+  prev_from: string
+  prev_to:   string
+  today:     string
+}
+
+export interface ManagementKpis {
+  sales_count: number
+  clients:     number
+  services:    number
+}
+
+export interface ManagementMonthly {
+  month:   string   // 'YYYY-MM'
+  revenue: number
+  net:     number
+  costs:   number
+  sales:   number
+}
+
+export interface ManagementLeaks {
+  cancelled_count: number
+  cancelled_value: number
+  no_show_count:   number
+  no_show_value:   number
+  voided_count:    number
+  voided_value:    number
+  waste_value:     number
+  cash_shortfall:  number
+}
+
+export interface ManagementHeatCell {
+  dow:              number   // 0 = domingo … 6 = sábado
+  hour:             number   // 6..21
+  appointments:     number
+  booked_minutes:   number
+  capacity_minutes: number
+  weeks:            number | null
+}
+
+export interface ManagementStaff {
+  id:               string
+  full_name:        string
+  scheduled_minutes: number
+  booked_minutes:   number
+  produced:         number
+  services:         number
+}
+
+export interface ManagementTopItem {
+  name:    string
+  count:   number
+  revenue: number
+}
+
+export interface ManagementCustomersMonth {
+  month:             string
+  new_clients:       number
+  returning_clients: number
+}
+
+export interface ManagementAtRiskClient {
+  id:            string
+  name:          string
+  has_phone:     boolean
+  last_visit:    string
+  visits:        number
+  monthly_value: number
+}
+
+export interface ManagementAtRisk {
+  count:         number
+  monthly_value: number
+  top:           ManagementAtRiskClient[]
+}
+
+export interface ManagementReport {
+  period:            ManagementReportPeriod
+  pl:                ProfitLossResult
+  pl_prev:           ProfitLossResult
+  kpis:              ManagementKpis
+  kpis_prev:         ManagementKpis
+  monthly:           ManagementMonthly[]
+  leaks:             ManagementLeaks
+  heatmap:           ManagementHeatCell[]
+  staff:             ManagementStaff[]
+  services:          ManagementTopItem[]
+  products:          ManagementTopItem[]
+  customers_monthly: ManagementCustomersMonth[]
+  at_risk:           ManagementAtRisk
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // RF8 — Walk-ins (Cola de clientes sin cita)
 // ══════════════════════════════════════════════════════════════════════════════
