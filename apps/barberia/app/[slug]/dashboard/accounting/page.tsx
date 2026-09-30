@@ -2,11 +2,10 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
 import { AdminPageHeader } from '@xinuco/ui'
-import { getMoneyMovements, getMonthResults } from '@/actions/accounting'
+import { getMoneyMovements, getMonthResults, getStaffProduction } from '@/actions/accounting'
 import { AccountingView, type AccountingTab } from '@/components/dashboard/accounting/AccountingView'
 import { businessTodayISODate } from '@/lib/agenda-time'
 import { currentMonthKey, isMonthKey, monthRange } from '@/lib/accounting-utils'
-import { categoryName } from '@/lib/expense-utils'
 import type { BusinessFeatures, ExpenseCategoryRow, Profile } from '@xinuco/types'
 
 export const metadata: Metadata = {
@@ -14,7 +13,7 @@ export const metadata: Metadata = {
   description: 'Cuánto ganó el negocio y por dónde entró y salió la plata',
 }
 
-const TABS: AccountingTab[] = ['resultados', 'movimientos', 'contador']
+const TABS: AccountingTab[] = ['resultados', 'movimientos', 'profesionales', 'contador']
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value
@@ -66,20 +65,18 @@ export default async function AccountingPage({
   const range = monthRange(mes)
 
   // 5. Carga en paralelo: resultados (con mes anterior), movimientos y nombres de categorías de gasto
-  const [results, movements, categoriesRes] = await Promise.all([
+  const [results, movements, staff, categoriesRes] = await Promise.all([
     getMonthResults(mes),
     getMoneyMovements(range.from, range.to),
+    getStaffProduction(range.from, range.to),
     supabase
       .from('expense_categories')
       .select('slug, name, color, is_hidden')
       .eq('business_id', profile.business_id),
   ])
 
-  // slug → nombre de las categorías que aparecen en el estado de resultados (para el CSV)
+  // Categorías de gasto del negocio: el panel del contador las usa para nombrar los gastos en el CSV
   const categories = (categoriesRes.data ?? []) as Pick<ExpenseCategoryRow, 'slug' | 'name' | 'color' | 'is_hidden'>[]
-  const slugs = 'error' in results ? [] : results.current.expenses.by_category.map(c => c.category)
-  const categoryNames: Record<string, string> = {}
-  for (const s of slugs) categoryNames[s] = categoryName(s, categories)
 
   return (
     <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
@@ -98,7 +95,9 @@ export default async function AccountingPage({
         resultsError={'error' in results ? results.error : null}
         movements={'error' in movements ? null : movements.rows}
         movementsError={'error' in movements ? movements.error : null}
-        categoryNames={categoryNames}
+        staff={'error' in staff ? null : staff.rows}
+        staffError={'error' in staff ? staff.error : null}
+        categories={categories}
       />
     </div>
   )

@@ -947,6 +947,23 @@ export interface MoneyMovement {
   reference_id:  string | null
 }
 
+/** Un renglón de get_staff_production: lo que produjo, ganó y se le pagó a un profesional. */
+export interface StaffProduction {
+  staff_id:         string
+  full_name:        string
+  is_active:        boolean
+  services_count:   number
+  services_revenue: number   // INTEGER COP
+  products_revenue: number
+  commissions:      number
+  tips:             number
+  bonuses:          number
+  deductions:       number
+  advances:         number
+  payments:         number
+  balance_now:      number   // saldo pendiente HOY (puede ser negativo)
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Inventario (Inventory Management)
 // ══════════════════════════════════════════════════════════════════════════════

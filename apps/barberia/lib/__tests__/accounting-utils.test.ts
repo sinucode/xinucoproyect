@@ -1,4 +1,4 @@
-import type { MoneyMovement, ProfitLossResult } from '@xinuco/types'
+import type { MoneyMovement, ProfitLossResult, StaffProduction } from '@xinuco/types'
 import {
   METHOD_LABEL,
   SOURCE_LABEL,
@@ -11,7 +11,16 @@ import {
   pctChange,
   toCsv,
   movementsCsv,
-  profitLossCsv,
+  monthShortLabel,
+  monthsBetween,
+  rangeDates,
+  monthRangeLabel,
+  rangeFileSuffix,
+  profitLossMultiCsv,
+  staffTotals,
+  summarizeStaff,
+  sortStaffByProduction,
+  staffCsv,
 } from '../accounting-utils'
 import { businessTodayISODate } from '../agenda-time'
 
@@ -171,8 +180,38 @@ describe('movementsCsv', () => {
   })
 })
 
-describe('profitLossCsv', () => {
-  const pl: ProfitLossResult = {
+describe('meses y rangos', () => {
+  it('monthShortLabel', () => {
+    expect(monthShortLabel('2026-01')).toBe('ene 2026')
+    expect(monthShortLabel('2025-12')).toBe('dic 2025')
+  })
+
+  it('monthsBetween incluye ambos extremos y cruza el año', () => {
+    expect(monthsBetween('2026-01', '2026-01')).toEqual(['2026-01'])
+    expect(monthsBetween('2025-11', '2026-02')).toEqual(['2025-11', '2025-12', '2026-01', '2026-02'])
+    expect(monthsBetween('2026-01', '2026-12')).toHaveLength(12)
+    expect(monthsBetween('2026-03', '2026-01')).toEqual([])
+    expect(monthsBetween('x', '2026-01')).toEqual([])
+  })
+
+  it('rangeDates: último día de un mes pasado y hoy si es el actual', () => {
+    expect(rangeDates('2025-01', '2025-02')).toEqual({ from: '2025-01-01', to: '2025-02-28' })
+    expect(rangeDates('2024-01', '2024-02').to).toBe('2024-02-29')
+    const cur = currentMonthKey()
+    expect(rangeDates('2020-01', cur)).toEqual({ from: '2020-01-01', to: businessTodayISODate() })
+    expect(() => rangeDates('2026-13', '2026-01')).toThrow()
+  })
+
+  it('texto y sufijo de archivo', () => {
+    expect(monthRangeLabel('2026-09', '2026-09')).toBe('septiembre 2026')
+    expect(monthRangeLabel('2026-01', '2026-09')).toBe('enero 2026 a septiembre 2026')
+    expect(rangeFileSuffix('2026-09', '2026-09')).toBe('2026-09')
+    expect(rangeFileSuffix('2026-01', '2026-09')).toBe('2026-01_a_2026-09')
+  })
+})
+
+describe('profitLossMultiCsv', () => {
+  const pl = (over: Partial<ProfitLossResult> = {}): ProfitLossResult => ({
     revenue: { services: 900000, retail: 100000, total: 1000000, discounts: 20000, sales_count: 30 },
     tips: 50000,
     cost_of_goods: 40000,
@@ -183,26 +222,110 @@ describe('profitLossCsv', () => {
     asset_disposals: -5000,
     net_profit: 245000,
     margin_pct: 24.5,
-  }
+    ...over,
+  })
+  const jan = pl()
+  const feb = pl({
+    revenue: { services: 100, retail: 0, total: 100, discounts: 0, sales_count: 1 },
+    expenses: { total: 70, by_category: [{ category: 'rent', total: 20 }, { category: 'luz', total: 50 }] },
+    net_profit: 30,
+    depreciation: undefined,
+    asset_disposals: undefined,
+  })
+  const total = pl({
+    revenue: { services: 900100, retail: 100000, total: 1000100, discounts: 20000, sales_count: 31 },
+    expenses: { total: 300070, by_category: [{ category: 'rent', total: 250020 }, { category: 'c_x', total: 50000 }, { category: 'luz', total: 50 }] },
+    net_profit: 245030,
+  })
+  const name = (s: string) => ({ rent: 'Arriendo', c_x: 'Otra cosa', luz: 'Luz' }[s] ?? s)
+  const csv = profitLossMultiCsv(
+    [{ month: '2026-01', pl: jan }, { month: '2026-02', pl: feb }],
+    total,
+    'enero 2026 a febrero 2026',
+    name,
+  )
+  const lines = csv.replace('﻿', '').split('\r\n')
 
-  it('incluye todas las líneas', () => {
-    const csv = profitLossCsv(pl, 'septiembre 2026', s => (s === 'rent' ? 'Arriendo' : 'Otra cosa'))
-    const lines = csv.replace('﻿', '').split('\r\n')
-    expect(lines).toContain('Concepto;Valor')
-    expect(lines).toContain('Estado de resultados;septiembre 2026')
-    expect(lines).toContain('Ingresos por servicios;900000')
-    expect(lines).toContain('Ingresos por productos;100000')
-    expect(lines).toContain('Descuentos;20000')
-    expect(lines).toContain('Ingresos totales;1000000')
-    expect(lines).toContain('Costo de productos vendidos;40000')
-    expect(lines).toContain('Utilidad bruta;960000')
-    expect(lines).toContain('Comisiones del equipo;400000')
-    expect(lines).toContain('Gastos;300000')
-    expect(lines).toContain('Gastos - Arriendo;250000')
-    expect(lines).toContain('Gastos - Otra cosa;50000')
-    expect(lines).toContain('Desgaste de equipos;10000')
-    expect(lines).toContain('Venta o baja de equipos;-5000')
-    expect(lines).toContain('Utilidad neta;245000')
-    expect(lines).toContain('Propinas (no son ingreso del negocio);50000')
+  it('encabezado con un mes por columna y el total', () => {
+    expect(lines[0]).toBe('Estado de resultados;enero 2026 a febrero 2026')
+    expect(lines[1]).toBe('Concepto;ene 2026;feb 2026;Total')
+  })
+
+  it('una columna por mes y el total', () => {
+    expect(lines).toContain('Ingresos por servicios;900000;100;900100')
+    expect(lines).toContain('Ingresos totales;1000000;100;1000100')
+    expect(lines).toContain('Gastos;300000;70;300070')
+    expect(lines).toContain('Utilidad neta;245000;30;245030')
+    expect(lines).toContain('Desgaste de equipos;10000;0;10000')
+    expect(lines).toContain('Venta o baja de equipos;-5000;0;-5000')
+  })
+
+  it('categorías de gasto: unión de todos los meses, 0 donde faltan', () => {
+    expect(lines).toContain('Gastos - Arriendo;250000;20;250020')
+    expect(lines).toContain('Gastos - Otra cosa;50000;0;50000')
+    expect(lines).toContain('Gastos - Luz;0;50;50')
+  })
+
+  it('todas las filas tienen el mismo número de columnas', () => {
+    for (const l of lines.filter(Boolean)) expect(l.split(';')).toHaveLength(l.startsWith('Estado de resultados') ? 2 : 4)
+  })
+
+  it('con un solo mes funciona igual', () => {
+    const one = profitLossMultiCsv([{ month: '2026-01', pl: jan }], jan, 'enero 2026', name)
+    expect(one).toContain('Concepto;ene 2026;Total')
+    expect(one).toContain('Comisiones del equipo;400000;400000')
+  })
+})
+
+describe('por profesional', () => {
+  const st = (extra: Partial<StaffProduction>): StaffProduction => ({
+    staff_id: 'a', full_name: 'Ana', is_active: true, services_count: 10,
+    services_revenue: 500000, products_revenue: 100000,
+    commissions: 250000, tips: 30000, bonuses: 20000, deductions: 10000,
+    advances: 50000, payments: 100000, balance_now: 140000,
+    ...extra,
+  })
+
+  it('staffTotals: produjo, ganó, pagado y lo que le quedó al negocio', () => {
+    expect(staffTotals(st({}))).toEqual({
+      produced: 600000,
+      earned: 290000,   // 250000 + 30000 + 20000 − 10000
+      paid: 150000,
+      kept: 340000,     // 600000 − 250000 − 20000 + 10000
+    })
+  })
+
+  it('summarizeStaff suma todo el equipo y el saldo de hoy', () => {
+    const s = summarizeStaff([
+      st({}),
+      st({ staff_id: 'b', full_name: 'Beto', services_revenue: 100000, products_revenue: 0, commissions: 40000, tips: 0, bonuses: 0, deductions: 0, advances: 60000, payments: 0, balance_now: -20000 }),
+    ])
+    expect(s.produced).toBe(700000)
+    expect(s.earned).toBe(330000)
+    expect(s.paid).toBe(210000)
+    expect(s.kept).toBe(400000)
+    expect(s.pending).toBe(120000)
+    expect(s.count).toBe(2)
+  })
+
+  it('summarizeStaff de lista vacía es todo cero', () => {
+    expect(summarizeStaff([])).toEqual({ produced: 0, earned: 0, paid: 0, kept: 0, pending: 0, count: 0 })
+  })
+
+  it('ordena por lo que produjo', () => {
+    const sorted = sortStaffByProduction([
+      st({ full_name: 'Zoe', services_revenue: 10, products_revenue: 0 }),
+      st({ full_name: 'Ana', services_revenue: 900, products_revenue: 0 }),
+      st({ full_name: 'Bea', services_revenue: 10, products_revenue: 0 }),
+    ])
+    expect(sorted.map(r => r.full_name)).toEqual(['Ana', 'Bea', 'Zoe'])
+  })
+
+  it('staffCsv: encabezado y fila', () => {
+    const lines = staffCsv([st({})]).replace('﻿', '').split('\r\n')
+    expect(lines[0]).toBe(
+      'Profesional;Servicios hechos;Produjo en servicios;Produjo en productos;Produjo total;Comisiones;Propinas;Bonos;Descuentos;Ganó total;Anticipos;Pagos;Pagado total;Le quedó al negocio;Saldo pendiente hoy',
+    )
+    expect(lines[1]).toBe('Ana;10;500000;100000;600000;250000;30000;20000;10000;290000;50000;100000;150000;340000;140000')
   })
 })

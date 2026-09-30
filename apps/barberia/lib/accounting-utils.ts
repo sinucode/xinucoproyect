@@ -1,6 +1,8 @@
 // lib/accounting-utils.ts — lógica PURA de Contabilidad (movimientos de plata, meses, CSV para el contador).
 // Sin dependencias de servidor: la usan la Server Action y los componentes cliente.
-import type { MoneyMovement, MoneyMovementMethod, MoneyMovementSource, ProfitLossResult } from '@xinuco/types'
+import type {
+  MoneyMovement, MoneyMovementMethod, MoneyMovementSource, ProfitLossResult, StaffProduction,
+} from '@xinuco/types'
 import { addDaysToDateKey, businessTodayISODate } from '@/lib/agenda-time'
 
 // ── Etiquetas ─────────────────────────────────────────────────────────────────
@@ -157,6 +159,47 @@ export function monthName(yyyyMm: string): string {
   return m ? MONTH_NAMES[Number(m[2]) - 1] : yyyyMm
 }
 
+const MONTH_SHORT = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+
+/** '2026-01' → 'ene 2026' (encabezados de columna). */
+export function monthShortLabel(yyyyMm: string): string {
+  const m = MONTH_KEY_RE.exec(yyyyMm)
+  return m ? `${MONTH_SHORT[Number(m[2]) - 1]} ${m[1]}` : yyyyMm
+}
+
+/** Máximo de meses por descarga (get_money_movements y get_staff_production aceptan hasta 400 días). */
+export const ACCOUNTANT_MAX_MONTHS = 13
+/** Hasta cuántos meses atrás se puede pedir (incluye el mes actual). */
+export const ACCOUNTANT_HISTORY_MONTHS = 36
+
+/** Meses entre dos meses, ambos incluidos: ('2026-01','2026-03') → ['2026-01','2026-02','2026-03']. Vacío si 'to' < 'from'. */
+export function monthsBetween(fromMonth: string, toMonth: string): string[] {
+  if (!isMonthKey(fromMonth) || !isMonthKey(toMonth) || toMonth < fromMonth) return []
+  const out: string[] = []
+  let cur = fromMonth
+  while (cur <= toMonth && out.length < 1200) {
+    out.push(cur)
+    cur = nextMonth(cur)
+  }
+  return out
+}
+
+/** Fechas de un rango de meses: del día 1 del primero al último día del último (o hoy si es el mes actual). */
+export function rangeDates(fromMonth: string, toMonth: string): { from: string; to: string } {
+  if (!isMonthKey(fromMonth) || !isMonthKey(toMonth)) throw new Error('Mes inválido.')
+  return { from: `${fromMonth}-01`, to: monthRange(toMonth).to }
+}
+
+/** Texto del rango: 'septiembre 2026' o 'enero 2026 a septiembre 2026'. */
+export function monthRangeLabel(fromMonth: string, toMonth: string): string {
+  return fromMonth === toMonth ? monthLabel(fromMonth) : `${monthLabel(fromMonth)} a ${monthLabel(toMonth)}`
+}
+
+/** Sufijo de nombre de archivo: '2026-09' o '2026-01_a_2026-09'. */
+export function rangeFileSuffix(fromMonth: string, toMonth: string): string {
+  return fromMonth === toMonth ? fromMonth : `${fromMonth}_a_${toMonth}`
+}
+
 /**
  * Cambio porcentual frente al período anterior. Null si no hay base (anterior = 0).
  * Con base negativa usa su valor absoluto: pasar de −100 a −50 es una mejora de +50 %.
@@ -210,28 +253,120 @@ export function movementsCsv(rows: MoneyMovement[]): string {
   ])
 }
 
-/** Estado de resultados del mes en dos columnas (Concepto;Valor). `categoryName` traduce slug → nombre. */
-export function profitLossCsv(
-  pl: ProfitLossResult,
-  label: string,
+/**
+ * Estado de resultados por mes: una columna por mes y una última con el total del período.
+ * Las categorías de gasto son la unión de las de todos los meses (0 donde no hubo).
+ * `categoryName` traduce slug → nombre.
+ */
+export function profitLossMultiCsv(
+  monthly: { month: string; pl: ProfitLossResult }[],
+  total: ProfitLossResult,
+  rangeLabel: string,
   categoryName: (slug: string) => string,
 ): string {
+  const cols = [...monthly.map(m => m.pl), total]
+  const line = (label: string, pick: (pl: ProfitLossResult) => number): CsvCell[] => [label, ...cols.map(pick)]
+
+  // Unión de categorías: primero las del total (ya vienen ordenadas), luego las que solo aparezcan en algún mes
+  const slugs: string[] = []
+  for (const pl of [total, ...monthly.map(m => m.pl)]) {
+    for (const c of pl.expenses.by_category) if (!slugs.includes(c.category)) slugs.push(c.category)
+  }
+  const catTotal = (pl: ProfitLossResult, slug: string) =>
+    pl.expenses.by_category.find(c => c.category === slug)?.total ?? 0
+
   const rows: CsvCell[][] = [
-    ['Estado de resultados', label],
-    ['Concepto', 'Valor'],
-    ['Ingresos por servicios', pl.revenue.services],
-    ['Ingresos por productos', pl.revenue.retail],
-    ['Descuentos', pl.revenue.discounts],
-    ['Ingresos totales', pl.revenue.total],
-    ['Costo de productos vendidos', pl.cost_of_goods],
-    ['Utilidad bruta', pl.gross_profit],
-    ['Comisiones del equipo', pl.commissions],
-    ['Gastos', pl.expenses.total],
-    ...pl.expenses.by_category.map(c => [`Gastos - ${categoryName(c.category)}`, c.total] as CsvCell[]),
-    ['Desgaste de equipos', pl.depreciation ?? 0],
-    ['Venta o baja de equipos', pl.asset_disposals ?? 0],
-    ['Utilidad neta', pl.net_profit],
-    ['Propinas (no son ingreso del negocio)', pl.tips],
+    ['Estado de resultados', rangeLabel],
+    ['Concepto', ...monthly.map(m => monthShortLabel(m.month)), 'Total'],
+    line('Ingresos por servicios', pl => pl.revenue.services),
+    line('Ingresos por productos', pl => pl.revenue.retail),
+    line('Descuentos', pl => pl.revenue.discounts),
+    line('Ingresos totales', pl => pl.revenue.total),
+    line('Costo de productos vendidos', pl => pl.cost_of_goods),
+    line('Utilidad bruta', pl => pl.gross_profit),
+    line('Comisiones del equipo', pl => pl.commissions),
+    line('Gastos', pl => pl.expenses.total),
+    ...slugs.map(slug => line(`Gastos - ${categoryName(slug)}`, pl => catTotal(pl, slug))),
+    line('Desgaste de equipos', pl => pl.depreciation ?? 0),
+    line('Venta o baja de equipos', pl => pl.asset_disposals ?? 0),
+    line('Utilidad neta', pl => pl.net_profit),
+    line('Propinas (no son ingreso del negocio)', pl => pl.tips),
   ]
   return toCsv(rows)
+}
+
+// ── Por profesional ───────────────────────────────────────────────────────────
+
+export interface StaffTotals {
+  /** Lo que vendió: servicios + productos (sin propinas). */
+  produced: number
+  /** Lo que ganó: comisiones + propinas + bonos − descuentos. */
+  earned:   number
+  /** Lo que se le pagó: anticipos + pagos. */
+  paid:     number
+  /** Lo que le quedó al negocio: produjo − comisiones − bonos + descuentos. */
+  kept:     number
+}
+
+type StaffRow = Pick<
+  StaffProduction,
+  'services_revenue' | 'products_revenue' | 'commissions' | 'tips' | 'bonuses' | 'deductions' | 'advances' | 'payments'
+>
+
+export function staffTotals(r: StaffRow): StaffTotals {
+  const n = (v: number) => Number(v) || 0
+  const produced = n(r.services_revenue) + n(r.products_revenue)
+  return {
+    produced,
+    earned: n(r.commissions) + n(r.tips) + n(r.bonuses) - n(r.deductions),
+    paid:   n(r.advances) + n(r.payments),
+    kept:   produced - n(r.commissions) - n(r.bonuses) + n(r.deductions),
+  }
+}
+
+export interface StaffSummary extends StaffTotals {
+  /** Saldo pendiente hoy de todo el equipo (suma de los saldos; los negativos restan). */
+  pending: number
+  count:   number
+}
+
+/** Totales de todo el equipo. */
+export function summarizeStaff(rows: (StaffRow & Pick<StaffProduction, 'balance_now'>)[]): StaffSummary {
+  const sum: StaffSummary = { produced: 0, earned: 0, paid: 0, kept: 0, pending: 0, count: rows.length }
+  for (const r of rows) {
+    const t = staffTotals(r)
+    sum.produced += t.produced
+    sum.earned += t.earned
+    sum.paid += t.paid
+    sum.kept += t.kept
+    sum.pending += Number(r.balance_now) || 0
+  }
+  return sum
+}
+
+/** Más produjo primero; a igual producción, por nombre. */
+export function sortStaffByProduction<T extends StaffRow & Pick<StaffProduction, 'full_name'>>(rows: T[]): T[] {
+  return [...rows].sort(
+    (a, b) => staffTotals(b).produced - staffTotals(a).produced || a.full_name.localeCompare(b.full_name, 'es'),
+  )
+}
+
+export const STAFF_CSV_HEADER = [
+  'Profesional', 'Servicios hechos', 'Produjo en servicios', 'Produjo en productos', 'Produjo total',
+  'Comisiones', 'Propinas', 'Bonos', 'Descuentos', 'Ganó total',
+  'Anticipos', 'Pagos', 'Pagado total', 'Le quedó al negocio', 'Saldo pendiente hoy',
+]
+
+export function staffCsv(rows: StaffProduction[]): string {
+  return toCsv([
+    STAFF_CSV_HEADER,
+    ...sortStaffByProduction(rows).map(r => {
+      const t = staffTotals(r)
+      return [
+        r.full_name, r.services_count, r.services_revenue, r.products_revenue, t.produced,
+        r.commissions, r.tips, r.bonuses, r.deductions, t.earned,
+        r.advances, r.payments, t.paid, t.kept, r.balance_now,
+      ]
+    }),
+  ])
 }

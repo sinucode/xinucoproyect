@@ -36,6 +36,7 @@ export type {
   ProfitLossResult,
   ProfitLossCategoryEntry,
   MoneyMovement,
+  StaffProduction,
   MoneyMovementKind,
   MoneyMovementSource,
   MoneyMovementMethod,

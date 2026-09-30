@@ -3,18 +3,20 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react'
-import type { MoneyMovement } from '@xinuco/types'
+import type { ExpenseCategoryRow, MoneyMovement, StaffProduction } from '@xinuco/types'
 import type { MonthResults } from '@/actions/accounting'
 import { monthLabel, monthName, monthRange, nextMonth, previousMonth } from '@/lib/accounting-utils'
 import { ProfitLossStatement } from './ProfitLossStatement'
 import { MovementsPanel } from './MovementsPanel'
+import { StaffPanel } from './StaffPanel'
 import { AccountantPanel } from './AccountantPanel'
 
-export type AccountingTab = 'resultados' | 'movimientos' | 'contador'
+export type AccountingTab = 'resultados' | 'movimientos' | 'profesionales' | 'contador'
 
 const TABS: { key: AccountingTab; label: string }[] = [
   { key: 'resultados',  label: 'Resultados' },
   { key: 'movimientos', label: 'Movimientos' },
+  { key: 'profesionales', label: 'Por profesional' },
   { key: 'contador',    label: 'Para el contador' },
 ]
 
@@ -30,8 +32,10 @@ export interface AccountingViewProps {
   resultsError:   string | null
   movements:      MoneyMovement[] | null
   movementsError: string | null
-  /** slug de categoría de gasto → nombre (para el CSV) */
-  categoryNames:  Record<string, string>
+  staff:          StaffProduction[] | null
+  staffError:     string | null
+  /** Categorías de gasto del negocio (para los nombres en el CSV) */
+  categories:     Pick<ExpenseCategoryRow, 'slug' | 'name' | 'color' | 'is_hidden'>[]
 }
 
 function ErrorCard({ title, message }: { title: string; message: string }) {
@@ -60,7 +64,9 @@ export function AccountingView({
   resultsError,
   movements,
   movementsError,
-  categoryNames,
+  staff,
+  staffError,
+  categories,
 }: AccountingViewProps) {
   const router = useRouter()
   const [tab, setTab] = useState<AccountingTab>(initialTab)
@@ -117,7 +123,7 @@ export function AccountingView({
       <div
         role="tablist"
         aria-label="Secciones de contabilidad"
-        className="grid grid-cols-3 gap-1 p-1 rounded-xl"
+        className="grid grid-cols-2 sm:grid-cols-4 gap-1 p-1 rounded-xl"
         style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
       >
         {TABS.map(t => {
@@ -182,14 +188,19 @@ export function AccountingView({
           )
         )}
 
+        {tab === 'profesionales' && (
+          staff ? (
+            <StaffPanel key={mes} slug={slug} rows={staff} />
+          ) : (
+            <ErrorCard
+              title="Por profesional"
+              message={staffError ?? 'No se pudo cargar lo del equipo. Intenta de nuevo.'}
+            />
+          )
+        )}
+
         {tab === 'contador' && (
-          <AccountantPanel
-            slug={slug}
-            mes={mes}
-            movements={movements}
-            results={results}
-            categoryNames={categoryNames}
-          />
+          <AccountantPanel slug={slug} currentMes={currentMes} categories={categories} />
         )}
       </div>
     </div>
