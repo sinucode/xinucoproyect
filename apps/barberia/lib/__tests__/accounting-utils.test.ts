@@ -165,8 +165,9 @@ describe('movementsCsv', () => {
     ])
     const lines = csv.replace('﻿', '').split('\r\n')
     expect(lines[0]).toBe('Fecha;Hora;Tipo;Origen;Descripción;Categoría;Medio de pago;Monto;Propina')
-    expect(lines[1]).toBe('2026-09-10;10:30;Entrada;Venta;Venta · Juan;;Mercado Pago;50000;5000')
-    expect(lines[2]).toBe('2026-09-10;;Salida;Gasto;"Arriendo; local";Arriendo;Efectivo;1200000;0')
+    // Mismo día: el que solo tiene fecha va primero
+    expect(lines[1]).toBe('2026-09-10;;Salida;Gasto;"Arriendo; local";Arriendo;Efectivo;1200000;0')
+    expect(lines[2]).toBe('2026-09-10;10:30;Entrada;Venta;Venta · Juan;;Mercado Pago;50000;5000')
   })
 })
 
