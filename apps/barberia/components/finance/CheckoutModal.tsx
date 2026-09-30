@@ -129,7 +129,8 @@ export function CheckoutModal({
   const totalAmount = Math.max(0, subtotal - finalDiscount - loyaltyDiscount + finalTip)
 
   // Monto recibido (el cambio lo muestra CashReceivedInput)
-  const finalReceived = Number(receivedAmount) || 0
+  // Vacío = pago exacto (igual que en el Punto de Venta)
+  const finalReceived = receivedAmount === '' ? totalAmount : Number(receivedAmount) || 0
 
   // Apartados por OTRAS citas (los de esta cita son del propio cliente y se pueden cobrar)
   const reservedOthers = reservedByItem(reservations, appointment.id)
