@@ -1,8 +1,9 @@
 import { createClient } from '@xinuco/supabase/server'
 import { redirect } from 'next/navigation'
-import { Shield } from 'lucide-react'
-import { getAuditLogs } from '@/actions/audit'
+import { AdminPageHeader } from '@xinuco/ui'
+import { getAuditActors, getAuditAlerts, getAuditLogs } from '@/actions/audit'
 import { AuditLogViewer } from '@/components/dashboard/audit/AuditLogViewer'
+import { businessTodayISODate } from '@/lib/agenda-time'
 import type { BusinessFeatures } from '@xinuco/types'
 
 interface AuditPageProps {
@@ -20,7 +21,7 @@ export default async function AuditPage({ params }: AuditPageProps) {
   // ── Verificar rol: solo admin puede acceder a auditoría ─────────────────────
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, business_id, full_name')
+    .select('role, business_id')
     .eq('id', user.id)
     .single()
 
@@ -37,43 +38,28 @@ export default async function AuditPage({ params }: AuditPageProps) {
   const featureFlags = (biz?.features_enabled ?? {}) as unknown as BusinessFeatures
   if (!featureFlags?.audit_logs) redirect(`/${slug}/dashboard`)
 
-  const businessId = profile.business_id
-
-  // ── Cargar primera página de logs ───────────────────────────────────────────
-  const initialLogs = await getAuditLogs(businessId, { limit: 100 })
+  // ── Primera página, alertas de la semana y personas para el filtro ──────────
+  const [logs, alerts, actors] = await Promise.all([
+    getAuditLogs({}),
+    getAuditAlerts(),
+    getAuditActors(),
+  ])
 
   return (
-    <div className="bg-xinuco-bg min-h-screen">
-      <main className="px-4 py-6 pb-24 space-y-6 max-w-5xl mx-auto">
-        {/* Encabezado */}
-        <section aria-label="Encabezado de Auditoría" className="flex items-start gap-3">
-          <div
-            className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center mt-0.5"
-            style={{
-              background:   'rgba(197,160,89,0.10)',
-              border:       '1px solid rgba(197,160,89,0.20)',
-            }}
-          >
-            <Shield size={18} style={{ color: 'var(--primary-color)' }} />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-xinuco-text">
-              Auditoría
-            </h1>
-            <p className="text-sm text-xinuco-muted mt-0.5">
-              Registro inmutable de todas las acciones del sistema. Solo visible para administradores.
-            </p>
-          </div>
-        </section>
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
+      <AdminPageHeader
+        title="Auditoría"
+        subtitle="Quién hizo qué y cuándo: dinero, caja, inventario, citas y configuración. Solo lo ve el administrador."
+      />
 
-        {/* Visor de logs */}
-        <section aria-label="Registros de auditoría">
-          <AuditLogViewer
-            initialLogs={initialLogs}
-            businessId={businessId}
-          />
-        </section>
-      </main>
+      <AuditLogViewer
+        initialLogs={'error' in logs ? [] : logs.logs}
+        initialHasMore={'error' in logs ? false : logs.hasMore}
+        initialError={'error' in logs ? logs.error : null}
+        alerts={'error' in alerts ? null : alerts}
+        actors={'error' in actors ? null : actors}
+        today={businessTodayISODate()}
+      />
     </div>
   )
 }

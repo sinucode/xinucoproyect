@@ -60,7 +60,7 @@ describe('cancelAppointmentByToken', () => {
     })
   })
 
-  it('passes the trimmed reason to the rpc, the email and the audit log', async () => {
+  it('passes the trimmed reason to the rpc and the email', async () => {
     rpc.mockResolvedValueOnce({ data: { appointment_id: 'appt1', business_id: 'biz1' }, error: null })
     const result = await cancelAppointmentByToken(TOKEN, '  me surgió un imprevisto  ')
     expect(result).toEqual({ success: true })
@@ -71,12 +71,8 @@ describe('cancelAppointmentByToken', () => {
     expect(sendCancellationNotice).toHaveBeenCalledWith(
       expect.objectContaining({ reason: 'me surgió un imprevisto' }),
     )
-    expect(adminRpc).toHaveBeenCalledWith(
-      'log_action',
-      expect.objectContaining({
-        p_new_value: { status: 'cancelled', source: 'email_link', reason: 'me surgió un imprevisto' },
-      }),
-    )
+    // La auditoría de la cancelación la escribe el trigger de la BD: la app ya no llama log_action
+    expect(adminRpc).not.toHaveBeenCalledWith('log_action', expect.anything())
   })
 
   it('truncates a reason longer than 300 characters', async () => {

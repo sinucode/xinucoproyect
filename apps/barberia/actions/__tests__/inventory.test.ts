@@ -25,7 +25,7 @@ jest.mock('next/cache', () => ({
   revalidatePath: jest.fn(),
 }))
 
-jest.mock('@/actions/audit', () => ({
+jest.mock('@/lib/audit', () => ({
   logAction: jest.fn().mockResolvedValue(undefined),
 }))
 

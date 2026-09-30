@@ -1,7 +1,6 @@
 import { getShiftSummary, getActiveShiftDetails, openShift, closeShift, checkoutAppointment } from '../finance'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { logAction } from '../audit'
 
 jest.mock('@xinuco/supabase/server', () => ({
   createClient: jest.fn(),
@@ -11,7 +10,7 @@ jest.mock('next/cache', () => ({
   revalidatePath: jest.fn(),
 }))
 
-jest.mock('../audit', () => ({
+jest.mock('@/lib/audit', () => ({
   logAction: jest.fn(),
 }))
 

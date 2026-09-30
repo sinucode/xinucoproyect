@@ -10,7 +10,7 @@ jest.mock('next/cache', () => ({
   revalidatePath: jest.fn(),
 }))
 
-jest.mock('../audit', () => ({
+jest.mock('@/lib/audit', () => ({
   logAction: jest.fn(),
 }))
 

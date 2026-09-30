@@ -3,8 +3,7 @@
 import { createClient } from '@xinuco/supabase/server'
 import { addMinutes, format, parseISO, isBefore, isAfter, getDay } from 'date-fns'
 import { revalidatePath } from 'next/cache'
-import type { AppointmentStatus, Json } from '@xinuco/types'
-import { logAction } from './audit'
+import type { AppointmentStatus } from '@xinuco/types'
 import { sendCancellationNotice } from '@/lib/email/notifications'
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -152,29 +151,6 @@ export async function updateAppointmentStatus(appointmentId: string, status: App
   // Sin filas: la RLS no dejó cambiarla (cita de otro profesional)
   if (!updated || updated.length === 0) {
     return { error: 'Solo puedes cambiar tus propias citas.' }
-  }
-
-  // ── Audit log (nunca bloquea la operación principal) ─────────────────────────
-  if (existing?.business_id) {
-    try {
-      // Reutilizar el user obtenido al inicio — no llamar auth.getUser() de nuevo
-      const { data: profile } = user
-        ? await supabase.from('profiles').select('full_name').eq('id', user.id).single()
-        : { data: null }
-
-      await logAction({
-        businessId:  existing.business_id,
-        actorId:     user?.id ?? null,
-        actorName:   profile?.full_name ?? null,
-        action:      'appointment.status_changed',
-        entityType:  'appointment',
-        entityId:    appointmentId,
-        oldValue:    { status: existing.status } as unknown as Json,
-        newValue:    { status } as unknown as Json,
-      })
-    } catch {
-      // Silenciar — el log nunca rompe la operación principal
-    }
   }
 
   // ── Notificación de cancelación por correo (best-effort — nunca bloquea) ────

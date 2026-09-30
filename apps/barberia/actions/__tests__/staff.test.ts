@@ -7,7 +7,7 @@ import {
 } from '../staff'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { logAction } from '../audit'
+import { logAction } from '@/lib/audit'
 
 jest.mock('@xinuco/supabase/server', () => ({
   createClient: jest.fn(),
@@ -17,7 +17,7 @@ jest.mock('next/cache', () => ({
   revalidatePath: jest.fn(),
 }))
 
-jest.mock('../audit', () => ({
+jest.mock('@/lib/audit', () => ({
   logAction: jest.fn(),
 }))
 
@@ -156,7 +156,8 @@ describe('Staff Server Actions', () => {
         is_active: true,
       })
       expect(find(ops, 'staff_services', 'insert')).toHaveLength(0)
-      expect(logAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'staff.created', businessId: 'biz1' }))
+      // El alta la audita el trigger de la BD
+      expect(logAction).not.toHaveBeenCalled()
       expect(revalidatePath).toHaveBeenCalled()
     })
 
@@ -279,6 +280,23 @@ describe('Staff Server Actions', () => {
       expect(find(ops, 'staff', 'update')).toHaveLength(0)
     })
 
+    it("audita solo el cambio de servicios ('all' que quita filas) y sin actor", async () => {
+      use({
+        handlers: {
+          'staff.select': { data: STAFF_ROW, error: null },
+          'staff_services.delete': { data: [{ service_id: 's1' }], error: null },
+        },
+      })
+      await updateStaffMember('staff1', { ...data, service_ids: 'all' })
+      expect(logAction).toHaveBeenCalledTimes(1)
+      const arg = (logAction as jest.Mock).mock.calls[0][0]
+      expect(arg).toEqual(expect.objectContaining({
+        businessId: 'biz1', action: 'staff.services_changed', entityType: 'staff', entityId: 'staff1',
+      }))
+      expect(arg).not.toHaveProperty('actorId')
+      expect(arg).not.toHaveProperty('actorName')
+    })
+
     it('rechaza staff de otro negocio (no aparece bajo el business_id del perfil)', async () => {
       const { ops } = use({ handlers: { 'staff.select': { data: null, error: null } } })
       const result = await updateStaffMember('staff-ajeno', { ...data, service_ids: 'all' })
@@ -302,11 +320,8 @@ describe('Staff Server Actions', () => {
       expect(hasFilter(del[0], 'business_id', 'biz1')).toBe(true)
       expect(find(ops, 'staff_services', 'insert')).toHaveLength(0)
 
-      expect(logAction).toHaveBeenCalledWith(expect.objectContaining({
-        action: 'staff.updated',
-        oldValue: { full_name: 'John', specialty_role: 'Barbero' },
-        newValue: { full_name: 'John Nuevo', specialty_role: 'Estilista' },
-      }))
+      // Nombre/usuario los audita el trigger de la BD; aquí solo los servicios (no cambiaron)
+      expect(logAction).not.toHaveBeenCalled()
     })
 
     it('exige al menos un servicio cuando no es "all"', async () => {
@@ -447,10 +462,7 @@ describe('Staff Server Actions', () => {
         expect(find(ops, 'staff', 'update')[0].payload).toEqual({
           full_name: 'John Nuevo', specialty_role: 'Estilista', user_id: null,
         })
-        expect(logAction).toHaveBeenCalledWith(expect.objectContaining({
-          oldValue: expect.objectContaining({ user_id: 'u9' }),
-          newValue: expect.objectContaining({ user_id: null }),
-        }))
+        expect(logAction).not.toHaveBeenCalled()
       })
     })
   })
@@ -463,7 +475,7 @@ describe('Staff Server Actions', () => {
       expect(find(ops, 'staff', 'update')).toHaveLength(0)
     })
 
-    it('desactiva filtrando por id y business_id, y audita', async () => {
+    it('desactiva filtrando por id y business_id', async () => {
       const { ops } = use({ handlers: { 'staff.select': { data: STAFF_ROW, error: null } } })
       const result = await toggleStaffStatus('staff1', false)
 
@@ -472,7 +484,7 @@ describe('Staff Server Actions', () => {
       expect(upd.payload).toEqual({ is_active: false })
       expect(hasFilter(upd, 'id', 'staff1')).toBe(true)
       expect(hasFilter(upd, 'business_id', 'biz1')).toBe(true)
-      expect(logAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'staff.deactivated' }))
+      expect(logAction).not.toHaveBeenCalled()
       expect(revalidatePath).toHaveBeenCalledWith('/[slug]/dashboard/walk-ins', 'page')
     })
 

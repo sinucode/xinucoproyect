@@ -1,363 +1,468 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { ChevronDown, ChevronRight, Loader2, Shield } from 'lucide-react'
+// AuditLogViewer — "Auditoría": quién hizo qué y cuándo. Alertas de la semana, filtros,
+// lista agrupada por día y detalle antes/después. Solo lectura (los registros los escribe la BD).
+
+import { useRef, useState, useTransition } from 'react'
+import {
+  Banknote,
+  CalendarDays,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Package,
+  Settings,
+  TriangleAlert,
+  UserRound,
+  Users,
+  Wallet,
+  type LucideIcon,
+} from 'lucide-react'
 import { getAuditLogs } from '@/actions/audit'
-import type { AuditLog, Json } from '@xinuco/types'
-
-// ── Tipos ─────────────────────────────────────────────────────────────────────
-
-type EntityTypeFilter =
-  | 'all'
-  | 'appointment'
-  | 'staff'
-  | 'service'
-  | 'shift'
-  | 'sale'
+import {
+  AUDIT_CATEGORIES,
+  AUDIT_CATEGORY_LABEL,
+  auditCategoryOf,
+  auditDayKey,
+  auditDayLabel,
+  auditSentence,
+  diffRows,
+  formatAuditClock,
+  formatAuditTime,
+  type AuditActorOption,
+  type AuditAlertItem,
+  type AuditCategory,
+  type AuditFilters,
+} from '@/lib/audit-utils'
+import type { AuditLog } from '@xinuco/types'
 
 interface AuditLogViewerProps {
-  initialLogs: AuditLog[]
-  businessId:  string
+  initialLogs:    AuditLog[]
+  initialHasMore: boolean
+  /** Null = no se pudo cargar. */
+  actors:         AuditActorOption[] | null
+  alerts:         AuditAlertItem[] | null
+  /** Día de hoy en Colombia ('YYYY-MM-DD'), calculado en el servidor. */
+  today:          string
+  initialError?:  string | null
 }
 
-// ── Configuración de badges por prefijo de acción ─────────────────────────────
-
-const ACTION_BADGE_CONFIG: Record<string, { bg: string; text: string; border: string }> = {
-  appointment: { bg: 'rgba(59,130,246,0.12)',  text: '#60a5fa', border: 'rgba(59,130,246,0.25)' },
-  staff:       { bg: 'rgba(168,85,247,0.12)', text: '#c084fc', border: 'rgba(168,85,247,0.25)' },
-  sale:        { bg: 'rgba(234,179,8,0.12)',  text: '#facc15', border: 'rgba(234,179,8,0.25)'  },
-  shift:       { bg: 'rgba(34,197,94,0.12)',  text: '#4ade80', border: 'rgba(34,197,94,0.25)'  },
-  service:     { bg: 'rgba(148,163,184,0.12)', text: '#94a3b8', border: 'rgba(148,163,184,0.25)' },
+const CATEGORY_ICON: Record<AuditCategory, LucideIcon> = {
+  money:        Wallet,
+  cash:         Banknote,
+  inventory:    Package,
+  appointments: CalendarDays,
+  team:         Users,
+  settings:     Settings,
+  customers:    UserRound,
 }
 
-function getActionBadgeStyle(action: string) {
-  const prefix = action.split('.')[0]
-  return (
-    ACTION_BADGE_CONFIG[prefix] ?? {
-      bg: 'rgba(255,255,255,0.07)',
-      text: 'var(--text-color)',
-      border: 'var(--border-color)',
+const AMBER = '#fbbf24'
+const AMBER_BORDER = 'rgba(251,191,36,0.35)'
+const AMBER_BG = 'rgba(251,191,36,0.10)'
+
+const EMPTY_FILTERS: AuditFilters = {}
+
+function hasAnyFilter(f: AuditFilters): boolean {
+  return !!(f.category || f.actor || f.from || f.to || f.onlyWarnings)
+}
+
+const chip = (active: boolean) =>
+  `px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors whitespace-nowrap ${
+    active ? '' : 'text-xinuco-muted hover:text-xinuco-text'
+  }`
+const chipStyle = (active: boolean) => active
+  ? {
+      borderColor: 'var(--primary-color)',
+      color: 'var(--primary-color)',
+      background: 'color-mix(in srgb, var(--primary-color) 12%, transparent)',
     }
+  : { borderColor: 'var(--border-color)' }
+
+// ── Tarjeta de alertas ────────────────────────────────────────────────────────
+
+function AlertsCard({ alerts }: { alerts: AuditAlertItem[] | null }) {
+  return (
+    <section
+      aria-label="Últimos 7 días"
+      className="rounded-2xl p-4 sm:p-5 flex flex-col gap-3"
+      style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
+    >
+      <h2 className="text-sm font-bold text-xinuco-text uppercase tracking-wider">Últimos 7 días</h2>
+      {alerts === null ? (
+        <p className="text-sm text-xinuco-muted">No se pudo calcular el resumen de la semana.</p>
+      ) : alerts.length === 0 ? (
+        <p className="flex items-center gap-2 text-sm text-xinuco-muted">
+          <Check size={16} className="shrink-0 text-emerald-400" />
+          Sin movimientos delicados esta semana
+        </p>
+      ) : (
+        <ul className="flex flex-wrap gap-2">
+          {alerts.map(a => (
+            <li
+              key={a.key}
+              className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold border min-w-0"
+              style={a.tone === 'warning'
+                ? { borderColor: AMBER_BORDER, background: AMBER_BG, color: AMBER }
+                : { borderColor: 'var(--border-color)' }}
+            >
+              {a.tone === 'warning' && <TriangleAlert size={12} className="shrink-0" />}
+              <span className={`break-words ${a.tone === 'warning' ? '' : 'text-xinuco-text'}`}>{a.label}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
-// ── Formatear timestamp a fecha y hora local en español Colombia ──────────────
+// ── Detalle antes / después ───────────────────────────────────────────────────
 
-function formatTimestamp(iso: string): { date: string; time: string } {
-  const d = new Date(iso)
-  return {
-    date: d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }),
-    time: d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+function DetailTable({ log }: { log: AuditLog }) {
+  const hasOld = log.old_value !== null && log.old_value !== undefined
+  const hasNew = log.new_value !== null && log.new_value !== undefined
+  const rows = diffRows(log.old_value, log.new_value)
+  const both = hasOld && hasNew
+
+  if (rows.length === 0) {
+    return <p className="text-xs text-xinuco-muted">No hay más detalles de este movimiento.</p>
   }
-}
 
-// ── Renderizar JSONB como diff legible ────────────────────────────────────────
-
-function JsonBlock({ label, value }: { label: string; value: Json | null }) {
-  if (value === null || value === undefined) return null
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-color)', opacity: 0.5 }}>
-        {label}
-      </span>
-      <pre
-        className="text-xs rounded-lg px-3 py-2.5 overflow-x-auto whitespace-pre-wrap break-words"
-        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)', color: 'var(--text-color)' }}
-      >
-        {JSON.stringify(value, null, 2)}
-      </pre>
+    <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border-color)' }}>
+      <table className="w-full table-fixed text-xs">
+        <thead>
+          <tr className="text-left text-[11px] uppercase tracking-wider text-xinuco-muted" style={{ background: 'rgba(255,255,255,0.03)' }}>
+            <th className="px-3 py-2 font-semibold">Campo</th>
+            {both ? (
+              <>
+                <th className="px-3 py-2 font-semibold">Antes</th>
+                <th className="px-3 py-2 font-semibold">Después</th>
+              </>
+            ) : (
+              <th className="px-3 py-2 font-semibold">Valor</th>
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={`${r.campo}-${i}`} className="align-top" style={{ borderTop: '1px solid var(--border-color)' }}>
+              <td className="px-3 py-2 font-medium text-xinuco-text break-words">{r.campo}</td>
+              {both ? (
+                <>
+                  <td className="px-3 py-2 text-xinuco-muted break-words">{r.antes}</td>
+                  <td className="px-3 py-2 text-xinuco-text break-words">{r.despues}</td>
+                </>
+              ) : (
+                <td className="px-3 py-2 text-xinuco-text break-words">{hasNew ? r.despues : r.antes}</td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
 
-// ── Fila de log con expansión ─────────────────────────────────────────────────
+// ── Fila ──────────────────────────────────────────────────────────────────────
 
-function AuditLogRow({ log }: { log: AuditLog }) {
-  const [expanded, setExpanded] = useState(false)
-  const { date, time } = formatTimestamp(log.created_at)
-  const badgeStyle = getActionBadgeStyle(log.action)
-  const hasDetails = log.old_value !== null || log.new_value !== null
+function LogRow({ log, first, open, onToggle }: { log: AuditLog; first: boolean; open: boolean; onToggle: () => void }) {
+  const category = auditCategoryOf(log)
+  const Icon = CATEGORY_ICON[category]
+  const warning = log.severity === 'warning'
+  const canExpand = (log.old_value !== null && log.old_value !== undefined)
+    || (log.new_value !== null && log.new_value !== undefined)
 
   return (
-    <>
-      <tr
-        className="transition-colors duration-150 hover:bg-white/[0.025] cursor-pointer"
-        style={{ borderTop: '1px solid var(--border-color)' }}
-        onClick={() => hasDetails && setExpanded(e => !e)}
-        aria-expanded={hasDetails ? expanded : undefined}
+    <li
+      className="flex gap-3 px-3 sm:px-4 py-3 min-w-0"
+      style={{
+        borderTop: first ? undefined : '1px solid var(--border-color)',
+        borderLeft: warning ? `3px solid ${AMBER}` : '3px solid transparent',
+        background: warning ? 'rgba(251,191,36,0.04)' : undefined,
+      }}
+    >
+      <span
+        className="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center mt-0.5"
+        style={warning
+          ? { background: AMBER_BG, color: AMBER }
+          : { background: 'color-mix(in srgb, var(--primary-color) 10%, transparent)', color: 'var(--primary-color)' }}
+        title={AUDIT_CATEGORY_LABEL[category]}
       >
-        {/* Timestamp */}
-        <td className="px-4 py-3 whitespace-nowrap">
-          <div className="flex flex-col">
-            <span className="text-xs font-medium tabular-nums" style={{ color: 'var(--text-color)' }}>{time}</span>
-            <span className="text-[11px]" style={{ color: 'var(--text-color)', opacity: 0.45 }}>{date}</span>
-          </div>
-        </td>
+        <Icon size={15} />
+      </span>
 
-        {/* Actor */}
-        <td className="px-4 py-3 whitespace-nowrap hidden sm:table-cell">
-          <span className="text-xs" style={{ color: 'var(--text-color)', opacity: 0.8 }}>
-            {log.actor_name ?? <span style={{ opacity: 0.4 }}>Sistema</span>}
-          </span>
-        </td>
-
-        {/* Action badge */}
-        <td className="px-4 py-3 whitespace-nowrap">
-          <span
-            className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full border whitespace-nowrap"
-            style={{ background: badgeStyle.bg, color: badgeStyle.text, borderColor: badgeStyle.border }}
-          >
-            {log.action}
-          </span>
-        </td>
-
-        {/* Entity */}
-        <td className="px-4 py-3 hidden md:table-cell">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium capitalize" style={{ color: 'var(--text-color)' }}>{log.entity_type}</span>
-            {log.entity_id && (
-              <span className="text-[10px] font-mono truncate max-w-[120px]" style={{ color: 'var(--text-color)', opacity: 0.4 }}>
-                {log.entity_id.substring(0, 8)}…
-              </span>
-            )}
-          </div>
-        </td>
-
-        {/* Expand indicator */}
-        <td className="px-4 py-3 text-right">
-          {hasDetails ? (
-            expanded
-              ? <ChevronDown size={14} style={{ color: 'var(--text-color)', opacity: 0.5 }} className="ml-auto" />
-              : <ChevronRight size={14} style={{ color: 'var(--text-color)', opacity: 0.5 }} className="ml-auto" />
-          ) : (
-            <span className="text-[10px]" style={{ color: 'var(--text-color)', opacity: 0.25 }}>—</span>
+      <div className="min-w-0 flex-1 flex flex-col gap-1.5">
+        <p className="text-sm text-xinuco-text break-words">
+          <strong className="font-semibold">{log.actor_name ?? 'Sistema'}</strong>{' '}
+          {auditSentence(log)}
+        </p>
+        <p className="text-xs text-xinuco-muted flex flex-wrap items-center gap-x-2">
+          <span title={formatAuditTime(log.created_at)}>{formatAuditClock(log.created_at)}</span>
+          <span aria-hidden>·</span>
+          <span>{AUDIT_CATEGORY_LABEL[category]}</span>
+          {warning && (
+            <span className="inline-flex items-center gap-1 font-semibold" style={{ color: AMBER }}>
+              <TriangleAlert size={11} /> Para revisar
+            </span>
           )}
-        </td>
-      </tr>
+        </p>
 
-      {/* Fila expandida con diff de valores */}
-      {expanded && hasDetails && (
-        <tr style={{ borderTop: '1px solid var(--border-color)' }}>
-          <td colSpan={5} className="px-4 pb-4 pt-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <JsonBlock label="Valor anterior" value={log.old_value} />
-              <JsonBlock label="Valor nuevo"    value={log.new_value} />
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
+        {canExpand && (
+          <>
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-expanded={open}
+              className="self-start inline-flex items-center gap-1 text-xs font-medium hover:underline"
+              style={{ color: 'var(--primary-color)' }}
+            >
+              {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              {open ? 'Ocultar detalle' : 'Ver detalle'}
+            </button>
+            {open && (
+              <div className="flex flex-col gap-1.5 animate-fade-in">
+                <p className="text-[11px] text-xinuco-muted">{formatAuditTime(log.created_at)}</p>
+                <DetailTable log={log} />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </li>
   )
 }
 
-// ── Componente principal ──────────────────────────────────────────────────────
+// ── Visor ─────────────────────────────────────────────────────────────────────
 
-const ENTITY_FILTER_OPTIONS: { value: EntityTypeFilter; label: string }[] = [
-  { value: 'all',         label: 'Todos'       },
-  { value: 'appointment', label: 'Citas'        },
-  { value: 'staff',       label: 'Equipo'       },
-  { value: 'service',     label: 'Servicios'    },
-  { value: 'shift',       label: 'Turnos'       },
-  { value: 'sale',        label: 'Ventas'       },
-]
+export function AuditLogViewer({
+  initialLogs, initialHasMore, actors, alerts, today, initialError = null,
+}: AuditLogViewerProps) {
+  const [filters, setFilters] = useState<AuditFilters>(EMPTY_FILTERS)
+  const [logs, setLogs] = useState<AuditLog[]>(initialLogs)
+  const [hasMore, setHasMore] = useState(initialHasMore)
+  const [error, setError] = useState<string | null>(initialError)
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set())
+  const [pending, startTransition] = useTransition()
+  const [loadingMore, startMore] = useTransition()
+  // Evita que una respuesta vieja pise a una más reciente al cambiar filtros rápido
+  const requestId = useRef(0)
 
-export function AuditLogViewer({ initialLogs, businessId }: AuditLogViewerProps) {
-  const [logs,          setLogs]          = useState<AuditLog[]>(initialLogs)
-  const [entityFilter,  setEntityFilter]  = useState<EntityTypeFilter>('all')
-  const [dateFrom,      setDateFrom]      = useState('')
-  const [dateTo,        setDateTo]        = useState('')
-  const [offset,        setOffset]        = useState(initialLogs.length)
-  const [hasMore,       setHasMore]       = useState(initialLogs.length === 100)
-  const [isPending,     startTransition]  = useTransition()
-
-  // ── Aplicar filtros (reinicia la lista) ──────────────────────────────────────
-
-  function handleFilterChange(
-    newEntityFilter:  EntityTypeFilter,
-    newDateFrom:      string,
-    newDateTo:        string,
-  ) {
-    setEntityFilter(newEntityFilter)
-    setDateFrom(newDateFrom)
-    setDateTo(newDateTo)
-    setOffset(0)
-    setHasMore(false)
-
+  function applyFilters(patch: Partial<AuditFilters>) {
+    const next: AuditFilters = { ...filters, ...patch }
+    setFilters(next)
+    setError(null)
+    const id = ++requestId.current
     startTransition(async () => {
-      const result = await getAuditLogs(businessId, {
-        entityType: newEntityFilter !== 'all' ? newEntityFilter : undefined,
-        dateFrom:   newDateFrom || undefined,
-        dateTo:     newDateTo   || undefined,
-        limit:      100,
-      })
-      setLogs(result)
-      setOffset(result.length)
-      setHasMore(result.length === 100)
+      const res = await getAuditLogs(next)
+      if (id !== requestId.current) return
+      if ('error' in res) {
+        setError(res.error)
+        return
+      }
+      setLogs(res.logs)
+      setHasMore(res.hasMore)
+      setOpenIds(new Set())
     })
   }
 
-  // ── Cargar más (paginación) ───────────────────────────────────────────────────
-
-  function handleLoadMore() {
-    startTransition(async () => {
-      const result = await getAuditLogs(businessId, {
-        entityType: entityFilter !== 'all' ? entityFilter : undefined,
-        dateFrom:   dateFrom || undefined,
-        dateTo:     dateTo   || undefined,
-        limit:      100,
+  function loadMore() {
+    const last = logs[logs.length - 1]
+    if (!last) return
+    setError(null)
+    const id = requestId.current
+    startMore(async () => {
+      const res = await getAuditLogs({ ...filters, before: { createdAt: last.created_at, id: last.id } })
+      if (id !== requestId.current) return
+      if ('error' in res) {
+        setError(res.error)
+        return
+      }
+      setLogs(prev => {
+        const seen = new Set(prev.map(l => l.id))
+        return [...prev, ...res.logs.filter(l => !seen.has(l.id))]
       })
-      // Append — filtrar duplicados por id
-      const existingIds = new Set(logs.map(l => l.id))
-      const newLogs = result.filter(l => !existingIds.has(l.id))
-      setLogs(prev => [...prev, ...newLogs])
-      setOffset(prev => prev + newLogs.length)
-      setHasMore(result.length === 100 && newLogs.length > 0)
+      setHasMore(res.hasMore)
     })
   }
+
+  function toggle(id: string) {
+    setOpenIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // Agrupar por día de Colombia (la lista ya viene del más nuevo al más viejo)
+  const groups: { day: string; items: AuditLog[] }[] = []
+  for (const log of logs) {
+    const day = auditDayKey(log.created_at)
+    const last = groups[groups.length - 1]
+    if (last && last.day === day) last.items.push(log)
+    else groups.push({ day, items: [log] })
+  }
+
+  const filtered = hasAnyFilter(filters)
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Barra de filtros */}
-      <div
-        className="flex flex-wrap items-end gap-3 p-4 rounded-xl"
-        style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
-      >
-        {/* Selector de tipo de entidad */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-color)', opacity: 0.5 }}>
-            Tipo de entidad
-          </label>
-          <select
-            value={entityFilter}
-            onChange={e => handleFilterChange(e.target.value as EntityTypeFilter, dateFrom, dateTo)}
-            className="input-base text-sm h-9 py-0"
-            style={{ minWidth: '140px' }}
-            disabled={isPending}
-          >
-            {ENTITY_FILTER_OPTIONS.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        </div>
+    <div className="flex flex-col gap-5 min-w-0">
+      <AlertsCard alerts={alerts} />
 
-        {/* Date From */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-color)', opacity: 0.5 }}>
-            Desde
-          </label>
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={e => handleFilterChange(entityFilter, e.target.value, dateTo)}
-            className="input-base text-sm h-9 py-0"
-            disabled={isPending}
-          />
-        </div>
-
-        {/* Date To */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-color)', opacity: 0.5 }}>
-            Hasta
-          </label>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={e => handleFilterChange(entityFilter, dateFrom, e.target.value)}
-            className="input-base text-sm h-9 py-0"
-            disabled={isPending}
-          />
-        </div>
-
-        {/* Spinner de filtrado */}
-        {isPending && (
-          <div className="flex items-end pb-1.5">
-            <Loader2 size={16} className="animate-spin" style={{ color: 'var(--primary-color)' }} />
-          </div>
-        )}
-      </div>
-
-      {/* Tabla de logs */}
-      {logs.length === 0 && !isPending ? (
-        /* Empty state */
-        <div
-          className="flex flex-col items-center justify-center gap-3 py-16 rounded-xl"
-          style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
-        >
-          <div
-            className="w-12 h-12 rounded-2xl flex items-center justify-center"
-            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)' }}
-          >
-            <Shield size={22} style={{ color: 'var(--text-color)', opacity: 0.3 }} />
-          </div>
-          <p className="text-sm font-medium" style={{ color: 'var(--text-color)', opacity: 0.6 }}>
-            Sin registros de auditoría
-          </p>
-          <p className="text-xs text-center max-w-xs" style={{ color: 'var(--text-color)', opacity: 0.35 }}>
-            Las acciones significativas en el sistema aparecerán aquí.
-          </p>
-        </div>
-      ) : (
-        <div
-          className="overflow-x-auto rounded-xl animate-fade-in"
-          style={{ border: '1px solid var(--border-color)' }}
-        >
-          <table className="w-full text-sm" aria-label="Tabla de auditoría">
-            <thead>
-              <tr style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', borderBottom: '1px solid var(--border-color)' }}>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-color)', opacity: 0.5 }}>
-                  Fecha / Hora
-                </th>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider hidden sm:table-cell" style={{ color: 'var(--text-color)', opacity: 0.5 }}>
-                  Actor
-                </th>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-color)', opacity: 0.5 }}>
-                  Acción
-                </th>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider hidden md:table-cell" style={{ color: 'var(--text-color)', opacity: 0.5 }}>
-                  Entidad
-                </th>
-                <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-color)', opacity: 0.5 }}>
-                  Detalle
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.map(log => (
-                <AuditLogRow key={log.id} log={log} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Paginación: Cargar más */}
-      {hasMore && (
-        <div className="flex justify-center pt-2">
+      {/* Filtros */}
+      <section aria-label="Filtros" className="flex flex-col gap-3 min-w-0">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar por tema">
           <button
             type="button"
-            onClick={handleLoadMore}
-            disabled={isPending}
-            className="btn-ghost flex items-center gap-2 text-sm px-6 py-2.5"
+            onClick={() => applyFilters({ category: undefined })}
+            aria-pressed={!filters.category}
+            className={chip(!filters.category)}
+            style={chipStyle(!filters.category)}
           >
-            {isPending ? (
-              <>
-                <Loader2 size={15} className="animate-spin" />
-                Cargando…
-              </>
-            ) : (
-              'Cargar más'
-            )}
+            Todo
           </button>
+          {AUDIT_CATEGORIES.map(c => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => applyFilters({ category: c.key })}
+              aria-pressed={filters.category === c.key}
+              className={chip(filters.category === c.key)}
+              style={chipStyle(filters.category === c.key)}
+            >
+              {c.label}
+            </button>
+          ))}
         </div>
-      )}
 
-      {/* Contador */}
-      {logs.length > 0 && (
-        <p className="text-xs text-center" style={{ color: 'var(--text-color)', opacity: 0.35 }}>
-          Mostrando {logs.length} registro{logs.length !== 1 ? 's' : ''}
-          {hasMore ? ' · hay más disponibles' : ' · fin del historial'}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+          <label className="flex flex-col gap-1 text-[11px] font-semibold text-xinuco-muted uppercase tracking-wider min-w-0">
+            Quién
+            <select
+              value={filters.actor ?? ''}
+              onChange={e => applyFilters({ actor: e.target.value || undefined })}
+              disabled={actors === null}
+              className="input-base !py-2 !px-3 !text-xs normal-case font-normal"
+            >
+              <option value="">Todos</option>
+              {(actors ?? []).map(a => (
+                <option key={a.value} value={a.value}>{a.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] font-semibold text-xinuco-muted uppercase tracking-wider min-w-0">
+            Desde
+            <input
+              type="date"
+              value={filters.from ?? ''}
+              max={filters.to || undefined}
+              onChange={e => applyFilters({ from: e.target.value || undefined })}
+              className="input-base !py-2 !px-3 !text-xs normal-case font-normal"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] font-semibold text-xinuco-muted uppercase tracking-wider min-w-0">
+            Hasta
+            <input
+              type="date"
+              value={filters.to ?? ''}
+              min={filters.from || undefined}
+              onChange={e => applyFilters({ to: e.target.value || undefined })}
+              className="input-base !py-2 !px-3 !text-xs normal-case font-normal"
+            />
+          </label>
+          <div className="flex items-center gap-3 flex-wrap pb-0.5">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={!!filters.onlyWarnings}
+              onClick={() => applyFilters({ onlyWarnings: filters.onlyWarnings ? undefined : true })}
+              className={`${chip(!!filters.onlyWarnings)} inline-flex items-center gap-1.5`}
+              style={filters.onlyWarnings
+                ? { borderColor: AMBER_BORDER, color: AMBER, background: AMBER_BG }
+                : chipStyle(false)}
+            >
+              <TriangleAlert size={12} />
+              Solo alertas
+            </button>
+            {filtered && (
+              <button
+                type="button"
+                onClick={() => applyFilters({
+                  category: undefined, actor: undefined, from: undefined, to: undefined, onlyWarnings: undefined,
+                })}
+                className="text-xs font-medium hover:underline"
+                style={{ color: 'var(--primary-color)' }}
+              >
+                Quitar filtros
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {error && (
+        <p role="alert" className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3 break-words">
+          {error}
         </p>
       )}
+
+      {/* Lista */}
+      <section aria-label="Registros" aria-busy={pending} className="flex flex-col gap-4 min-w-0">
+        {pending && (
+          <div className="flex items-center gap-2 text-xs text-xinuco-muted">
+            <Loader2 size={14} className="animate-spin" aria-hidden /> Cargando…
+          </div>
+        )}
+
+        {groups.length === 0 ? (
+          !pending && !error && (
+            <div
+              className="rounded-xl px-4 py-10 text-center text-sm text-xinuco-muted"
+              style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+            >
+              Todavía no hay registros con estos filtros.
+            </div>
+          )
+        ) : (
+          <div className={`flex flex-col gap-4 ${pending ? 'opacity-60' : ''}`}>
+            {groups.map(g => (
+              <div key={g.day} className="flex flex-col gap-2 min-w-0">
+                <h3 className="text-xs font-bold text-xinuco-muted uppercase tracking-wider">
+                  {auditDayLabel(g.day, today)}
+                </h3>
+                <ul
+                  className="rounded-xl overflow-hidden min-w-0"
+                  style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+                >
+                  {g.items.map((log, i) => (
+                    <LogRow
+                      key={log.id}
+                      log={log}
+                      first={i === 0}
+                      open={openIds.has(log.id)}
+                      onToggle={() => toggle(log.id)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {hasMore && (
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore || pending}
+            className="btn-ghost self-center !py-2.5 !px-5 !text-xs"
+          >
+            {loadingMore && <Loader2 size={14} className="animate-spin" aria-hidden />}
+            {loadingMore ? 'Cargando…' : 'Cargar más'}
+          </button>
+        )}
+      </section>
     </div>
   )
 }

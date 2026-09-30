@@ -44,6 +44,8 @@ export type {
   InventoryMovement,
   InventoryMovementResult,
   MovementType,
+  AuditLog,
+  AuditCategory,
 } from './database'
 
 export type { Database as DatabaseGenerated } from './database.types'

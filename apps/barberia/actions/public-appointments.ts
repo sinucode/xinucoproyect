@@ -45,7 +45,7 @@ export async function cancelAppointmentByToken(
   const appointmentId = result?.appointment_id
   const businessId    = result?.business_id
 
-  // Best-effort: correo de cancelación + auditoría. Nunca fallan la acción.
+  // Best-effort: correo de cancelación (la auditoría la escribe el trigger de la BD). Nunca falla la acción.
   if (appointmentId && businessId) {
     try {
       const admin = await createAdminClient()
@@ -54,23 +54,6 @@ export async function cancelAppointmentByToken(
         await sendCancellationNotice({ supabase: admin as any, businessId, appointmentId, reason: cleanReason })
       } catch (e) {
         console.error('[cancelAppointmentByToken] email:', e)
-      }
-
-      try {
-        // logAction() usa el cliente anon y log_action solo está concedido a
-        // authenticated/service_role → se llama la RPC directo con el admin.
-        await (admin as any).rpc('log_action', {
-          p_business_id: businessId,
-          p_actor_id:    null,
-          p_actor_name:  'Cliente (enlace del correo)',
-          p_action:      'appointment.status_changed',
-          p_entity_type: 'appointment',
-          p_entity_id:   appointmentId,
-          p_old_value:   null,
-          p_new_value:   { status: 'cancelled', source: 'email_link', reason: cleanReason },
-        })
-      } catch (e) {
-        console.error('[cancelAppointmentByToken] audit:', e)
       }
     } catch (e) {
       console.error('[cancelAppointmentByToken] admin client:', e)

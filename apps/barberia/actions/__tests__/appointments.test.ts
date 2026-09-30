@@ -1,7 +1,6 @@
 import { updateAppointmentStatus } from '../appointments'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { logAction } from '../audit'
 import { sendCancellationNotice } from '@/lib/email/notifications'
 
 jest.mock('@xinuco/supabase/server', () => ({
@@ -10,10 +9,6 @@ jest.mock('@xinuco/supabase/server', () => ({
 
 jest.mock('next/cache', () => ({
   revalidatePath: jest.fn(),
-}))
-
-jest.mock('../audit', () => ({
-  logAction: jest.fn(),
 }))
 
 jest.mock('@/lib/email/notifications', () => ({
@@ -59,10 +54,6 @@ describe('Appointments Server Actions', () => {
       
       expect(result.success).toBe(true)
       expect(mockSupabase.update).toHaveBeenCalledWith({ status: 'in_progress', updated_at: expect.any(String) })
-      expect(logAction).toHaveBeenCalledWith(expect.objectContaining({
-        action: 'appointment.status_changed',
-        newValue: { status: 'in_progress' }
-      }))
       expect(revalidatePath).toHaveBeenCalled()
     })
 

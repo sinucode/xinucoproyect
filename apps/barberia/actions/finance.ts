@@ -2,8 +2,7 @@
 
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
-import type { PaymentMethod, CashRegisterShift, Sale, SaleItem, Payment, Json } from '@xinuco/types'
-import { logAction } from './audit'
+import type { PaymentMethod, CashRegisterShift, Sale, SaleItem, Payment } from '@xinuco/types'
 import { loyaltyErrorMessage, stampRewardCop, type CustomerLoyalty } from '@/lib/loyalty-utils'
 import { businessTodayISODate, apptDateKey, dayLabel, formatApptTime } from '@/lib/agenda-time'
 import { parseReservations, type InventoryReservation } from '@/lib/inventory-reservations'
@@ -119,26 +118,6 @@ export async function openShift(businessId: string, startingCash: number) {
     return { error: `Error de base de datos: ${error.message}` }
   }
 
-  // ── Audit log ────────────────────────────────────────────────────────────────
-  try {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name')
-      .eq('id', user.id)
-      .single()
-
-    await logAction({
-      businessId:  businessId,
-      actorId:     user.id,
-      actorName:   profile?.full_name ?? null,
-      action:      'shift.opened',
-      entityType:  'shift',
-      newValue:    { opening_balance: startingCash } as unknown as Json,
-    })
-  } catch {
-    // Silenciar
-  }
-
   revalidatePath('/[slug]/dashboard', 'page')
   return { success: true }
 }
@@ -183,27 +162,6 @@ export async function closeShift(businessId: string, shiftId: string, actualClos
   if (error) {
     console.error('Error closing shift:', error)
     return { error: `Error de base de datos: ${error.message}` }
-  }
-
-  // ── Audit log ────────────────────────────────────────────────────────────────
-  try {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name')
-      .eq('id', user.id)
-      .single()
-
-    await logAction({
-      businessId:  businessId,
-      actorId:     user.id,
-      actorName:   profile?.full_name ?? null,
-      action:      'shift.closed',
-      entityType:  'shift',
-      entityId:    shiftId,
-      newValue:    { actual_closing_balance: actualClosingBalance, status: 'closed' } as unknown as Json,
-    })
-  } catch {
-    // Silenciar
   }
 
   revalidatePath('/[slug]/dashboard', 'page')

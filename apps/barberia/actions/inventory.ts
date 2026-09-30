@@ -3,7 +3,6 @@
 
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { logAction } from '@/actions/audit'
 import { parseReservations, type InventoryReservation } from '@/lib/inventory-reservations'
 import {
   INVENTORY_CATEGORIES,
@@ -267,7 +266,7 @@ export async function createInventoryItem(
 ): Promise<ActionResult & { id?: string }> {
   const auth = await requireAdmin()
   if ('error' in auth) return { error: auth.error }
-  const { supabase, businessId, userId, userEmail } = auth
+  const { supabase, businessId, userId } = auth
 
   const checked = validateItemFields(input, true)
   if ('error' in checked) return { error: checked.error }
@@ -330,21 +329,6 @@ export async function createInventoryItem(
     }
   }
 
-  // Audit log — best effort, never blocks main operation
-  try {
-    await logAction({
-      businessId,
-      actorId:    userId,
-      actorName:  userEmail,
-      action:     'inventory_item.created',
-      entityType: 'inventory_item',
-      entityId:   itemId,
-      newValue:   { name: f.name ?? null, category: f.category ?? null, current_stock: initialStock },
-    })
-  } catch {
-    // intentionally silent
-  }
-
   revalidateInventory()
   return { success: true, id: itemId }
 }
@@ -361,7 +345,7 @@ export async function updateInventoryItem(
 ): Promise<ActionResult> {
   const auth = await requireAdmin()
   if ('error' in auth) return { error: auth.error }
-  const { supabase, businessId, userId, userEmail } = auth
+  const { supabase, businessId } = auth
 
   if (!itemId) return { error: 'Producto no encontrado.' }
 
@@ -378,21 +362,6 @@ export async function updateInventoryItem(
 
   if (error) return { error: error.message }
 
-  // Audit log — best effort
-  try {
-    await logAction({
-      businessId,
-      actorId:    userId,
-      actorName:  userEmail,
-      action:     'inventory_item.updated',
-      entityType: 'inventory_item',
-      entityId:   itemId,
-      newValue:   payload as any,
-    })
-  } catch {
-    // intentionally silent
-  }
-
   revalidateInventory()
   return { success: true }
 }
@@ -405,7 +374,7 @@ export async function updateInventoryItem(
 export async function deactivateInventoryItem(itemId: string): Promise<ActionResult> {
   const auth = await requireAdmin()
   if ('error' in auth) return { error: auth.error }
-  const { supabase, businessId, userId, userEmail } = auth
+  const { supabase, businessId } = auth
 
   const { error } = await supabase
     .from('inventory_items')
@@ -414,20 +383,6 @@ export async function deactivateInventoryItem(itemId: string): Promise<ActionRes
     .eq('business_id', businessId)
 
   if (error) return { error: error.message }
-
-  // Audit log — best effort
-  try {
-    await logAction({
-      businessId,
-      actorId:    userId,
-      actorName:  userEmail,
-      action:     'inventory_item.deactivated',
-      entityType: 'inventory_item',
-      entityId:   itemId,
-    })
-  } catch {
-    // intentionally silent
-  }
 
   revalidateInventory()
   return { success: true }

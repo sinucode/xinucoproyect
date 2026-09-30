@@ -656,6 +656,9 @@ export interface Payment {
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ---------- Tabla: audit_logs ----------
+export type AuditCategory =
+  | 'money' | 'cash' | 'inventory' | 'appointments' | 'team' | 'settings' | 'customers'
+
 export interface AuditLog {
   id:          string
   business_id: string
@@ -668,6 +671,13 @@ export interface AuditLog {
   new_value:   Json | null
   ip_address:  string | null
   created_at:  string
+  /** Null en registros antiguos (anteriores a los triggers de auditoría). */
+  category:    string | null
+  /** Frase en español SIN el actor. Null en registros antiguos. */
+  summary:     string | null
+  severity:    'info' | 'warning'
+  /** Monto relevante (shift.closed: diferencia, negativo = faltante). */
+  amount:      number | null
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

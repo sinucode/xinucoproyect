@@ -1,112 +1,153 @@
 'use server'
 
+// actions/audit.ts — Lectura de la Auditoría (solo administrador).
+// Los registros los escriben triggers de la BD; aquí NO se escribe nada.
+// El business_id sale SIEMPRE del perfil del administrador (nunca del cliente).
+
 import { createClient } from '@xinuco/supabase/server'
-import type { AuditLog, Json } from '@xinuco/types'
+import type { AuditLog } from '@xinuco/types'
+import {
+  bogotaDayRange,
+  isAuditCategory,
+  parseActorFilter,
+  summarizeAlerts,
+  type AuditActorOption,
+  type AuditAlertItem,
+  type AuditAlertRow,
+  type AuditFilters,
+} from '@/lib/audit-utils'
 
-// ── Tipos de parámetros ───────────────────────────────────────────────────────
+const NOT_ADMIN = 'Solo un administrador puede ver la auditoría.'
+const PAGE_SIZE = 50
+const TS_RE   = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:?\d{2})$/
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const ALERT_DAYS = 7
+const ALERT_ROW_LIMIT = 1000
 
-export interface LogActionParams {
-  businessId:  string
-  actorId:     string | null
-  actorName:   string | null
-  action:      string
-  entityType:  string
-  entityId?:   string | null
-  oldValue?:   Json | null
-  newValue?:   Json | null
-}
+type Supabase = Awaited<ReturnType<typeof createClient>>
 
-export interface GetAuditLogsFilters {
-  entityType?: string
-  entityId?:   string
-  actorId?:    string
-  dateFrom?:   string
-  dateTo?:     string
-  limit?:      number
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// logAction — Registra una acción en el audit trail vía RPC
-// IMPORTANTE: Siempre envolver en try/catch en el sitio de llamada.
-// Un fallo de logging NUNCA debe bloquear la operación principal.
-// ════════════════════════════════════════════════════════════════════════════
-
-export async function logAction(params: LogActionParams): Promise<void> {
+async function requireAdmin(): Promise<{ supabase: Supabase; businessId: string } | { error: string }> {
   const supabase = await createClient()
 
-  const { error } = await supabase.rpc('log_action', {
-    p_business_id: params.businessId,
-    p_actor_id:    params.actorId,
-    p_actor_name:  params.actorName,
-    p_action:      params.action,
-    p_entity_type: params.entityType,
-    p_entity_id:   params.entityId   ?? null,
-    p_old_value:   params.oldValue   ?? null,
-    p_new_value:   params.newValue   ?? null,
-  })
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: NOT_ADMIN }
 
-  if (error) {
-    // No lanzar — loggear silenciosamente para no romper la operación principal
-    console.error('[audit.logAction] Error registrando acción:', error.message, {
-      action:     params.action,
-      entityType: params.entityType,
-      entityId:   params.entityId,
-    })
-  }
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, business_id')
+    .eq('id', user.id)
+    .single()
+
+  const p = profile as { role?: string; business_id?: string | null } | null
+  if (!p || p.role !== 'admin' || !p.business_id) return { error: NOT_ADMIN }
+
+  return { supabase, businessId: p.business_id }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// getAuditLogs — Lista logs con filtros opcionales (máx. 100 registros)
+// getAuditLogs — una página (50) de registros, del más nuevo al más viejo
 // ════════════════════════════════════════════════════════════════════════════
 
 export async function getAuditLogs(
-  businessId: string,
-  filters?: GetAuditLogsFilters
-): Promise<AuditLog[]> {
-  const supabase = await createClient()
-  const limit    = Math.min(filters?.limit ?? 100, 100)
+  filters: AuditFilters = {},
+): Promise<{ logs: AuditLog[]; hasMore: boolean } | { error: string }> {
+  const auth = await requireAdmin()
+  if ('error' in auth) return { error: auth.error }
+  const { supabase, businessId } = auth
 
   let query = supabase
     .from('audit_logs')
     .select('*')
     .eq('business_id', businessId)
     .order('created_at', { ascending: false })
-    .limit(limit)
+    .order('id', { ascending: false })
+    .limit(PAGE_SIZE + 1)
 
-  if (filters?.entityType) {
-    query = query.eq('entity_type', filters.entityType)
+  if (isAuditCategory(filters.category)) query = query.eq('category', filters.category)
+  if (filters.onlyWarnings === true) query = query.eq('severity', 'warning')
+
+  const actor = parseActorFilter(filters.actor)
+  if (actor) {
+    query = 'id' in actor
+      ? query.eq('actor_id', actor.id)
+      : query.is('actor_id', null).eq('actor_name', actor.name)
   }
-  if (filters?.entityId) {
-    query = query.eq('entity_id', filters.entityId)
-  }
-  if (filters?.actorId) {
-    query = query.eq('actor_id', filters.actorId)
-  }
-  if (filters?.dateFrom) {
-    query = query.gte('created_at', filters.dateFrom)
-  }
-  if (filters?.dateTo) {
-    query = query.lte('created_at', filters.dateTo)
+
+  const { fromIso, toIso } = bogotaDayRange(filters.from, filters.to)
+  if (fromIso) query = query.gte('created_at', fromIso)
+  if (toIso) query = query.lt('created_at', toIso)
+
+  // Cursor compuesto: los triggers de una misma operación comparten created_at
+  const b = filters.before
+  if (b && typeof b.createdAt === 'string' && TS_RE.test(b.createdAt) && typeof b.id === 'string' && UUID_RE.test(b.id)) {
+    const ts = b.createdAt // tal cual viene de la BD: conserva los microsegundos
+    query = query.or(`created_at.lt."${ts}",and(created_at.eq."${ts}",id.lt.${b.id})`)
   }
 
   const { data, error } = await query
-
   if (error) {
     console.error('[audit.getAuditLogs]', error.message)
-    return []
+    return { error: 'No se pudo cargar el registro. Intenta de nuevo.' }
   }
 
-  return (data ?? []) as AuditLog[]
+  const rows = (data ?? []) as AuditLog[]
+  return { logs: rows.slice(0, PAGE_SIZE), hasMore: rows.length > PAGE_SIZE }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// getAuditLogsForEntity — Línea de tiempo de una entidad específica
+// getAuditActors — opciones del filtro "Quién"
 // ════════════════════════════════════════════════════════════════════════════
 
-export async function getAuditLogsForEntity(
-  businessId:  string,
-  entityType:  string,
-  entityId:    string
-): Promise<AuditLog[]> {
-  return getAuditLogs(businessId, { entityType, entityId, limit: 100 })
+export async function getAuditActors(): Promise<AuditActorOption[] | { error: string }> {
+  const auth = await requireAdmin()
+  if ('error' in auth) return { error: auth.error }
+  const { supabase, businessId } = auth
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name')
+    .eq('business_id', businessId)
+    .order('full_name', { ascending: true })
+
+  if (error) {
+    console.error('[audit.getAuditActors]', error.message)
+    return { error: 'No se pudo cargar la lista de personas.' }
+  }
+
+  const people: AuditActorOption[] = ((data ?? []) as { id: string; full_name: string | null }[])
+    .filter(p => p.full_name && p.full_name.trim() !== '')
+    .map(p => ({ value: `id:${p.id}`, label: p.full_name!.trim() }))
+
+  return [
+    ...people,
+    { value: 'name:Sistema', label: 'Sistema' },
+    { value: 'name:Cliente (en línea)', label: 'Cliente (en línea)' },
+  ]
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// getAuditAlerts — resumen de lo delicado en los últimos 7 días
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function getAuditAlerts(): Promise<AuditAlertItem[] | { error: string }> {
+  const auth = await requireAdmin()
+  if ('error' in auth) return { error: auth.error }
+  const { supabase, businessId } = auth
+
+  const since = new Date(Date.now() - ALERT_DAYS * 24 * 60 * 60 * 1000).toISOString()
+
+  const { data, error } = await supabase
+    .from('audit_logs')
+    .select('action, amount, severity')
+    .eq('business_id', businessId)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(ALERT_ROW_LIMIT)
+
+  if (error) {
+    console.error('[audit.getAuditAlerts]', error.message)
+    return { error: 'No se pudo calcular el resumen de la semana.' }
+  }
+
+  return summarizeAlerts((data ?? []) as AuditAlertRow[])
 }

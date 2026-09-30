@@ -9,7 +9,7 @@
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { Staff, StaffSchedule, ServiceAudienceOrAll, Json } from '@xinuco/types'
-import { logAction } from './audit'
+import { logAction } from '@/lib/audit'
 import { businessNowHHMM, businessTodayISODate } from '@/lib/agenda-time'
 import { normalizeStaffEmail, normalizeStaffPhone, validateWeeklySchedule } from '@/lib/team-utils'
 import type { StaffStatusNow } from '@/lib/walk-in-wait'
@@ -206,6 +206,10 @@ async function validateServiceIds(
   return { ids }
 }
 
+/**
+ * Auditoría de cambios que NINGÚN trigger de la BD cubre (los servicios que hace un profesional).
+ * Altas, activar/desactivar y cambios de nombre/usuario los registra la BD sola.
+ */
 async function audit(
   ctx: AdminContext,
   action: string,
@@ -213,20 +217,14 @@ async function audit(
   oldValue: Record<string, unknown> | null,
   newValue: Record<string, unknown> | null,
 ) {
-  try {
-    await logAction({
-      businessId: ctx.businessId,
-      actorId:    ctx.userId,
-      actorName:  ctx.actorName,
-      action,
-      entityType: 'staff',
-      entityId,
-      oldValue:   oldValue as unknown as Json,
-      newValue:   newValue as unknown as Json,
-    })
-  } catch {
-    // Un fallo de auditoría nunca bloquea la operación principal
-  }
+  await logAction({
+    businessId: ctx.businessId,
+    action,
+    entityType: 'staff',
+    entityId,
+    oldValue:   oldValue as unknown as Json,
+    newValue:   newValue as unknown as Json,
+  })
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -494,9 +492,6 @@ export async function createStaffMember(
     }
   }
 
-  await audit(auth, 'staff.created', created.id, null,
-    { full_name: parsed.full_name, specialty_role: parsed.specialty_role })
-
   revalidatePath('/[slug]/dashboard/staff', 'page')
   revalidatePath('/[slug]/dashboard/services', 'page')
   revalidatePath('/[slug]/book', 'page')
@@ -573,13 +568,16 @@ export async function updateStaffMember(
     return { error: updError.message }
   }
 
+  let servicesChanged = false
   if (targetIds === 'all') {
-    const { error } = await supabase
+    const { data: removed, error } = await supabase
       .from('staff_services')
       .delete()
       .eq('staff_id', staffId)
       .eq('business_id', businessId)
+      .select('service_id')
     if (error) return { error: error.message }
+    servicesChanged = (removed ?? []).length > 0
   } else {
     // Insertar primero los que faltan y borrar después los sobrantes: nunca queda en cero filas
     // (sin filas = "hace todo") en mitad del cambio.
@@ -595,6 +593,7 @@ export async function updateStaffMember(
     const toInsert = targetIds.filter(id => !current.has(id))
     const toDelete = Array.from(current).filter(id => !wanted.has(id))
 
+    servicesChanged = toInsert.length > 0 || toDelete.length > 0
     if (toInsert.length > 0) {
       const { error } = await supabase
         .from('staff_services')
@@ -612,11 +611,11 @@ export async function updateStaffMember(
     }
   }
 
-  await audit(auth, 'staff.updated', staffId,
-    { full_name: existing.full_name, specialty_role: existing.specialty_role,
-      ...(changesUser ? { user_id: existing.user_id ?? null } : {}) },
-    { full_name: parsed.full_name,   specialty_role: parsed.specialty_role,
-      ...(changesUser ? { user_id: data.user_id ?? null } : {}) })
+  if (servicesChanged) {
+    await audit(auth, 'staff.services_changed', staffId,
+      null,
+      { full_name: parsed.full_name, servicios: targetIds === 'all' ? 'todos' : targetIds.length })
+  }
 
   revalidatePath('/[slug]/dashboard/staff', 'page')
   revalidatePath('/[slug]/dashboard/services', 'page')
@@ -648,10 +647,6 @@ export async function toggleStaffStatus(
     .eq('business_id', businessId)
 
   if (error) return { error: error.message }
-
-  await audit(auth, isActive ? 'staff.activated' : 'staff.deactivated', staffId,
-    { is_active: existing.is_active, full_name: existing.full_name },
-    { is_active: isActive,           full_name: existing.full_name })
 
   revalidatePath('/[slug]/dashboard/staff', 'page')
   revalidatePath('/[slug]/book', 'page')

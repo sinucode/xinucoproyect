@@ -3,7 +3,7 @@
 
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { logAction } from '@/actions/audit'
+import { logAction } from '@/lib/audit'
 import type {
   FixedAsset,
   DepreciationSchedule,
@@ -134,8 +134,6 @@ export async function createFixedAsset(
   try {
     await logAction({
       businessId,
-      actorId:    user.id,
-      actorName:  user.email ?? null,
       action:     'fixed_asset.created',
       entityType: 'fixed_asset',
       entityId:   data.id,
@@ -216,8 +214,6 @@ export async function updateFixedAsset(
   try {
     await logAction({
       businessId,
-      actorId:    user.id,
-      actorName:  user.email ?? null,
       action:     'fixed_asset.updated',
       entityType: 'fixed_asset',
       entityId:   assetId,
@@ -266,8 +262,6 @@ export async function deactivateFixedAsset(
   try {
     await logAction({
       businessId,
-      actorId:    user.id,
-      actorName:  user.email ?? null,
       action:     'fixed_asset.deactivated',
       entityType: 'fixed_asset',
       entityId:   assetId,
