@@ -38,7 +38,7 @@ export interface BusinessFeatures {
   notifications_whatsapp:  boolean  // RF18 - Notificaciones por WhatsApp Cloud API
   // ── Finanzas ─────────────────────────────────────────────────────
   commissions:             boolean  // RF14 - Motor de comisiones variables
-  staff_ledger:            boolean  // RF15 - Billetera digital del staff
+  staff_ledger:            boolean  // RF15 - Pagos al equipo / Mi cuenta
   expenses_pgl:            boolean  // RF16 - Gastos y estado de resultados P&G
   retail_sales:            boolean  // RF20 - Ventas directas de productos (sin cita)
   loyalty:                 boolean  // RF17 - Programa de puntos de lealtad
@@ -707,7 +707,10 @@ export interface CommissionQueueEntry {
 }
 
 // ---------- Tabla: staff_ledger (RF15) ----------
-export type LedgerEntryType = 'commission' | 'tip' | 'advance' | 'payment'
+export type LedgerEntryType = 'commission' | 'tip' | 'advance' | 'payment' | 'bonus' | 'deduction'
+
+/** De dónde salió la plata en un pago/anticipo al equipo. 'cash_register' = efectivo de la caja. */
+export type TeamPaymentMethod = 'cash_register' | 'transfer' | 'other'
 
 export interface StaffLedgerEntry {
   id:           string
@@ -720,6 +723,11 @@ export interface StaffLedgerEntry {
   created_at:   string
   sale_id?:      string | null  // UUID → sales.id (comisiones/propinas automáticas)
   sale_item_id?: string | null  // UUID → sale_items.id (una comisión por línea)
+  payment_method?: TeamPaymentMethod | null  // solo en pagos y anticipos
+  shift_id?:     string | null  // UUID → cash_register_shifts.id (si salió de la caja)
+  created_by?:   string | null  // UUID → auth.users.id (quién lo registró)
+  period_from?:  string | null  // 'YYYY-MM-DD' — período liquidado (pagos)
+  period_to?:    string | null  // 'YYYY-MM-DD'
 }
 
 // Vista: staff_ledger_balances — saldo acumulado por empleado
@@ -729,7 +737,9 @@ export interface StaffLedgerBalance {
   total_earned:   number   // INTEGER COP — comisiones + propinas
   total_advances: number   // INTEGER COP — anticipos
   total_paid_out: number   // INTEGER COP — liquidaciones
-  current_balance: number  // INTEGER COP — earned - advances - paid_out
+  current_balance: number  // INTEGER COP — earned + bonos - advances - paid_out - descuentos
+  total_bonus:    number   // INTEGER COP — bonos / a favor
+  total_deductions: number // INTEGER COP — descuentos
 }
 
 // ---------- Tabla: expenses (RF16) ----------

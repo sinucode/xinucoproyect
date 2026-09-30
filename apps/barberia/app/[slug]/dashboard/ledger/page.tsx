@@ -1,22 +1,34 @@
-import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { getStaffBalances } from '@/actions/ledger'
-import { LedgerManager } from '@/components/dashboard/ledger/LedgerManager'
+import { getMyAccount, getStaffAccount, getTeamPaymentsOverview } from '@/actions/ledger'
+import { MyAccount, NotLinkedCard } from '@/components/dashboard/ledger/MyAccount'
+import { TeamPayments } from '@/components/dashboard/ledger/TeamPayments'
+import type { AccountViewFilters } from '@/components/dashboard/ledger/AccountParts'
+import { businessTodayISODate } from '@/lib/agenda-time'
+import { isLedgerEntryType, isRealDateKey } from '@/lib/team-payments'
 import type { BusinessFeatures, Profile } from '@xinuco/types'
 
 export const metadata: Metadata = {
-  title: 'Billetera del Staff — Xinuco',
-  description: 'Ledger digital: comisiones, propinas, anticipos y liquidaciones del equipo',
+  title: 'Pagos al equipo — Xinuco',
+  description: 'Comisiones, propinas, anticipos y pagos de cada profesional',
+}
+
+type SearchParams = Record<string, string | string[] | undefined>
+
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value
 }
 
 export default async function LedgerPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>
+  searchParams: Promise<SearchParams>
 }) {
   const { slug } = await params
+  const sp = await searchParams
 
   // 1. Auth guard — mismo patrón que commissions/page.tsx
   const supabase = await createClient()
@@ -25,7 +37,7 @@ export default async function LedgerPage({
   } = await supabase.auth.getUser()
   if (!user) redirect(`/${slug}/login`)
 
-  // 2. Obtener perfil: business_id + role
+  // 2. Perfil: business_id + role
   const { data: profile } = await supabase
     .from('profiles')
     .select('role, business_id')
@@ -34,14 +46,7 @@ export default async function LedgerPage({
 
   if (!profile?.business_id) redirect(`/${slug}/login`)
 
-  // Role guard: solo admin puede acceder
-  if (!profile || (profile.role !== 'admin' && profile.role !== 'super_admin')) {
-    redirect(`/${slug}/dashboard`)
-  }
-
-  const businessId = profile.business_id
-
-  // Feature gate: check staff_ledger flag server-side
+  // Feature gate: staff_ledger, del lado del servidor
   const { data: biz } = await supabase
     .from('businesses')
     .select('features_enabled')
@@ -50,111 +55,71 @@ export default async function LedgerPage({
   const features = (biz?.features_enabled ?? {}) as unknown as BusinessFeatures
   if (!features?.staff_ledger) redirect(`/${slug}/dashboard`)
 
-  // 3. Cargar saldos de todo el staff en paralelo
-  const balances = await getStaffBalances(businessId)
+  // 3. Filtros del historial (URL). Lo inválido se ignora.
+  const rawType = first(sp.type)
+  const rawFrom = first(sp.from)
+  const rawTo = first(sp.to)
+  const rawPage = Number(first(sp.page))
+  const filters: AccountViewFilters = {
+    type: rawType && isLedgerEntryType(rawType) ? rawType : 'all',
+    from: isRealDateKey(rawFrom) ? rawFrom : '',
+    to:   isRealDateKey(rawTo) ? rawTo : '',
+  }
+  const page = Number.isInteger(rawPage) && rawPage >= 1 ? rawPage : 1
+  const accountFilters = {
+    type: filters.type,
+    from: filters.from || undefined,
+    to:   filters.to || undefined,
+    page,
+  }
+
+  const isAdmin = profile.role === 'admin' || profile.role === 'super_admin'
+  const wrapper = 'flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 pb-24'
+
+  // ── Profesional (barbero / manicurista): solo su propia cuenta, en solo lectura ──
+  if (!isAdmin) {
+    const mine = await getMyAccount(accountFilters)
+    return (
+      <div className={wrapper}>
+        {'error' in mine ? (
+          <p role="alert" className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3">
+            {mine.error}
+          </p>
+        ) : 'notLinked' in mine ? (
+          <NotLinkedCard />
+        ) : (
+          <MyAccount account={mine} filters={filters} />
+        )}
+      </div>
+    )
+  }
+
+  // ── Administrador: resumen del equipo + cuenta del profesional elegido ──
+  const overview = await getTeamPaymentsOverview()
+  if ('error' in overview) redirect(`/${slug}/dashboard`)
+
+  const requested = first(sp.staff)
+  const selected = overview.members.find(m => m.staff.id === requested) ?? overview.members[0] ?? null
+
+  let account = null
+  let accountError: string | null = null
+  if (selected) {
+    const res = await getStaffAccount(selected.staff.id, accountFilters)
+    if ('error' in res) accountError = res.error
+    else account = res
+  }
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto pb-24">
-      <Suspense fallback={<LedgerPageSkeleton />}>
-        <LedgerManager
-          initialBalances={balances}
-          businessId={businessId}
-          slug={slug}
-        />
-      </Suspense>
-    </div>
-  )
-}
-
-// ── Skeleton de carga ─────────────────────────────────────────────────────────
-
-function LedgerPageSkeleton() {
-  return (
-    <div className="flex flex-col gap-6 animate-pulse">
-      {/* Header skeleton */}
-      <div
-        className="flex items-center justify-between pb-6 border-b"
-        style={{ borderColor: 'var(--border-color)' }}
-      >
-        <div className="flex flex-col gap-2">
-          <div
-            className="h-6 w-52 rounded-md"
-            style={{ background: 'var(--surface-color, #1a1a1a)' }}
-          />
-          <div
-            className="h-3 w-72 rounded-md"
-            style={{ background: 'var(--surface-color, #1a1a1a)' }}
-          />
-        </div>
-        <div
-          className="h-10 w-32 rounded-lg"
-          style={{ background: 'var(--surface-color, #1a1a1a)' }}
-        />
-      </div>
-
-      {/* Staff tabs skeleton */}
-      <div className="flex gap-2">
-        {[...Array(3)].map((_, i) => (
-          <div
-            key={i}
-            className="h-9 w-28 rounded-xl"
-            style={{ background: 'var(--surface-color, #1a1a1a)' }}
-          />
-        ))}
-      </div>
-
-      {/* Balance card skeleton */}
-      <div
-        className="rounded-2xl p-5"
-        style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
-      >
-        <div className="flex justify-between items-start mb-4">
-          <div className="flex flex-col gap-2">
-            <div className="h-3 w-20 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="h-8 w-40 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-          </div>
-          <div className="w-12 h-12 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-        </div>
-        <div className="grid grid-cols-3 gap-3 pt-3 border-t" style={{ borderColor: 'var(--border-color)' }}>
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="flex flex-col gap-1">
-              <div className="h-2.5 w-16 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-              <div className="h-4 w-20 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Table skeleton */}
-      <div
-        className="rounded-xl overflow-hidden"
-        style={{ border: '1px solid var(--border-color)' }}
-      >
-        <div
-          className="flex gap-4 px-5 py-3.5"
-          style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
-        >
-          {[20, 24, 48, 20].map((w, i) => (
-            <div
-              key={i}
-              className={`h-3 w-${w} rounded`}
-              style={{ background: 'var(--surface-color, #1a1a1a)' }}
-            />
-          ))}
-        </div>
-        {[...Array(4)].map((_, i) => (
-          <div
-            key={i}
-            className="flex items-center gap-4 px-5 py-4"
-            style={{ borderTop: '1px solid var(--border-color)' }}
-          >
-            <div className="h-5 w-20 rounded-full" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="flex-1 h-4 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="h-4 w-32 rounded hidden md:block" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="h-4 w-20 rounded hidden sm:block" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-          </div>
-        ))}
-      </div>
+    <div className={wrapper}>
+      <TeamPayments
+        slug={slug}
+        overview={overview}
+        selectedId={selected?.staff.id ?? null}
+        account={account}
+        accountError={accountError}
+        filters={filters}
+        today={businessTodayISODate()}
+      />
     </div>
   )
 }

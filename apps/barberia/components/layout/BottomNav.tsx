@@ -14,6 +14,10 @@ interface NavItem {
   label:     string
   feature:   keyof BusinessFeatures | null  // null = always visible
   adminOnly: boolean
+  /** Etiqueta para administradores cuando el mismo ítem lo ven también otros roles. */
+  adminLabel?: string
+  /** Nombre completo para lectores de pantalla cuando la etiqueta visible es corta. */
+  adminAriaLabel?: string
 }
 
 interface BottomNavProps {
@@ -37,7 +41,8 @@ export function BottomNav({ slug }: BottomNavProps) {
     { id: 'nav-appointments', href: `/${slug}/dashboard/appointments`, icon: CalendarDays, label: 'Agenda',    feature: null,             adminOnly: false },
     { id: 'nav-walk-ins',     href: `/${slug}/dashboard/walk-ins`,     icon: UserPlus,     label: 'Fila',      feature: 'walk_ins',       adminOnly: false },
     { id: 'nav-services',     href: `/${slug}/dashboard/services`,     icon: Scissors,     label: 'Servicios', feature: null,             adminOnly: true  },
-    { id: 'nav-ledger',       href: `/${slug}/dashboard/ledger`,       icon: Wallet,       label: 'Ledger',    feature: 'staff_ledger',   adminOnly: true  },
+    // Admin: pagos de todo el equipo. Barbero/manicurista: su propia cuenta.
+    { id: 'nav-ledger',       href: `/${slug}/dashboard/ledger`,       icon: Wallet,       label: 'Mi cuenta', feature: 'staff_ledger',   adminOnly: false, adminLabel: 'Pagos', adminAriaLabel: 'Pagos al equipo' },
     { id: 'nav-staff',        href: `/${slug}/dashboard/staff`,        icon: Users,        label: 'Equipo',    feature: null,             adminOnly: true  },
     { id: 'nav-settings',     href: `/${slug}/dashboard/settings`,     icon: Settings,     label: 'Ajustes',   feature: null,             adminOnly: true  },
   ]
@@ -46,7 +51,11 @@ export function BottomNav({ slug }: BottomNavProps) {
     (item) =>
       (item.feature === null || features[item.feature] === true) &&
       (!item.adminOnly || isAdmin)
-  )
+  ).map((item) => ({
+    ...item,
+    label:     isAdmin && item.adminLabel ? item.adminLabel : item.label,
+    ariaLabel: isAdmin ? item.adminAriaLabel : undefined,
+  }))
 
   return (
     <nav
@@ -57,7 +66,7 @@ export function BottomNav({ slug }: BottomNavProps) {
       {/* Blur overlay */}
       <div className="glass border-t border-xinuco-border">
         <ul className="flex items-center justify-around px-2 py-2 max-w-2xl mx-auto">
-          {navItems.map(({ id, href, icon: Icon, label }) => {
+          {navItems.map(({ id, href, icon: Icon, label, ariaLabel }) => {
             const isActive = pathname === href || pathname.startsWith(`${href}/`)
 
             return (
@@ -65,7 +74,7 @@ export function BottomNav({ slug }: BottomNavProps) {
                 <Link
                   id={id}
                   href={href}
-                  aria-label={label}
+                  aria-label={ariaLabel ?? label}
                   aria-current={isActive ? 'page' : undefined}
                   className={[
                     'flex flex-col items-center gap-1 py-1.5 px-2 rounded-xl transition-all duration-200 group',

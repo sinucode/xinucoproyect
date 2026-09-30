@@ -47,7 +47,11 @@ function makeSupabase({ role = 'admin', businessId = 'biz1', user = { id: 'user1
   const resolve = (op: Op): Result => {
     ops.push(op)
     const key = `${op.table}.${op.op}`
-    if (op.table === 'profiles') {
+    // El perfil del propio actor (id = user) define su rol; cualquier otra consulta a profiles
+    // (validar el usuario a vincular) usa handlers['profiles.select'] (por defecto: no existe).
+    const isActorProfile = op.filters.some(f => f[0] === 'eq' && f[1] === 'id' && f[2] === user?.id)
+    if (op.table === 'profiles' && (isActorProfile || !handlers['profiles.select'])) {
+      if (!isActorProfile) return { data: null, error: null }
       return { data: role ? { role, business_id: businessId, full_name: 'Admin' } : null, error: null }
     }
     const h = handlers[key]
@@ -70,6 +74,8 @@ function makeSupabase({ role = 'admin', businessId = 'biz1', user = { id: 'user1
       delete: jest.fn(() => { state.op = 'delete'; return builder }),
       eq: jest.fn((...args: any[]) => { state.filters.push(['eq', ...args]); return builder }),
       in: jest.fn((...args: any[]) => { state.filters.push(['in', ...args]); return builder }),
+      neq: jest.fn((...args: any[]) => { state.filters.push(['neq', ...args]); return builder }),
+      limit: jest.fn(() => builder),
       single: jest.fn(async () => resolve({ ...state })),
       maybeSingle: jest.fn(async () => resolve({ ...state })),
       then: (ok: any, fail: any) => Promise.resolve(resolve({ ...state })).then(ok, fail),
@@ -315,6 +321,70 @@ describe('Staff Server Actions', () => {
       use({ handlers: { 'staff.select': { data: STAFF_ROW, error: null } } })
       expect((await updateStaffMember('staff1', { full_name: 'J', specialty_role: 'Barbero', service_ids: 'all' })).error)
         .toBe('El nombre debe tener entre 2 y 80 caracteres.')
+    })
+
+    describe('vincular usuario (Mi cuenta)', () => {
+      it('sin user_id no toca el vínculo', async () => {
+        const { ops } = use({ handlers: { 'staff.select': { data: STAFF_ROW, error: null } } })
+        await updateStaffMember('staff1', { ...data, service_ids: 'all' })
+        expect(find(ops, 'staff', 'update')[0].payload).not.toHaveProperty('user_id')
+      })
+
+      it('vincula a un barbero/manicurista del negocio que no está en otro profesional', async () => {
+        const { ops } = use({
+          handlers: {
+            'staff.select': [{ data: STAFF_ROW, error: null }, { data: [], error: null }],
+            'profiles.select': { data: { id: 'u9' }, error: null },
+          },
+        })
+        const result = await updateStaffMember('staff1', { ...data, service_ids: 'all', user_id: 'u9' })
+        expect(result.success).toBe(true)
+
+        const profileQ = find(ops, 'profiles', 'select').find(o => hasFilter(o, 'id', 'u9'))!
+        expect(hasFilter(profileQ, 'business_id', 'biz1')).toBe(true)
+        expect(profileQ.filters).toContainEqual(['in', 'role', ['barber', 'manicurist']])
+
+        expect(find(ops, 'staff', 'update')[0].payload).toEqual({
+          full_name: 'John Nuevo', specialty_role: 'Estilista', user_id: 'u9',
+        })
+      })
+
+      it('rechaza un usuario que no es del negocio o no es barbero/manicurista', async () => {
+        const { ops } = use({
+          handlers: {
+            'staff.select': { data: STAFF_ROW, error: null },
+            'profiles.select': { data: null, error: null },
+          },
+        })
+        const result = await updateStaffMember('staff1', { ...data, service_ids: 'all', user_id: 'u-ajeno' })
+        expect(result.error).toBe('El usuario elegido no es válido.')
+        expect(find(ops, 'staff', 'update')).toHaveLength(0)
+      })
+
+      it('rechaza un usuario ya vinculado a otro profesional', async () => {
+        const { ops } = use({
+          handlers: {
+            'staff.select': [{ data: STAFF_ROW, error: null }, { data: [{ id: 'staff2' }], error: null }],
+            'profiles.select': { data: { id: 'u9' }, error: null },
+          },
+        })
+        const result = await updateStaffMember('staff1', { ...data, service_ids: 'all', user_id: 'u9' })
+        expect(result.error).toBe('Ese usuario ya está vinculado a otro profesional.')
+        expect(find(ops, 'staff', 'update')).toHaveLength(0)
+      })
+
+      it('user_id null quita el vínculo sin consultar perfiles', async () => {
+        const { ops } = use({ handlers: { 'staff.select': { data: { ...STAFF_ROW, user_id: 'u9' }, error: null } } })
+        const result = await updateStaffMember('staff1', { ...data, service_ids: 'all', user_id: null })
+        expect(result.success).toBe(true)
+        expect(find(ops, 'staff', 'update')[0].payload).toEqual({
+          full_name: 'John Nuevo', specialty_role: 'Estilista', user_id: null,
+        })
+        expect(logAction).toHaveBeenCalledWith(expect.objectContaining({
+          oldValue: expect.objectContaining({ user_id: 'u9' }),
+          newValue: expect.objectContaining({ user_id: null }),
+        }))
+      })
     })
   })
 

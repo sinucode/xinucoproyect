@@ -8,10 +8,10 @@ import { useState, useTransition, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus, X, Loader2, Users, Scissors, Clock, CalendarCheck, CalendarClock,
-  Pencil, CalendarDays, AlertTriangle,
+  Pencil, CalendarDays, AlertTriangle, UserCheck, UserX,
 } from 'lucide-react'
 import { createStaffMember, updateStaffMember, toggleStaffStatus } from '@/actions/staff'
-import type { TeamMember, TeamOverview } from '@/actions/staff'
+import type { TeamMember, TeamOverview, LinkableUser } from '@/actions/staff'
 import { StaffScheduleSheet } from './StaffScheduleSheet'
 import { AdminPageHeader } from '@xinuco/ui'
 import { AdminEmptyState } from '@xinuco/ui'
@@ -45,11 +45,12 @@ interface StaffManagerProps {
   members: TeamMember[]
   services: TeamService[]
   todayKey: string
+  linkableUsers: LinkableUser[]
 }
 
 type SheetState = { mode: 'create' } | { mode: 'edit'; memberId: string } | null
 
-export function StaffManager({ businessId, members, services, todayKey }: StaffManagerProps) {
+export function StaffManager({ businessId, members, services, todayKey, linkableUsers }: StaffManagerProps) {
   const router = useRouter()
   const [list, setList] = useState<TeamMember[]>(members)
   const [sheet, setSheet] = useState<SheetState>(null)
@@ -150,6 +151,7 @@ export function StaffManager({ businessId, members, services, todayKey }: StaffM
           member={editMember}
           services={services}
           members={list}
+          linkableUsers={linkableUsers}
           onClose={() => setSheet(null)}
           onDone={() => { setSheet(null); router.refresh() }}
         />
@@ -306,7 +308,16 @@ function StaffCard({
         </button>
       </div>
 
-      <StatusPill member={member} />
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusPill member={member} />
+        <span
+          className="inline-flex items-center gap-1 text-[11px] text-xinuco-muted"
+          title={member.user_id ? 'Puede ver su cuenta en "Mi cuenta"' : 'Aún no puede ver su cuenta: vincúlale un usuario al editarlo'}
+        >
+          {member.user_id ? <UserCheck size={11} /> : <UserX size={11} />}
+          {member.user_id ? 'Tiene usuario' : 'Sin usuario'}
+        </span>
+      </div>
 
       {error && (
         <p role="alert" className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
@@ -448,6 +459,7 @@ function StaffSheet({
   member,
   services,
   members,
+  linkableUsers,
   onClose,
   onDone,
 }: {
@@ -456,6 +468,7 @@ function StaffSheet({
   member: TeamMember | null
   services: TeamService[]
   members: TeamMember[]
+  linkableUsers: LinkableUser[]
   onClose: () => void
   onDone: () => void
 }) {
@@ -481,8 +494,13 @@ function StaffSheet({
       : applyQuickSchedule(scheduleRowsToState([]), DEFAULT_WORK_DAYS, DEFAULT_START_TIME, DEFAULT_END_TIME)
   })
   const [copyFrom, setCopyFrom] = useState('')
+  // Usuario para iniciar sesión ('' = sin usuario). Solo al editar.
+  const [userId, setUserId] = useState(member?.user_id ?? '')
   const [formError, setFormError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+
+  // Libres o el ya vinculado a este profesional
+  const userOptions = linkableUsers.filter(u => !u.linked_staff_id || u.linked_staff_id === member?.id)
 
   // Etiqueta de público solo si hay más de uno entre los servicios
   const showAudience = new Set(services.map(s => s.audience)).size > 1
@@ -534,7 +552,13 @@ function StaffSheet({
     startTransition(async () => {
       try {
         const result = mode === 'edit' && member
-          ? await updateStaffMember(member.id, { full_name: fullName, specialty_role: role, service_ids: serviceIds })
+          ? await updateStaffMember(member.id, {
+              full_name: fullName,
+              specialty_role: role,
+              service_ids: serviceIds,
+              // Solo se envía si cambió: así editar el nombre no toca el vínculo
+              ...((member.user_id ?? '') !== userId ? { user_id: userId || null } : {}),
+            })
           : await createStaffMember(businessId, { full_name: fullName, specialty_role: role, service_ids: serviceIds, schedules: scheduleRows })
 
         if (result.error) {
@@ -686,6 +710,29 @@ function StaffSheet({
               )
             )}
           </fieldset>
+
+          {/* Usuario para iniciar sesión (solo al editar) */}
+          {mode === 'edit' && (
+            <div className="flex flex-col gap-2">
+              <label htmlFor="staff-user" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
+                Usuario para iniciar sesión
+              </label>
+              <select
+                id="staff-user"
+                value={userId}
+                onChange={(e) => setUserId(e.target.value)}
+                className="input-base"
+              >
+                <option value="">Sin usuario</option>
+                {userOptions.map(u => (
+                  <option key={u.id} value={u.id}>{u.full_name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-xinuco-muted">
+                Así podrá ver su cuenta en ‘Mi cuenta’. Los usuarios los crea el administrador de Xinuco.
+              </p>
+            </div>
+          )}
 
           {/* Horario (solo al crear; al editar vive en el sheet Horario) */}
           {mode === 'create' && (

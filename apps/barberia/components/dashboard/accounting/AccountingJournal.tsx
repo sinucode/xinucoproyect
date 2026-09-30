@@ -47,7 +47,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   utilities:    'Servicios',
   salary:       'Nómina',
   other:        'Otros',
-  staff_ledger: 'Pagos staff',
+  staff_ledger: 'Pagos al equipo',
 }
 
 function categoryLabel(cat: string | null): string {

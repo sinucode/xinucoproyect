@@ -28,6 +28,8 @@ export interface TeamMember {
   specialty_role: string
   is_active:      boolean
   created_at:     string
+  /** Usuario (auth) con el que inicia sesión; null = sin usuario. Le da acceso a "Mi cuenta". */
+  user_id:        string | null
   schedules:      { day_of_week: number; start_time: string; end_time: string }[]
   /** true = sin filas en staff_services → hace TODOS los servicios. */
   does_all_services: boolean
@@ -42,10 +44,19 @@ export interface TeamMember {
   next_appointment: string | null
 }
 
+/** Usuario del negocio (barbero o manicurista) que se puede vincular a un profesional. */
+export interface LinkableUser {
+  id:        string
+  full_name: string
+  /** Profesional al que ya está vinculado (null = libre). */
+  linked_staff_id: string | null
+}
+
 export interface TeamOverview {
   todayKey: string
   members:  TeamMember[]
   services: { id: string; name: string; audience: ServiceAudienceOrAll }[]
+  linkableUsers: LinkableUser[]
 }
 
 const NOT_ADMIN = 'Solo un administrador puede gestionar el equipo.'
@@ -53,6 +64,10 @@ const DENIED = 'Autorización denegada.'
 const NOT_FOUND = 'Miembro del equipo no encontrado.'
 const SERVICES_REQUIRED = 'Elige al menos un servicio o "Todos los servicios".'
 const SERVICES_INVALID = 'Algún servicio elegido no es válido.'
+const USER_INVALID = 'El usuario elegido no es válido.'
+const USER_ALREADY_LINKED = 'Ese usuario ya está vinculado a otro profesional.'
+/** Roles de usuario que pueden vincularse a un profesional (ven "Mi cuenta"). */
+const LINKABLE_ROLES = ['barber', 'manicurist']
 
 type Supabase = Awaited<ReturnType<typeof createClient>>
 
@@ -93,11 +108,13 @@ async function findOwnStaff(supabase: Supabase, staffId: string, businessId: str
   if (!staffId || typeof staffId !== 'string') return null
   const { data } = await supabase
     .from('staff')
-    .select('id, full_name, specialty_role, is_active')
+    .select('id, full_name, specialty_role, is_active, user_id')
     .eq('id', staffId)
     .eq('business_id', businessId)
     .maybeSingle()
-  return (data as { id: string; full_name: string; specialty_role: string; is_active: boolean } | null) ?? null
+  return (data as {
+    id: string; full_name: string; specialty_role: string; is_active: boolean; user_id?: string | null
+  } | null) ?? null
 }
 
 // ── Validación ────────────────────────────────────────────────────────────────
@@ -113,6 +130,39 @@ function validateProfile(data: { full_name: unknown; specialty_role: unknown }):
     return { error: 'El cargo debe tener entre 2 y 40 caracteres.' }
   }
   return { full_name, specialty_role }
+}
+
+/**
+ * El usuario a vincular debe ser del negocio, con rol barbero/manicurista, y no estar
+ * vinculado a OTRO profesional del negocio. Devuelve un mensaje de error o null.
+ */
+async function validateLinkedUser(
+  supabase: Supabase,
+  businessId: string,
+  staffId: string,
+  userId: unknown,
+): Promise<string | null> {
+  if (typeof userId !== 'string' || !userId) return USER_INVALID
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('id', userId)
+    .eq('business_id', businessId)
+    .in('role', LINKABLE_ROLES)
+    .maybeSingle()
+  if (!profile) return USER_INVALID
+
+  const { data: others } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('business_id', businessId)
+    .eq('user_id', userId)
+    .neq('id', staffId)
+    .limit(1)
+  if (((others ?? []) as { id: string }[]).length > 0) return USER_ALREADY_LINKED
+
+  return null
 }
 
 /** Todos los ids deben ser servicios del negocio. Devuelve la lista sin duplicados. */
@@ -202,9 +252,9 @@ export async function getTeamOverview(): Promise<TeamOverview | { error: string 
   const nowIso = `${todayKey}T${businessNowHHMM()}:00Z`
   const { from, to } = currentMonthRange()
 
-  const [staffRes, schedRes, ssRes, servicesRes, statusRes, completedRes, upcomingRes] = await Promise.all([
+  const [staffRes, schedRes, ssRes, servicesRes, statusRes, completedRes, upcomingRes, usersRes] = await Promise.all([
     supabase.from('staff')
-      .select('id, full_name, specialty_role, is_active, created_at')
+      .select('id, full_name, specialty_role, is_active, created_at, user_id')
       .eq('business_id', businessId)
       .order('is_active', { ascending: false })
       .order('full_name', { ascending: true }),
@@ -240,14 +290,20 @@ export async function getTeamOverview(): Promise<TeamOverview | { error: string 
         .order('id', { ascending: true })
         .range(a, b),
     ),
+    // Usuarios que se pueden vincular a un profesional (barberos y manicuristas del negocio)
+    supabase.from('profiles')
+      .select('id, full_name, role')
+      .eq('business_id', businessId)
+      .in('role', LINKABLE_ROLES)
+      .order('full_name', { ascending: true }),
   ])
 
-  const firstError = [staffRes, schedRes, ssRes, servicesRes].find(r => r.error)?.error?.message
+  const firstError = [staffRes, schedRes, ssRes, servicesRes, usersRes].find(r => r.error)?.error?.message
     ?? completedRes.error ?? upcomingRes.error
   if (firstError) return { error: firstError }
 
   const staffRows = (staffRes.data ?? []) as
-    { id: string; full_name: string; specialty_role: string; is_active: boolean; created_at: string }[]
+    { id: string; full_name: string; specialty_role: string; is_active: boolean; created_at: string; user_id: string | null }[]
   const schedRows = (schedRes.data ?? []) as
     { staff_id: string; day_of_week: number; start_time: string; end_time: string }[]
   const ssRows = (ssRes.data ?? []) as { staff_id: string; service_id: string }[]
@@ -299,6 +355,7 @@ export async function getTeamOverview(): Promise<TeamOverview | { error: string 
       specialty_role:   s.specialty_role,
       is_active:        s.is_active,
       created_at:       s.created_at,
+      user_id:          s.user_id ?? null,
       schedules:        schedulesByStaff.get(s.id) ?? [],
       does_all_services: explicit.length === 0,
       service_ids:      explicit,
@@ -311,7 +368,12 @@ export async function getTeamOverview(): Promise<TeamOverview | { error: string 
     }
   })
 
-  return { todayKey, members, services }
+  const linkedByUser = new Map<string, string>()
+  for (const s of staffRows) if (s.user_id) linkedByUser.set(s.user_id, s.id)
+  const linkableUsers: LinkableUser[] = ((usersRes.data ?? []) as { id: string; full_name: string | null }[])
+    .map(u => ({ id: u.id, full_name: u.full_name?.trim() || 'Usuario sin nombre', linked_staff_id: linkedByUser.get(u.id) ?? null }))
+
+  return { todayKey, members, services, linkableUsers }
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -419,6 +481,11 @@ export async function updateStaffMember(
     full_name: string
     specialty_role: string
     service_ids: string[] | 'all'
+    /**
+     * Usuario con el que inicia sesión (para "Mi cuenta"). undefined = no cambiar;
+     * null = quitar el vínculo; id = vincular (barbero/manicurista del negocio, libre).
+     */
+    user_id?: string | null
   }
 ): Promise<ActionResult> {
   const auth = await requireAdmin()
@@ -430,6 +497,13 @@ export async function updateStaffMember(
 
   const parsed = validateProfile(data)
   if ('error' in parsed) return { error: parsed.error }
+
+  // Vínculo con un usuario: se valida ANTES de escribir nada
+  const changesUser = data.user_id !== undefined
+  if (changesUser && data.user_id !== null) {
+    const userError = await validateLinkedUser(supabase, businessId, staffId, data.user_id)
+    if (userError) return { error: userError }
+  }
 
   // Validar TODO antes de escribir, para no dejar cambios a medias.
   let targetIds: string[] | 'all'
@@ -444,7 +518,11 @@ export async function updateStaffMember(
 
   const { error: updError } = await supabase
     .from('staff')
-    .update({ full_name: parsed.full_name, specialty_role: parsed.specialty_role })
+    .update({
+      full_name: parsed.full_name,
+      specialty_role: parsed.specialty_role,
+      ...(changesUser ? { user_id: data.user_id ?? null } : {}),
+    })
     .eq('id', staffId)
     .eq('business_id', businessId)
   if (updError) return { error: updError.message }
@@ -489,13 +567,16 @@ export async function updateStaffMember(
   }
 
   await audit(auth, 'staff.updated', staffId,
-    { full_name: existing.full_name, specialty_role: existing.specialty_role },
-    { full_name: parsed.full_name,   specialty_role: parsed.specialty_role })
+    { full_name: existing.full_name, specialty_role: existing.specialty_role,
+      ...(changesUser ? { user_id: existing.user_id ?? null } : {}) },
+    { full_name: parsed.full_name,   specialty_role: parsed.specialty_role,
+      ...(changesUser ? { user_id: data.user_id ?? null } : {}) })
 
   revalidatePath('/[slug]/dashboard/staff', 'page')
   revalidatePath('/[slug]/dashboard/services', 'page')
   revalidatePath('/[slug]/book', 'page')
   revalidatePath('/[slug]', 'page')
+  if (changesUser) revalidatePath('/[slug]/dashboard/ledger', 'page')
   return { success: true }
 }
 

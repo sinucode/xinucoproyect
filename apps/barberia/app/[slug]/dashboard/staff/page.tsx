@@ -48,6 +48,7 @@ export default async function StaffPage({ params }: { params: Promise<{ slug: st
           members={overview.members}
           services={overview.services}
           todayKey={overview.todayKey}
+          linkableUsers={overview.linkableUsers}
         />
       </Suspense>
     </div>

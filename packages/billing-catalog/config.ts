@@ -20,7 +20,7 @@ export const FEATURE_CATALOG: Record<keyof BusinessFeatures, FeatureMeta> = {
   notifications_email:    { label: 'Email Notifications',    description: 'Confirmación y recordatorio de citas por correo',          icon: 'Mail',       category: 'comunicacion' },
   notifications_whatsapp: { label: 'WhatsApp Notifications', description: 'Mensajes automáticos por WhatsApp Cloud API',               icon: 'MessageCircle', category: 'comunicacion' },
   commissions:            { label: 'Comisiones',             description: 'Motor de comisiones variables por barbero y servicio',     icon: 'Percent',    category: 'finanzas' },
-  staff_ledger:           { label: 'Billetera Staff',        description: 'Saldos y liquidaciones del equipo en tiempo real',         icon: 'Wallet',     category: 'finanzas' },
+  staff_ledger:           { label: 'Pagos al equipo',        description: 'Saldos, pagos y Mi cuenta de cada profesional en tiempo real',         icon: 'Wallet',     category: 'finanzas' },
   expenses_pgl:           { label: 'Gastos y P&G',           description: 'Registro de gastos y estado de resultados',               icon: 'Receipt',    category: 'finanzas' },
   retail_sales:           { label: 'Ventas Retail',          description: 'Venta rápida de productos sin cita asociada',             icon: 'ShoppingBag', category: 'finanzas' },
   loyalty:                { label: 'Programa de Lealtad',    description: 'Puntos y recompensas para clientes frecuentes',           icon: 'Gift',       category: 'finanzas' },

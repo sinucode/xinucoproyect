@@ -65,14 +65,28 @@ export async function getShiftSummary(shiftId: string) {
     console.error('Error fetching cash expenses for summary:', expensesError)
   }
 
+  // Pagos y anticipos al equipo hechos con efectivo de la caja en este turno (también salen del cajón)
+  const { data: cashTeamPayments, error: teamPaymentsError } = await supabase
+    .from('staff_ledger')
+    .select('amount')
+    .eq('shift_id', shiftId)
+    .eq('payment_method', 'cash_register')
+    .in('entry_type', ['advance', 'payment'])
+
+  if (teamPaymentsError) {
+    console.error('Error fetching cash team payments for summary:', teamPaymentsError)
+  }
+
   const totalSales = (sales ?? []).reduce((sum, s) => sum + (s.total_amount ?? 0), 0)
   const totalCashCollected = (cashPayments ?? []).reduce((sum, p) => sum + (p.amount ?? 0), 0)
   const totalCashExpenses = (cashExpenses ?? []).reduce((sum, e) => sum + (e.amount ?? 0), 0)
+  const totalCashTeamPayments = (cashTeamPayments ?? []).reduce((sum, e) => sum + (e.amount ?? 0), 0)
 
   return {
     totalSales,
     totalCashCollected,
     totalCashExpenses,
+    totalCashTeamPayments,
   }
 }
 
@@ -90,8 +104,11 @@ export async function getActiveShiftDetails(businessId: string) {
     totalSales: summary.totalSales,
     totalCashCollected: summary.totalCashCollected,
     totalCashExpenses: summary.totalCashExpenses,
+    totalCashTeamPayments: summary.totalCashTeamPayments,
     // Efectivo esperado = base + cobros en efectivo − gastos pagados con efectivo de la caja
-    expectedCashBalance: shift.opening_balance + summary.totalCashCollected - summary.totalCashExpenses,
+    //                     − pagos/anticipos al equipo pagados con efectivo de la caja
+    expectedCashBalance:
+      shift.opening_balance + summary.totalCashCollected - summary.totalCashExpenses - summary.totalCashTeamPayments,
   }
 }
 

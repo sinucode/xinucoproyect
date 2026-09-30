@@ -27,6 +27,8 @@ interface NavLink {
   label:     string
   feature:   keyof BusinessFeatures | null  // null = always visible
   adminOnly: boolean
+  /** Etiqueta para administradores cuando el mismo enlace lo ven también otros roles. */
+  adminLabel?: string
   locked?:   boolean                        // true = feature restringida por plan
 }
 
@@ -39,7 +41,8 @@ function buildLinks(slug: string, features: BusinessFeatures): NavLink[] {
     { href: `/${slug}/dashboard/staff`,        icon: Users,        label: 'Equipo',          feature: null,               adminOnly: true },
     { href: `/${slug}/dashboard/commissions`,  icon: Percent,      label: 'Comisiones',     feature: 'commissions',      adminOnly: true },
     { href: `/${slug}/dashboard/expenses`,     icon: Receipt,      label: 'Gastos',          feature: 'expenses_pgl',     adminOnly: true },
-    { href: `/${slug}/dashboard/ledger`,       icon: Wallet,       label: 'Ledger',          feature: 'staff_ledger',     adminOnly: true },
+    // Admin: gestiona los pagos de todo el equipo. Barbero/manicurista: ve solo su cuenta.
+    { href: `/${slug}/dashboard/ledger`,       icon: Wallet,       label: 'Mi cuenta',       feature: 'staff_ledger',     adminOnly: false, adminLabel: 'Pagos al equipo' },
     { href: `/${slug}/dashboard/loyalty`,      icon: Gift,         label: 'Lealtad',         feature: 'loyalty',          adminOnly: true },
     { href: `/${slug}/dashboard/workstations`, icon: LayoutGrid,   label: 'Estaciones',      feature: 'workstations',     adminOnly: true },
     { href: `/${slug}/dashboard/retail`,       icon: ShoppingBag,  label: 'Punto de Venta', feature: 'retail_sales',     adminOnly: true },
@@ -74,9 +77,11 @@ export function DashboardSidebar({
   const isAdmin  = useIsAdmin()
   const role     = useRole()
   const [isPending, startTransition] = useTransition()
-  const links    = buildLinks(slug, features).filter(
-    (link) => !link.adminOnly || isAdmin
-  )
+  const links    = buildLinks(slug, features)
+    .filter((link) => !link.adminOnly || isAdmin)
+    // "Mi cuenta" no se ofrece a quien no es admin si el negocio no tiene la función (nada que mostrar con candado)
+    .filter((link) => isAdmin || !link.adminLabel || !link.locked)
+    .map((link) => (isAdmin && link.adminLabel ? { ...link, label: link.adminLabel } : link))
 
   return (
     <SidebarContext.Provider value={{ isCollapsed, setIsCollapsed }}>

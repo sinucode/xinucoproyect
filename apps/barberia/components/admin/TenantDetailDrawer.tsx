@@ -46,7 +46,7 @@ const FEATURE_GROUPS: {
     color: '#10B981',
     features: [
       { key: 'commissions',  label: 'Comisiones',  icon: Percent,      desc: 'Motor de comisiones variables por servicio y empleado' },
-      { key: 'staff_ledger', label: 'Billetera',   icon: Wallet,       desc: 'Billetera digital del staff — saldo y anticipos' },
+      { key: 'staff_ledger', label: 'Pagos al equipo', icon: Wallet,     desc: 'Pagos al equipo y Mi cuenta de cada profesional — saldo, anticipos y liquidaciones' },
       { key: 'expenses_pgl', label: 'P&G',         icon: BarChart3,    desc: 'Registro de gastos y estado de resultados' },
       { key: 'retail_sales', label: 'Retail',      icon: ShoppingBag,  desc: 'Ventas directas de productos sin cita asociada' },
       { key: 'loyalty',      label: 'Lealtad',     icon: Award,        desc: 'Programa de puntos de fidelización de clientes' },

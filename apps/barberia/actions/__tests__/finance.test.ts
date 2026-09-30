@@ -1,4 +1,4 @@
-import { getShiftSummary, openShift, closeShift, checkoutAppointment } from '../finance'
+import { getShiftSummary, getActiveShiftDetails, openShift, closeShift, checkoutAppointment } from '../finance'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { logAction } from '../audit'
@@ -33,6 +33,7 @@ describe('Finance Server Actions', () => {
       from: jest.fn().mockReturnThis(),
       select: jest.fn().mockReturnThis(),
       insert: jest.fn().mockReturnThis(),
+      in: jest.fn().mockReturnThis(),
       update: jest.fn().mockReturnThis(),
       eq: jest.fn().mockReturnThis(),
       maybeSingle: jest.fn().mockReturnThis(),
@@ -59,11 +60,42 @@ describe('Finance Server Actions', () => {
         eq: jest.fn().mockResolvedValueOnce({ data: [{ amount: 20 }, { amount: 5 }], error: null })
       })
 
+      // Mock pagos y anticipos al equipo pagados con efectivo de la caja
+      mockSupabase.eq.mockReturnValueOnce({
+        eq: jest.fn().mockReturnValueOnce({
+          in: jest.fn().mockResolvedValueOnce({ data: [{ amount: 10 }, { amount: 7 }], error: null }),
+        }),
+      })
+
       const summary = await getShiftSummary('shift1')
       expect(summary.totalSales).toBe(300)
       expect(summary.totalCashCollected).toBe(50)
       expect(summary.totalCashExpenses).toBe(25)
+      expect(summary.totalCashTeamPayments).toBe(17)
       expect(mockSupabase.from).toHaveBeenCalledWith('expenses')
+      expect(mockSupabase.from).toHaveBeenCalledWith('staff_ledger')
+    })
+
+    it('getActiveShiftDetails resta pagos al equipo del efectivo esperado', async () => {
+      // Turno abierto (maybeSingle del getActiveShift)
+      mockSupabase.maybeSingle.mockResolvedValueOnce({ data: { id: 'shift1', opening_balance: 100 }, error: null })
+      // los dos .eq() de getActiveShift encadenan
+      mockSupabase.eq.mockReturnValueOnce(mockSupabase).mockReturnValueOnce(mockSupabase)
+      // ventas del turno
+      mockSupabase.eq.mockResolvedValueOnce({ data: [{ total_amount: 300 }], error: null })
+      // cobros en efectivo = 50
+      mockSupabase.eq.mockReturnValueOnce({ eq: jest.fn().mockResolvedValueOnce({ data: [{ amount: 50 }], error: null }) })
+      // gastos de la caja = 20
+      mockSupabase.eq.mockReturnValueOnce({ eq: jest.fn().mockResolvedValueOnce({ data: [{ amount: 20 }], error: null }) })
+      // pagos al equipo desde la caja = 17
+      mockSupabase.eq.mockReturnValueOnce({
+        eq: jest.fn().mockReturnValueOnce({ in: jest.fn().mockResolvedValueOnce({ data: [{ amount: 17 }], error: null }) }),
+      })
+
+      const details = await getActiveShiftDetails('b1')
+      expect(details?.totalCashTeamPayments).toBe(17)
+      // 100 base + 50 cobros − 20 gastos − 17 equipo
+      expect(details?.expectedCashBalance).toBe(113)
     })
   })
 

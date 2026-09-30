@@ -190,6 +190,11 @@ export function CashShiftManager({
                   Gastos pagados de la caja: −{formatCurrency(shiftDetails.totalCashExpenses)}
                 </span>
               )}
+              {shiftDetails.totalCashTeamPayments > 0 && (
+                <span className="text-[11px] text-xinuco-muted block mt-1">
+                  Pagos al equipo desde la caja: −{formatCurrency(shiftDetails.totalCashTeamPayments)}
+                </span>
+              )}
             </div>
           </div>
 
@@ -323,6 +328,14 @@ export function CashShiftManager({
                     {shiftDetails.totalCashExpenses > 0 ? '−' : ''}{formatCurrency(shiftDetails.totalCashExpenses)}
                   </span>
                 </div>
+                {shiftDetails.totalCashTeamPayments > 0 && (
+                  <div className="flex justify-between text-xs text-xinuco-muted">
+                    <span>Pagos al equipo desde la caja:</span>
+                    <span className="font-semibold text-zinc-300">
+                      −{formatCurrency(shiftDetails.totalCashTeamPayments)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm font-bold text-xinuco-text border-t border-zinc-900 pt-2">
                   <span>Monto Esperado en Caja:</span>
                   <span className="text-[var(--primary-color)]">{formatCurrency(shiftDetails.expectedCashBalance)}</span>

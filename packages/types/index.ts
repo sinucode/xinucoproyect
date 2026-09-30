@@ -26,6 +26,7 @@ export type {
   SaleItem,
   CommissionRule,
   LedgerEntryType,
+  TeamPaymentMethod,
   StaffLedgerEntry,
   StaffLedgerBalance,
   Expense,
