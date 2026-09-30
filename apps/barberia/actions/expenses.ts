@@ -19,6 +19,7 @@ import {
   type PendingRecurringExpense,
 } from '@/lib/expense-utils'
 import { EXPENSE_HISTORY_DAYS, fetchExpenseHistory } from '@/lib/expense-history'
+import { fetchProfitLoss } from '@/lib/profit-loss'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -315,11 +316,7 @@ export async function getExpensesOverview(
       .order('expense_date', { ascending: false })
       .order('created_at', { ascending: false }),
     fetchExpenseHistory(supabase, businessId, historyFrom, range.from).catch(() => []),
-    supabase.rpc('get_profit_loss', {
-      p_business_id: businessId,
-      p_date_from:   range.from,
-      p_date_to:     range.to,
-    }),
+    fetchProfitLoss(supabase, businessId, range.from, range.to),
     getOpenShift(supabase, businessId),
     ensureExpenseCategories(supabase, businessId),
   ])
@@ -329,18 +326,8 @@ export async function getExpensesOverview(
   const expenses = (expensesRes.data ?? []) as Expense[]
 
   // P&G: si falla no se cae la página; se muestra el motivo
-  let pl: ProfitLossResult | null = null
-  let plError: string | undefined
-  const plResult = plRes.data as unknown as (ProfitLossResult & { error?: string }) | null
-  if (plRes.error) {
-    plError = plRes.error.message.includes('forbidden')
-      ? 'No tienes permiso para ver el estado de resultados.'
-      : 'No se pudo calcular el estado de resultados. Intenta de nuevo.'
-  } else if (plResult?.error) {
-    plError = 'No se pudo calcular el estado de resultados. Intenta de nuevo.'
-  } else {
-    pl = plResult
-  }
+  const pl: ProfitLossResult | null = 'pl' in plRes ? plRes.pl : null
+  const plError: string | undefined = 'error' in plRes ? plRes.error : undefined
 
   // Los gastos fijos solo se sugieren para el mes en curso
   const pending = key === currentMonthKey()

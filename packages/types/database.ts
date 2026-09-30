@@ -923,31 +923,28 @@ export interface AssetPortfolioSummary {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// RF22 — Trazabilidad Contable (Accounting Journal)
+// RF22 — Contabilidad: movimientos de plata
 // ══════════════════════════════════════════════════════════════════════════════
 
-export type JournalEntryType    = 'income' | 'expense'
-export type JournalEntrySubtype = 'sale' | 'operating_expense' | 'staff_payout' | 'asset_depreciation'
+export type MoneyMovementKind   = 'in' | 'out'
+export type MoneyMovementSource =
+  | 'sale' | 'asset_sale' | 'expense' | 'team_advance' | 'team_payment'
+  | 'inventory_purchase' | 'asset_purchase'
+export type MoneyMovementMethod =
+  | 'cash' | 'card' | 'transfer' | 'mercadopago' | 'loyalty_points' | 'mixed' | 'other'
 
-export interface JournalEntry {
-  entry_id:        string
-  business_id:     string
-  entry_date:      string   // TIMESTAMPTZ ISO string
-  entry_type:      JournalEntryType
-  entry_subtype:   JournalEntrySubtype
-  description:     string
-  amount:          number   // INTEGER COP, always positive
-  category:        string | null
-  reference_id:    string | null
-  reference_table: string | null
-}
-
-export interface AccountingSummary {
-  total_income:   number   // INTEGER COP
-  total_expense:  number   // INTEGER COP
-  net_position:   number   // INTEGER COP (can be negative)
-  period_from:    string   // DATE string
-  period_to:      string   // DATE string
+/** Un renglón de get_money_movements: algo que entró o salió de verdad del negocio. */
+export interface MoneyMovement {
+  kind:          MoneyMovementKind
+  source:        MoneyMovementSource
+  occurred_on:   string          // 'YYYY-MM-DD' (Colombia)
+  occurred_time: string | null   // 'HH:MM' (Colombia) o null si solo hay fecha
+  description:   string
+  category:      string | null   // NOMBRE de la categoría de gasto
+  method:        MoneyMovementMethod
+  amount:        number          // INTEGER COP, siempre positivo
+  tip:           number          // propina incluida en el monto (solo ventas)
+  reference_id:  string | null
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

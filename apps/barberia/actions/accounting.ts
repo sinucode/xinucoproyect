@@ -1,121 +1,120 @@
 'use server'
-// actions/accounting.ts — RF22 Trazabilidad Contable
+// actions/accounting.ts — Contabilidad: movimientos de plata y resultados del mes.
+// El business_id sale SIEMPRE del perfil del usuario (nunca del navegador) y solo el admin entra.
 
 import { createClient } from '@xinuco/supabase/server'
-import type { JournalEntry, JournalEntryType, AccountingSummary } from '@xinuco/types'
+import type { MoneyMovement, ProfitLossResult } from '@xinuco/types'
+import { isMonthKey, currentMonthKey, monthRange, previousMonth } from '@/lib/accounting-utils'
+import { fetchProfitLoss } from '@/lib/profit-loss'
 
-// ════════════════════════════════════════════════════════════════════════════
-// getJournalEntries
-// Obtiene las entradas del diario contable para un negocio.
-// Consulta la VIEW accounting_journal directamente; RLS de las tablas
-// subyacentes aplica automáticamente (INVOKER security).
-// ════════════════════════════════════════════════════════════════════════════
+const NOT_ADMIN = 'Solo un administrador puede ver la contabilidad.'
+const LOAD_FAILED = 'No se pudo cargar la información. Intenta de nuevo.'
 
-export async function getJournalEntries(
-  businessId: string,
-  filters?: {
-    dateFrom?:  string          // 'YYYY-MM-DD'
-    dateTo?:    string          // 'YYYY-MM-DD'
-    entryType?: JournalEntryType
-  }
-): Promise<{ data: JournalEntry[] | null; error: string | null }> {
+type Supabase = Awaited<ReturnType<typeof createClient>>
+
+export interface MonthResults {
+  current:  ProfitLossResult
+  previous: ProfitLossResult
+  from:     string
+  to:       string
+  prevFrom: string
+  prevTo:   string
+}
+
+// ── Autorización ──────────────────────────────────────────────────────────────
+
+async function requireAdmin(): Promise<
+  { supabase: Supabase; businessId: string; userId: string } | { error: string }
+> {
   const supabase = await createClient()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: NOT_ADMIN }
 
-  if (!user) {
-    return { data: null, error: 'No autorizado. Por favor inicia sesión.' }
-  }
-
-  // Verify the caller belongs to this business
-  const { data: profileRaw } = await supabase
+  const { data: profile } = await supabase
     .from('profiles')
-    .select('business_id')
+    .select('role, business_id')
     .eq('id', user.id)
     .single()
 
-  const profile = profileRaw as { business_id: string } | null
-  if (!profile?.business_id || profile.business_id !== businessId) {
-    return { data: null, error: 'Acceso denegado.' }
+  const role = (profile as { role?: string } | null)?.role
+  const businessId = (profile as { business_id?: string | null } | null)?.business_id
+  if ((role !== 'admin' && role !== 'super_admin') || !businessId) {
+    return { error: NOT_ADMIN }
   }
 
-  let query = supabase
-    .from('accounting_journal')
-    .select('*')
-    .eq('business_id', businessId)
+  return { supabase, businessId, userId: user.id }
+}
 
-  if (filters?.dateFrom) {
-    query = query.gte('entry_date', filters.dateFrom)
-  }
-  if (filters?.dateTo) {
-    query = query.lte('entry_date', filters.dateTo + 'T23:59:59')
-  }
-  if (filters?.entryType) {
-    query = query.eq('entry_type', filters.entryType)
-  }
-
-  query = query
-    .order('entry_date', { ascending: false })
-    .limit(500)
-
-  const { data, error } = await query
-
-  if (error) {
-    console.error('[getJournalEntries]', error)
-    return { data: null, error: error.message }
-  }
-
-  return { data: data as unknown as JournalEntry[], error: null }
+function isRealDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const d = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// getAccountingSummary
-// Llama al RPC get_accounting_summary y retorna el resumen tipado.
-// Toda la aritmética financiera ocurre en PostgreSQL.
+// getMoneyMovements — todo lo que entró y salió de verdad entre dos fechas
 // ════════════════════════════════════════════════════════════════════════════
 
-export async function getAccountingSummary(
-  businessId: string,
-  dateFrom:   string,
-  dateTo:     string
-): Promise<{ data: AccountingSummary | null; error: string | null }> {
-  const supabase = await createClient()
+export async function getMoneyMovements(
+  from: string,
+  to: string,
+): Promise<{ rows: MoneyMovement[] } | { error: string }> {
+  const auth = await requireAdmin()
+  if ('error' in auth) return auth
+  const { supabase } = auth
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  if (!isRealDate(from) || !isRealDate(to)) return { error: 'Las fechas no son válidas.' }
+  if (to < from) return { error: 'La fecha final no puede ser anterior a la inicial.' }
 
-  if (!user) {
-    return { data: null, error: 'No autorizado. Por favor inicia sesión.' }
-  }
-
-  // Verify the caller belongs to this business
-  const { data: profileRaw2 } = await supabase
-    .from('profiles')
-    .select('business_id')
-    .eq('id', user.id)
-    .single()
-
-  const profile2 = profileRaw2 as { business_id: string } | null
-  if (!profile2?.business_id || profile2.business_id !== businessId) {
-    return { data: null, error: 'Acceso denegado.' }
-  }
-
-  const { data, error } = await supabase.rpc('get_accounting_summary', {
-    p_business_id: businessId,
-    p_date_from:   dateFrom,
-    p_date_to:     dateTo,
+  // El negocio sale del JWT dentro del RPC; aquí solo se pasan las fechas.
+  const { data, error } = await supabase.rpc('get_money_movements', {
+    p_date_from: from,
+    p_date_to:   to,
   })
 
   if (error) {
-    console.error('[getAccountingSummary]', error)
-    return { data: null, error: error.message }
+    if (error.message.includes('forbidden')) return { error: NOT_ADMIN }
+    if (error.message.includes('invalid_range')) {
+      return { error: 'El rango de fechas no es válido (máximo 400 días).' }
+    }
+    console.error('[getMoneyMovements]', error)
+    return { error: LOAD_FAILED }
   }
 
-  if (!data) return { data: null, error: null }
+  return { rows: (data ?? []) as unknown as MoneyMovement[] }
+}
 
-  // JSONB llega como `unknown` — cast explícito sin `as any`
-  return { data: data as unknown as AccountingSummary, error: null }
+// ════════════════════════════════════════════════════════════════════════════
+// getMonthResults — estado de resultados del mes y del mes anterior completo
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function getMonthResults(yyyyMm: string): Promise<MonthResults | { error: string }> {
+  const auth = await requireAdmin()
+  if ('error' in auth) return auth
+  const { supabase, businessId } = auth
+
+  if (!isMonthKey(yyyyMm)) return { error: 'El mes no es válido.' }
+  const now = currentMonthKey()
+  const key = yyyyMm > now ? now : yyyyMm
+
+  const { from, to } = monthRange(key)
+  const prevFull = monthRange(previousMonth(key))
+  const prevFrom = prevFull.from
+  // Mes en curso: se compara contra los mismos días del mes anterior (1 al día de hoy)
+  let prevTo = prevFull.to
+  if (key === now) {
+    const day = Math.min(Number(to.slice(8, 10)), Number(prevFull.to.slice(8, 10)))
+    prevTo = `${prevFrom.slice(0, 8)}${String(day).padStart(2, '0')}`
+  }
+
+  const [cur, prev] = await Promise.all([
+    fetchProfitLoss(supabase, businessId, from, to),
+    fetchProfitLoss(supabase, businessId, prevFrom, prevTo),
+  ])
+
+  if ('error' in cur) return cur
+  if ('error' in prev) return prev
+
+  return { current: cur.pl, previous: prev.pl, from, to, prevFrom, prevTo }
 }

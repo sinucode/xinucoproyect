@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Plus,
@@ -121,36 +122,17 @@ function PaymentMethodTag({ method }: { method: ExpensePaymentMethod }) {
   )
 }
 
-// ── Estado de resultados ──────────────────────────────────────────────────────
+// ── Resumen del mes (el estado de resultados completo vive en Contabilidad) ───
 
-function StatementRow({
-  sign,
-  label,
-  value,
-  hint,
-  strong,
+function MonthResultCard({
+  pl,
+  plError,
+  slug,
 }: {
-  sign?:   '−' | '=' | '+'
-  label:   string
-  value:   number
-  hint?:   string
-  strong?: boolean
+  pl:       ProfitLossResult | null
+  plError?: string
+  slug:     string
 }) {
-  return (
-    <div className="flex items-start gap-3 py-2.5">
-      <span className="w-4 shrink-0 text-center text-sm text-xinuco-muted tabular-nums">{sign ?? ''}</span>
-      <div className="flex-1 min-w-0">
-        <p className={`text-sm ${strong ? 'font-semibold' : ''} text-xinuco-text`}>{label}</p>
-        {hint && <p className="text-[11px] text-xinuco-muted mt-0.5">{hint}</p>}
-      </div>
-      <span className={`text-sm tabular-nums whitespace-nowrap ${strong ? 'font-bold' : 'font-medium'} text-xinuco-text`}>
-        {sign === '−' && value > 0 ? '−' : sign === '+' && value > 0 ? '+' : ''}{formatCOP(value)}
-      </span>
-    </div>
-  )
-}
-
-function ProfitLossStatement({ pl, plError, monthLabel }: { pl: ProfitLossResult | null; plError?: string; monthLabel: string }) {
   if (!pl) {
     return (
       <section
@@ -159,9 +141,9 @@ function ProfitLossStatement({ pl, plError, monthLabel }: { pl: ProfitLossResult
       >
         <AlertCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
         <div>
-          <h2 className="text-sm font-bold text-xinuco-text">Estado de resultados</h2>
+          <h2 className="text-sm font-bold text-xinuco-text">Utilidad del mes</h2>
           <p className="text-xs text-xinuco-muted mt-1">
-            {plError ?? 'No se pudo calcular el estado de resultados.'}
+            {plError ?? 'No se pudo calcular la utilidad del mes.'}
           </p>
         </div>
       </section>
@@ -169,68 +151,27 @@ function ProfitLossStatement({ pl, plError, monthLabel }: { pl: ProfitLossResult
   }
 
   const positive = pl.net_profit >= 0
-  const netColor = positive ? 'text-emerald-400' : 'text-red-400'
 
   return (
     <section
-      className="rounded-2xl p-5 sm:p-6"
+      className="rounded-2xl p-4 sm:p-5"
       style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
-      aria-label="Estado de resultados"
+      aria-label="Utilidad del mes"
     >
-      <div className="flex items-baseline justify-between gap-3 mb-2">
-        <h2 className="text-sm font-bold text-xinuco-text">Estado de resultados</h2>
-        <span className="text-xs text-xinuco-muted">{monthLabel}</span>
-      </div>
-
-      <div className="divide-y" style={{ borderColor: 'var(--border-color)' }}>
-        <StatementRow
-          label="Ingresos"
-          value={pl.revenue.total}
-          strong
-          hint={`servicios ${formatCOP(pl.revenue.services)} · productos ${formatCOP(pl.revenue.retail)} · ${pl.revenue.sales_count} ${pl.revenue.sales_count === 1 ? 'venta' : 'ventas'}`}
-        />
-        <StatementRow sign="−" label="Costo de productos vendidos" value={pl.cost_of_goods} />
-        <StatementRow sign="=" label="Utilidad bruta" value={pl.gross_profit} strong />
-        <StatementRow sign="−" label="Comisiones del equipo" value={pl.commissions} />
-        <StatementRow sign="−" label="Gastos" value={pl.expenses.total} />
-        {(pl.depreciation ?? 0) > 0 && (
-          <StatementRow
-            sign="−"
-            label="Desgaste de equipos"
-            value={pl.depreciation}
-            hint="Lo que se gastaron tus equipos este período (se calcula en Activos fijos)"
-          />
-        )}
-        {(pl.asset_disposals ?? 0) !== 0 && (
-          <StatementRow
-            sign={pl.asset_disposals > 0 ? '+' : '−'}
-            label="Venta o baja de equipos"
-            value={Math.abs(pl.asset_disposals)}
-            hint={pl.asset_disposals > 0 ? 'Ganancia al vender equipos por más de lo que valían' : 'Pérdida al vender o dar de baja equipos'}
-          />
-        )}
-      </div>
-
-      <div
-        className="mt-3 pt-4 flex items-end justify-between gap-3 border-t-2"
-        style={{ borderColor: 'var(--border-color)' }}
+      <p className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">Utilidad del mes</p>
+      <p className={`text-3xl font-bold tabular-nums mt-1 ${positive ? 'text-emerald-400' : 'text-red-400'}`}>
+        {!positive ? '−' : ''}{formatCOP(Math.abs(pl.net_profit))}
+      </p>
+      <p className="text-xs text-xinuco-muted mt-1">
+        Ingresos {formatCOP(pl.revenue.total)} · Gastos {formatCOP(pl.expenses.total)}
+      </p>
+      <Link
+        href={`/${slug}/dashboard/accounting`}
+        className="inline-block mt-3 text-xs font-semibold hover:underline"
+        style={{ color: 'var(--primary-color)' }}
       >
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">= Utilidad neta</p>
-          {pl.margin_pct !== null && (
-            <p className="text-xs text-xinuco-muted mt-1">Margen {formatPct(pl.margin_pct)}</p>
-          )}
-        </div>
-        <span className={`text-3xl sm:text-4xl font-bold tabular-nums ${netColor}`}>
-          {!positive ? '−' : ''}{formatCOP(Math.abs(pl.net_profit))}
-        </span>
-      </div>
-
-      <div className="mt-4 flex flex-col gap-1 text-[11px] text-xinuco-muted">
-        <p>Las propinas ({formatCOP(pl.tips)}) no cuentan como ingreso: son del profesional.</p>
-        {pl.revenue.discounts > 0 && <p>Incluye {formatCOP(pl.revenue.discounts)} en descuentos.</p>}
-        <p>El costo de productos usa el costo registrado en Inventario.</p>
-      </div>
+        Ver estado de resultados →
+      </Link>
     </section>
   )
 }
@@ -1407,7 +1348,7 @@ export function ExpenseManager({
           </p>
         )}
 
-        <ProfitLossStatement pl={pl} plError={plError} monthLabel={month.label} />
+        <MonthResultCard pl={pl} plError={plError} slug={slug} />
 
         {pendingRecurring.length > 0 && (
           <PendingRecurringBanner
