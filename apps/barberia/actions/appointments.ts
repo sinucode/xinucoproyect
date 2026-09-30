@@ -99,6 +99,14 @@ export async function getAvailableSlots(
  * updateAppointmentStatus — Actualiza el estado de una cita.
  * [SEC H-3] Guarda de autenticación explícita antes de cualquier query.
  */
+// Transiciones permitidas desde la Agenda / Fila de espera
+const ALLOWED_TRANSITIONS: Partial<Record<AppointmentStatus, AppointmentStatus[]>> = {
+  payment_pending: ['in_progress', 'cancelled', 'no_show'],
+  scheduled:       ['in_progress', 'cancelled', 'no_show'],
+  in_progress:     ['ready_to_pay', 'cancelled'],
+  ready_to_pay:    ['in_progress', 'cancelled'],
+}
+
 export async function updateAppointmentStatus(appointmentId: string, status: AppointmentStatus) {
   const supabase = await createClient()
 
@@ -113,7 +121,19 @@ export async function updateAppointmentStatus(appointmentId: string, status: App
     .eq('id', appointmentId)
     .single()
 
-  const { error } = await supabase
+  if (!existing) return { error: 'Cita no encontrada.' }
+
+  // "Completada" solo la pone el cobro; aquí solo transiciones del día a día
+  const allowed = ALLOWED_TRANSITIONS[existing.status as AppointmentStatus] ?? []
+  if (!allowed.includes(status)) {
+    return {
+      error: status === 'completed'
+        ? 'La cita se completa al cobrarla.'
+        : 'Ese cambio de estado no está permitido para esta cita.',
+    }
+  }
+
+  const { data: updated, error } = await supabase
     .from('appointments')
     .update({
       status,
@@ -122,10 +142,16 @@ export async function updateAppointmentStatus(appointmentId: string, status: App
       ...(status === 'cancelled' ? { cancelled_by: 'business' as const } : {}),
     })
     .eq('id', appointmentId)
+    .select('id')
 
   if (error) {
     console.error('Error updating appointment status:', error)
+    if (error.message?.includes('use_checkout')) return { error: 'La cita se completa al cobrarla.' }
     return { error: error.message }
+  }
+  // Sin filas: la RLS no dejó cambiarla (cita de otro profesional)
+  if (!updated || updated.length === 0) {
+    return { error: 'Solo puedes cambiar tus propias citas.' }
   }
 
   // ── Audit log (nunca bloquea la operación principal) ─────────────────────────
