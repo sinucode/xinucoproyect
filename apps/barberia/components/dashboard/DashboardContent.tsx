@@ -123,7 +123,7 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
       {isAdmin && (
         <section aria-label="Venta Rápida de Productos">
           <RetailSaleButton
-            businessId={businessId}
+            slug={slug}
             activeShiftId={activeShiftDetails?.shift.id ?? null}
           />
         </section>

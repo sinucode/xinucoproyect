@@ -241,6 +241,7 @@ export async function getCommissionsOverview(
 
   // Movimientos automáticos del período (comisiones y propinas), paginados
   type LedgerRow = {
+    id?:       string
     staff_id:  string
     entry_type: 'commission' | 'tip'
     amount:    number
@@ -252,7 +253,7 @@ export async function getCommissionsOverview(
       .from('staff_ledger')
       // Por fecha de la VENTA (no del registro): "Aplicar reglas" a un mes pasado
       // debe contar en ese mes.
-      .select('staff_id, entry_type, amount, sale_item:sale_item_id(item_type), sale:sale_id!inner(created_at)')
+      .select('id, staff_id, entry_type, amount, sale_item:sale_item_id(item_type), sale:sale_id!inner(created_at)')
       .eq('business_id', businessId)
       .in('entry_type', ['commission', 'tip'])
       .gte('sale.created_at', startISO)
@@ -266,37 +267,73 @@ export async function getCommissionsOverview(
     if (page.length < PAGE_SIZE) break
   }
 
+  // Reversiones por anulación de venta (descuentos que apuntan al movimiento original vía
+  // reference_id). Se restan del mismo rubro del original: servicios, productos o propinas.
+  type ReversalRow = { staff_id: string; amount: number; reference_id: string | null }
+  const reversals: ReversalRow[] = []
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('staff_ledger')
+      .select('staff_id, amount, reference_id, sale:sale_id!inner(created_at)')
+      .eq('business_id', businessId)
+      .eq('entry_type', 'deduction')
+      .like('notes', 'Anulación de venta%')
+      .not('reference_id', 'is', null)
+      .gte('sale.created_at', startISO)
+      .lt('sale.created_at', endISO)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1)
+    if (error) return { error: error.message }
+    const page = (data ?? []) as ReversalRow[]
+    reversals.push(...page)
+    if (page.length < PAGE_SIZE) break
+  }
+  const originalById = new Map<string, LedgerRow>()
+  for (const e of entries) if (e.id) originalById.set(e.id, e)
+
   const allStaff = (staffRes.data ?? []) as { id: string; full_name: string; is_active: boolean }[]
   const nameById = new Map(allStaff.map(s => [s.id, s.full_name]))
 
   const byStaff = new Map<string, CommissionSummaryRow>()
-  for (const e of entries) {
-    let row = byStaff.get(e.staff_id)
+  const rowFor = (staffId: string): CommissionSummaryRow => {
+    let row = byStaff.get(staffId)
     if (!row) {
       row = {
-        staff_id:        e.staff_id,
-        staff_name:      nameById.get(e.staff_id) ?? 'Profesional',
+        staff_id:        staffId,
+        staff_name:      nameById.get(staffId) ?? 'Profesional',
         services_amount: 0,
         services_count:  0,
         products_amount: 0,
         tips_amount:     0,
         total:           0,
       }
-      byStaff.set(e.staff_id, row)
+      byStaff.set(staffId, row)
     }
-    const amount = e.amount ?? 0
+    return row
+  }
+
+  // sign = +1 suma el movimiento; −1 lo revierte (anulación de venta)
+  const apply = (e: LedgerRow, staffId: string, amount: number, sign: 1 | -1) => {
+    const row = rowFor(staffId)
     if (e.entry_type === 'tip') {
-      row.tips_amount += amount
+      row.tips_amount += sign * amount
     } else {
       const item = Array.isArray(e.sale_item) ? e.sale_item[0] : e.sale_item
       if (item?.item_type === 'product') {
-        row.products_amount += amount
+        row.products_amount += sign * amount
       } else {
-        row.services_amount += amount
-        row.services_count  += 1
+        row.services_amount += sign * amount
+        row.services_count  += sign
       }
     }
-    row.total += amount
+    row.total += sign * amount
+  }
+
+  for (const e of entries) apply(e, e.staff_id, e.amount ?? 0, 1)
+  for (const r of reversals) {
+    const original = r.reference_id ? originalById.get(r.reference_id) : undefined
+    if (original) apply(original, r.staff_id, r.amount ?? 0, -1)
   }
 
   const summary = Array.from(byStaff.values()).sort(

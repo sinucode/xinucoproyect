@@ -108,7 +108,7 @@ describe('checkoutAppointment — inventario', () => {
         customer_name: 'Ana Pérez', customer_phone: '3001112233' },
     ]
     setRpc((fn: string) =>
-      fn === 'checkout_appointment'
+      fn === 'checkout_appointment_secure'
         ? Promise.resolve({ data: { success: true, sale_id: 'sale1' }, error: null })
         : Promise.resolve({ data: { item_id: 'inv1', new_stock: 3 }, error: null })
     )
@@ -116,7 +116,7 @@ describe('checkoutAppointment — inventario', () => {
     const result = await checkoutAppointment(baseParams)
 
     expect(result.success).toBe(true)
-    expect(rpc).toHaveBeenCalledWith('checkout_appointment', expect.anything())
+    expect(rpc).toHaveBeenCalledWith('checkout_appointment_secure', expect.anything())
   })
 
   it('rejects inventory items from another business', async () => {
@@ -130,7 +130,7 @@ describe('checkoutAppointment — inventario', () => {
 
   it('records a negative sale movement after a successful checkout', async () => {
     setRpc((fn: string) =>
-      fn === 'checkout_appointment'
+      fn === 'checkout_appointment_secure'
         ? Promise.resolve({ data: { success: true, sale_id: 'sale1' }, error: null })
         : Promise.resolve({ data: { item_id: 'inv1', new_stock: 3 }, error: null })
     )
@@ -139,7 +139,7 @@ describe('checkoutAppointment — inventario', () => {
 
     expect(result.success).toBe(true)
     // el RPC de cobro no recibe inventoryItemId
-    const checkoutCall = rpc.mock.calls.find((c) => c[0] === 'checkout_appointment')!
+    const checkoutCall = rpc.mock.calls.find((c) => c[0] === 'checkout_appointment_secure')!
     expect(JSON.stringify(checkoutCall[1].p_items)).not.toContain('inv1')
     expect(rpc).toHaveBeenCalledWith('record_inventory_movement', {
       p_business_id: 'b1',
@@ -156,7 +156,7 @@ describe('checkoutAppointment — inventario', () => {
   it('still succeeds when the inventory movement fails', async () => {
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
     setRpc((fn: string) =>
-      fn === 'checkout_appointment'
+      fn === 'checkout_appointment_secure'
         ? Promise.resolve({ data: { success: true, sale_id: 'sale1' }, error: null })
         : Promise.resolve({ data: null, error: { message: 'boom' } })
     )

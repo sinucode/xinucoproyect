@@ -154,11 +154,27 @@ describe('Finance Server Actions', () => {
       expect(result.saleId).toBe('sale1')
       expect(result.loyalty).toBeUndefined()
       expect(mockSupabase.rpc).toHaveBeenCalledTimes(1)
-      expect(mockSupabase.rpc).toHaveBeenCalledWith('checkout_appointment', expect.objectContaining({
+      expect(mockSupabase.rpc).toHaveBeenCalledWith('checkout_appointment_secure', expect.objectContaining({
         p_discount_amount: 0,
       }))
       // Sin canje solicitado no se toca la lealtad
       expect(mockSupabase.from).not.toHaveBeenCalledWith('appointments')
+    })
+
+    it('translates shift_not_open and appointment_not_found from the secure RPC', async () => {
+      const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      const params = {
+        appointmentId: 'apt1', businessId: 'b1', shiftId: 'sh1',
+        paymentMethod: 'cash' as const, receivedAmount: 100, tipAmount: 0, discountAmount: 0,
+        items: [{ description: 'Haircut', quantity: 1, unitPrice: 100, itemType: 'service' as const }]
+      }
+
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'shift_not_open' } })
+      expect(await checkoutAppointment(params)).toEqual({ error: 'shift_not_open', message: 'No hay una caja abierta.' })
+
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'appointment_not_found' } })
+      expect(await checkoutAppointment(params)).toEqual({ error: 'appointment_not_found', message: 'No se encontró la cita.' })
+      errSpy.mockRestore()
     })
   })
 
@@ -185,7 +201,7 @@ describe('Finance Server Actions', () => {
       mockSupabase.maybeSingle.mockResolvedValue({ data: customerId ? { customer_id: customerId } : null, error: null })
       mockSupabase.rpc.mockImplementation((fn: string) => {
         if (fn === 'get_customer_loyalty') return Promise.resolve({ data: loyalty, error: null })
-        if (fn === 'checkout_appointment') return Promise.resolve({ data: { success: true, sale_id: 'sale1' }, error: null })
+        if (fn === 'checkout_appointment_secure') return Promise.resolve({ data: { success: true, sale_id: 'sale1' }, error: null })
         if (fn === 'redeem_loyalty_for_sale') return Promise.resolve(redeemResult)
         return Promise.resolve({ data: null, error: null })
       })
@@ -200,9 +216,9 @@ describe('Finance Server Actions', () => {
       const result = await checkoutAppointment({ ...base, discountAmount: 1000, loyaltyRedeem: { units: 500 } })
 
       // 500 puntos × $50 = $25.000 (sumado al descuento manual de $1.000)
-      expect(rpcCall('checkout_appointment')[1].p_discount_amount).toBe(26000)
+      expect(rpcCall('checkout_appointment_secure')[1].p_discount_amount).toBe(26000)
       expect(rpcCall('redeem_loyalty_for_sale')[1]).toEqual({ p_sale_id: 'sale1', p_units: 500, p_discount_cop: 25000 })
-      expect(rpcNames().indexOf('redeem_loyalty_for_sale')).toBeGreaterThan(rpcNames().indexOf('checkout_appointment'))
+      expect(rpcNames().indexOf('redeem_loyalty_for_sale')).toBeGreaterThan(rpcNames().indexOf('checkout_appointment_secure'))
       expect(result.success).toBe(true)
       expect(result.loyalty).toEqual({ redeemed_units: 500, discount_cop: 25000 })
       expect(result.loyaltyWarning).toBeUndefined()
@@ -211,7 +227,7 @@ describe('Finance Server Actions', () => {
     it('nunca confía en un monto de descuento que mande el cliente', async () => {
       setLoyalty(pointsLoyalty)
       await checkoutAppointment({ ...base, loyaltyRedeem: { units: 100, discountCop: 999999 } as any })
-      expect(rpcCall('checkout_appointment')[1].p_discount_amount).toBe(5000)
+      expect(rpcCall('checkout_appointment_secure')[1].p_discount_amount).toBe(5000)
       expect(rpcCall('redeem_loyalty_for_sale')[1].p_discount_cop).toBe(5000)
     })
 
@@ -219,7 +235,7 @@ describe('Finance Server Actions', () => {
       setLoyalty({ ...pointsLoyalty, balance: 5000 })
       const result = await checkoutAppointment({ ...base, discountAmount: 5000, loyaltyRedeem: { units: 3000 } })
       // 3000 × 50 = 150.000, pero solo quedan 40.000 por pagar
-      expect(rpcCall('checkout_appointment')[1].p_discount_amount).toBe(45000)
+      expect(rpcCall('checkout_appointment_secure')[1].p_discount_amount).toBe(45000)
       expect(result.loyalty).toEqual({ redeemed_units: 800, discount_cop: 40000 })   // solo se gastan los puntos que caben
     })
 
@@ -233,7 +249,7 @@ describe('Finance Server Actions', () => {
       setLoyalty(pointsLoyalty)
       const result = await checkoutAppointment({ ...base, loyaltyRedeem: { units } })
       expect(result.error).toBe('validation_error')
-      expect(rpcNames()).not.toContain('checkout_appointment')
+      expect(rpcNames()).not.toContain('checkout_appointment_secure')
       expect(rpcNames()).not.toContain('redeem_loyalty_for_sale')
     })
 
@@ -248,7 +264,7 @@ describe('Finance Server Actions', () => {
         loyaltyRedeem: { stamps: true },
       })
       // Precio del servicio $45.000 con tope $30.000
-      expect(rpcCall('checkout_appointment')[1].p_discount_amount).toBe(30000)
+      expect(rpcCall('checkout_appointment_secure')[1].p_discount_amount).toBe(30000)
       expect(rpcCall('redeem_loyalty_for_sale')[1]).toEqual({ p_sale_id: 'sale1', p_units: 10, p_discount_cop: 30000 })
       expect(result.loyalty).toEqual({ redeemed_units: 10, discount_cop: 30000 })
     })
@@ -257,7 +273,7 @@ describe('Finance Server Actions', () => {
       setLoyalty({ ...stampsLoyalty, balance: 7, can_redeem: false })
       const result = await checkoutAppointment({ ...base, loyaltyRedeem: { stamps: true } })
       expect(result.error).toBe('validation_error')
-      expect(rpcNames()).not.toContain('checkout_appointment')
+      expect(rpcNames()).not.toContain('checkout_appointment_secure')
     })
 
     it('rechaza canjear puntos si el negocio usa sellos (y al revés)', async () => {
@@ -265,7 +281,7 @@ describe('Finance Server Actions', () => {
       expect((await checkoutAppointment({ ...base, loyaltyRedeem: { units: 100 } })).error).toBe('validation_error')
       setLoyalty(pointsLoyalty)
       expect((await checkoutAppointment({ ...base, loyaltyRedeem: { stamps: true } })).error).toBe('validation_error')
-      expect(rpcNames()).not.toContain('checkout_appointment')
+      expect(rpcNames()).not.toContain('checkout_appointment_secure')
     })
 
     it('rechaza si la lealtad está desactivada o la cita no tiene cliente', async () => {
@@ -274,7 +290,7 @@ describe('Finance Server Actions', () => {
 
       setLoyalty(pointsLoyalty, null)
       expect((await checkoutAppointment({ ...base, loyaltyRedeem: { units: 100 } })).error).toBe('validation_error')
-      expect(rpcNames()).not.toContain('checkout_appointment')
+      expect(rpcNames()).not.toContain('checkout_appointment_secure')
     })
 
     it('no permite canjear con MercadoPago', async () => {
@@ -282,7 +298,7 @@ describe('Finance Server Actions', () => {
       const result = await checkoutAppointment({ ...base, paymentMethod: 'mercadopago', loyaltyRedeem: { units: 100 } })
       expect(result.error).toBe('validation_error')
       expect(result.message).toMatch(/efectivo, tarjeta o transferencia/)
-      expect(rpcNames()).not.toContain('checkout_appointment')
+      expect(rpcNames()).not.toContain('checkout_appointment_secure')
     })
 
     it('si el canje falla después del cobro, la venta se queda y se devuelve un aviso', async () => {

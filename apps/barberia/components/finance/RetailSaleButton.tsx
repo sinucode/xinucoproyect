@@ -1,43 +1,68 @@
 'use client'
 
-import { useState } from 'react'
-import { ShoppingBag } from 'lucide-react'
-import { RetailSaleModal } from './RetailSaleModal'
+import { useCallback, useEffect, useState } from 'react'
+import { Loader2, ShoppingBag, X } from 'lucide-react'
+import { getPosCatalog } from '@/actions/retail'
+import { PointOfSale } from '@/components/pos/PointOfSale'
+import type { PosCatalog } from '@/lib/pos-utils'
 
 interface RetailSaleButtonProps {
-  businessId:    string
+  slug:          string
   activeShiftId: string | null
 }
 
 /**
- * RetailSaleButton — Botón flotante de Venta Rápida para el Dashboard.
+ * RetailSaleButton — Acceso rápido "Venta Rápida" del Dashboard.
  *
- * - Si hay turno activo: botón habilitado que abre <RetailSaleModal>
- * - Si no hay turno activo: botón deshabilitado con tooltip explicativo
- *
- * Componente cliente puro — se renderiza dentro de DashboardContent (Server Component).
+ * Abre el mismo Punto de Venta de /retail dentro de un modal (disposición compacta).
+ * - Con caja abierta: botón habilitado.
+ * - Sin caja: botón deshabilitado con tooltip explicativo.
  */
-export function RetailSaleButton({ businessId, activeShiftId }: RetailSaleButtonProps) {
-  const [isModalOpen, setIsModalOpen] = useState(false)
+export function RetailSaleButton({ slug, activeShiftId }: RetailSaleButtonProps) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [catalog, setCatalog] = useState<PosCatalog | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const hasActiveShift = !!activeShiftId
 
-  const handleSuccess = () => {
-    setIsModalOpen(false)
-    // Forzar refresco del dashboard para actualizar totales del turno
-    window.location.reload()
-  }
+  const loadCatalog = useCallback(async () => {
+    const res = await getPosCatalog()
+    if ('error' in res) {
+      setLoadError(res.error)
+      return
+    }
+    setLoadError(null)
+    setCatalog(res)
+  }, [])
+
+  // Se carga el catálogo al abrir y se limpia al cerrar (siempre datos frescos)
+  useEffect(() => {
+    if (!isOpen) {
+      setCatalog(null)
+      setLoadError(null)
+      return
+    }
+    void loadCatalog()
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsOpen(false) }
+    window.addEventListener('keydown', onKey)
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [isOpen, loadCatalog])
 
   return (
     <>
       {/* Botón de acceso rápido */}
       <div className="relative group">
         <button
-          onClick={() => hasActiveShift && setIsModalOpen(true)}
+          onClick={() => hasActiveShift && setIsOpen(true)}
           disabled={!hasActiveShift}
           aria-label={
             hasActiveShift
-              ? 'Abrir modal de venta rápida de productos'
+              ? 'Abrir venta rápida de productos'
               : 'Debes abrir un turno de caja primero'
           }
           className={`
@@ -63,7 +88,7 @@ export function RetailSaleButton({ businessId, activeShiftId }: RetailSaleButton
               Venta Rápida
             </p>
             <p className={`text-xs mt-0.5 ${hasActiveShift ? 'text-[var(--primary-color)]/60' : 'text-zinc-700'}`}>
-              {hasActiveShift ? 'Vender productos sin cita' : 'Abre el turno para vender'}
+              {hasActiveShift ? 'Vender productos sin cita' : 'Abre la caja para vender'}
             </p>
           </div>
 
@@ -86,14 +111,50 @@ export function RetailSaleButton({ businessId, activeShiftId }: RetailSaleButton
         )}
       </div>
 
-      {/* Modal de venta rápida */}
-      {isModalOpen && hasActiveShift && (
-        <RetailSaleModal
-          businessId={businessId}
-          activeShiftId={activeShiftId}
-          onClose={() => setIsModalOpen(false)}
-          onSuccess={handleSuccess}
-        />
+      {/* Punto de Venta en modal */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/75 backdrop-blur-sm animate-fade-in"
+          onClick={() => setIsOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="quick-sale-title"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl border bg-zinc-950 shadow-2xl text-zinc-100"
+            style={{ borderColor: 'var(--border-color)' }}
+          >
+            <div className="flex items-center justify-between border-b border-zinc-800 p-4 shrink-0">
+              <div>
+                <h2 id="quick-sale-title" className="text-lg font-bold text-xinuco-text">Venta Rápida</h2>
+                <p className="text-xs text-xinuco-muted">Vende productos sin cita: se descuentan del inventario.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                aria-label="Cerrar"
+                className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-4">
+              {loadError ? (
+                <div role="alert" className="p-3 bg-red-950/40 border border-red-900/30 rounded-xl text-red-400 text-sm">
+                  {loadError}
+                </div>
+              ) : !catalog ? (
+                <div className="flex items-center justify-center gap-2 py-16 text-sm text-xinuco-muted">
+                  <Loader2 size={16} className="animate-spin" /> Cargando productos…
+                </div>
+              ) : (
+                <PointOfSale slug={slug} catalog={catalog} compact onSold={() => void loadCatalog()} />
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </>
   )

@@ -291,6 +291,38 @@ describe('Commissions Server Actions', () => {
       expect(ledgerOps.find(o => o.op === 'eq')!.args).toEqual(['business_id', 'biz1'])
     })
 
+    it('resta las reversiones por anulación del mismo rubro del movimiento original', async () => {
+      const { calls } = setup('admin', {
+        staff: [{ data: [{ id: 'a', full_name: 'Ana', is_active: true }], error: null }],
+        staff_ledger: [
+          { data: [
+            { id: 'e1', staff_id: 'a', entry_type: 'commission', amount: 10000, sale_item: { item_type: 'service' } },
+            { id: 'e2', staff_id: 'a', entry_type: 'commission', amount: 4000, sale_item: { item_type: 'service' } },
+            { id: 'e3', staff_id: 'a', entry_type: 'commission', amount: 2000, sale_item: { item_type: 'product' } },
+            { id: 'e4', staff_id: 'a', entry_type: 'tip', amount: 3000, sale_item: null },
+          ], error: null },
+          { data: [
+            { staff_id: 'a', amount: 4000, reference_id: 'e2' },   // servicio anulado
+            { staff_id: 'a', amount: 2000, reference_id: 'e3' },   // producto anulado
+            { staff_id: 'a', amount: 3000, reference_id: 'e4' },   // propina anulada
+            { staff_id: 'a', amount: 999,  reference_id: 'desconocido' }, // sin original en el período: se ignora
+          ], error: null },
+        ],
+      })
+      const r = await getCommissionsOverview(range)
+      if ('error' in r) throw new Error(r.error)
+      expect(r.summary).toEqual([
+        { staff_id: 'a', staff_name: 'Ana', services_amount: 10000, services_count: 1, products_amount: 0, tips_amount: 0, total: 10000 },
+      ])
+      // la segunda consulta pide solo los descuentos por anulación
+      const ledgerCalls = calls.filter(c => c.table === 'staff_ledger')
+      expect(ledgerCalls).toHaveLength(2)
+      const ops2 = ledgerCalls[1].ops
+      expect(ops2.find(o => o.op === 'eq')!.args).toEqual(['business_id', 'biz1'])
+      expect(ops2.filter(o => o.op === 'eq').map(o => o.args)).toContainEqual(['entry_type', 'deduction'])
+      expect(ops2.find(o => o.op === 'like')!.args).toEqual(['notes', 'Anulación de venta%'])
+    })
+
     it('rango inválido cae al mes actual', async () => {
       setup('admin')
       const r = await getCommissionsOverview({ from: 'x', to: 'y' })

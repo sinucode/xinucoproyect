@@ -345,7 +345,7 @@ export async function getAppointmentProducts(
  *
  * Reemplaza el flujo anterior de 4 operaciones secuenciales (INSERT sales →
  * INSERT sale_items → INSERT payments → UPDATE appointments) por una única
- * llamada al RPC `checkout_appointment` que ejecuta todo en una transacción.
+ * llamada al RPC `checkout_appointment_secure` que ejecuta todo en una transacción.
  *
  * Garantía: si cualquier paso falla, PostgreSQL revierte la transacción
  * completa. No existe riesgo de estado financiero parcial.
@@ -469,8 +469,9 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
     staff_id:    item.staffId ?? null,
   }))
 
-  // Una sola llamada — atomicidad garantizada por PostgreSQL
-  const { data, error } = await supabase.rpc('checkout_appointment', {
+  // Una sola llamada — atomicidad garantizada por PostgreSQL.
+  // Se usa la variante _secure: verifica que la cita y la caja sean del negocio del usuario.
+  const { data, error } = await supabase.rpc('checkout_appointment_secure', {
     p_appointment_id:  appointmentId,
     p_business_id:     businessId,
     p_shift_id:        shiftId,
@@ -482,6 +483,12 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
 
   if (error) {
     console.error('[checkout_appointment RPC]', error)
+    if (error.message?.includes('shift_not_open')) {
+      return { error: 'shift_not_open', message: 'No hay una caja abierta.' }
+    }
+    if (error.message?.includes('appointment_not_found')) {
+      return { error: 'appointment_not_found', message: 'No se encontró la cita.' }
+    }
     return { error: 'db_error', message: error.message }
   }
 

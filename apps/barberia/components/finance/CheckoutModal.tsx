@@ -17,6 +17,7 @@ import { StampDots } from '@/components/dashboard/loyalty/StampDots'
 import { reservedByItem, type InventoryReservation } from '@/lib/inventory-reservations'
 import type { PaymentMethod, InventoryItem } from '@xinuco/types'
 import { MPPaymentPanel } from '@/components/pos/MPPaymentPanel'
+import { CashReceivedInput } from '@/components/pos/CashReceivedInput'
 
 interface CheckoutModalProps {
   appointment: {
@@ -127,9 +128,8 @@ export function CheckoutModal({
 
   const totalAmount = Math.max(0, subtotal - finalDiscount - loyaltyDiscount + finalTip)
 
-  // Cambio/Vuelto
+  // Monto recibido (el cambio lo muestra CashReceivedInput)
   const finalReceived = Number(receivedAmount) || 0
-  const changeAmount = paymentMethod === 'cash' && finalReceived > totalAmount ? finalReceived - totalAmount : 0
 
   // Apartados por OTRAS citas (los de esta cita son del propio cliente y se pueden cobrar)
   const reservedOthers = reservedByItem(reservations, appointment.id)
@@ -349,16 +349,6 @@ export function CheckoutModal({
       minimumFractionDigits: 0,
     }).format(val)
   }
-
-  // Efectivo rápido: múltiplos redondos estrictamente mayores al total
-  const suggestedCash = Array.from(
-    new Set([5000, 10000, 20000, 50000, 100000].map((m) => (Math.floor(totalAmount / m) + 1) * m))
-  )
-    .sort((a, b) => a - b)
-    .slice(0, 3)
-  const billChips = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
-  const chipClass =
-    'text-xs font-semibold py-2 rounded-lg border border-zinc-800 bg-zinc-950 hover:border-[var(--primary-color)] text-zinc-200'
 
   // Filtro del selector de inventario
   const filterText = inventoryFilter.trim().toLowerCase()
@@ -840,85 +830,7 @@ export function CheckoutModal({
 
           {/* Monto Recibido y Cambio para Efectivo */}
           {paymentMethod === 'cash' && (
-            <div className="p-4 bg-zinc-900/40 rounded-xl border border-zinc-900 space-y-3 animate-fade-in">
-              <div>
-                <label className="block text-xs font-semibold text-xinuco-muted mb-1">
-                  Monto Recibido de Cliente
-                </label>
-                <div className="relative">
-                  <DollarSign size={14} className="absolute left-2.5 top-2.5 text-zinc-500" />
-                  <input
-                    type="number"
-                    placeholder="Monto con el que paga"
-                    value={receivedAmount}
-                    onChange={(e) => setReceivedAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="w-full text-sm bg-zinc-950 border border-zinc-800 rounded-lg pl-7 pr-3 py-2 text-zinc-100 placeholder-zinc-650 focus:outline-none focus:border-zinc-700"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-xinuco-muted mb-1.5">Rápido</p>
-                  <div className="grid grid-cols-4 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setReceivedAmount(totalAmount)}
-                      className="col-span-2 text-xs font-bold py-2 rounded-lg bg-[var(--primary-color)] text-black hover:opacity-90 transition-opacity"
-                    >
-                      Exacto · {formatCurrency(totalAmount)}
-                    </button>
-                    {suggestedCash.map((amt) => (
-                      <button
-                        key={amt}
-                        type="button"
-                        onClick={() => setReceivedAmount(amt)}
-                        className={chipClass}
-                      >
-                        {formatCurrency(amt)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-xinuco-muted mb-1.5">Billetes</p>
-                  <div className="grid grid-cols-4 gap-2">
-                    {billChips.map((bill) => (
-                      <button
-                        key={bill}
-                        type="button"
-                        onClick={() => setReceivedAmount((Number(receivedAmount) || 0) + bill)}
-                        className={chipClass}
-                      >
-                        +{new Intl.NumberFormat('es-CO').format(bill)}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => setReceivedAmount('')}
-                      className={chipClass}
-                    >
-                      Borrar
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {finalReceived > 0 && finalReceived < totalAmount && (
-                <p className="text-xs text-xinuco-muted">
-                  Faltan {formatCurrency(totalAmount - finalReceived)}
-                </p>
-              )}
-
-              {finalReceived > 0 && finalReceived >= totalAmount && (
-                <div className="flex items-center justify-between bg-[var(--primary-color)]/[0.05] border border-[var(--primary-color)]/20 p-2.5 rounded-lg text-sm">
-                  <span className="font-semibold text-zinc-300">Cambio a entregar:</span>
-                  <span className="font-extrabold text-[var(--primary-color)] text-base">
-                    {formatCurrency(changeAmount)}
-                  </span>
-                </div>
-              )}
-            </div>
+            <CashReceivedInput total={totalAmount} value={receivedAmount} onChange={setReceivedAmount} />
           )}
 
           {/* Alertas de error */}

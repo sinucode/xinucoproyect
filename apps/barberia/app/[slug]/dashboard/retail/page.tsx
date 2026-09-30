@@ -1,9 +1,10 @@
-import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
 import { FeatureGate } from '@/components/dashboard/FeatureGate'
-import { RetailPOS } from '@/components/dashboard/retail/RetailPOS'
+import { PointOfSale } from '@/components/pos/PointOfSale'
+import { ShiftSalesList } from '@/components/pos/ShiftSalesList'
+import { getPosCatalog, getShiftSales } from '@/actions/retail'
 import type { Profile } from '@xinuco/types'
 
 export const metadata: Metadata = {
@@ -37,94 +38,41 @@ export default async function RetailPage({
   if (!profile?.business_id) redirect(`/${slug}/login`)
 
   // Role guard: solo admin puede acceder
-  if (!profile || (profile.role !== 'admin' && profile.role !== 'super_admin')) {
+  if (profile.role !== 'admin' && profile.role !== 'super_admin') {
     redirect(`/${slug}/dashboard`)
   }
 
-  const businessId = profile.business_id
-
-  // 3. Cargar datos en paralelo
-  const [shiftResult, salesResult, staffResult] = await Promise.all([
-    // Turno abierto actual
-    supabase
-      .from('cash_register_shifts')
-      .select('id, status, opened_at, opening_balance')
-      .eq('business_id', businessId)
-      .eq('status', 'open')
-      .maybeSingle(),
-
-    // Últimas 20 ventas retail (sin cita, completadas)
-    supabase
-      .from('sales')
-      .select('id, total_amount, created_at, status, customer_id')
-      .eq('business_id', businessId)
-      .is('appointment_id', null)
-      .eq('status', 'paid')
-      .order('created_at', { ascending: false })
-      .limit(20),
-
-    // Lista de empleados activos
-    supabase
-      .from('staff')
-      .select('id, full_name')
-      .eq('business_id', businessId)
-      .eq('is_active', true)
-      .order('full_name', { ascending: true }),
-  ])
-
-  const currentShift = shiftResult.data ?? null
-  const recentSales  = salesResult.data ?? []
-  const staffList    = staffResult.data ?? []
+  // 3. Catálogo (productos, equipo, caja, lealtad) y ventas del turno abierto
+  const [catalog, shiftSales] = await Promise.all([getPosCatalog(), getShiftSales()])
 
   return (
-    <div className="flex flex-col gap-6 max-w-6xl mx-auto pb-24">
-      <Suspense fallback={<RetailPOSSkeleton />}>
-        <FeatureGate featureKey="retail_sales" planName="Profesional">
-          <RetailPOS
-            businessId={businessId}
-            slug={slug}
-            currentShift={currentShift}
-            recentSales={recentSales}
-            staffList={staffList}
-          />
-        </FeatureGate>
-      </Suspense>
-    </div>
-  )
-}
+    <div className="flex flex-col gap-6 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
+      <header>
+        <h1 className="text-2xl font-bold text-xinuco-text">Punto de Venta</h1>
+        <p className="text-sm text-xinuco-muted mt-1">
+          Vende productos sin cita: se descuentan del inventario y suman a la caja.
+        </p>
+      </header>
 
-// ── Skeleton de carga ─────────────────────────────────────────────────────────
-
-function RetailPOSSkeleton() {
-  return (
-    <div className="flex flex-col gap-6 animate-pulse pt-6">
-      {/* Header skeleton */}
-      <div
-        className="flex items-center gap-4 pb-6 border-b"
-        style={{ borderColor: 'var(--border-color)' }}
-      >
-        <div className="w-12 h-12 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-        <div className="flex flex-col gap-2">
-          <div className="h-6 w-44 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-          <div className="h-3 w-64 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-        </div>
-      </div>
-
-      {/* Two-column layout skeleton */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
-        {/* Left column */}
-        <div className="flex flex-col gap-4">
-          <div className="h-48 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-          <div className="h-40 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-          <div className="h-32 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-        </div>
-        {/* Right column */}
-        <div className="flex flex-col gap-3">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-16 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-          ))}
-        </div>
-      </div>
+      <FeatureGate featureKey="retail_sales" planName="Profesional">
+        {'error' in catalog ? (
+          <div
+            role="alert"
+            className="rounded-xl border p-4 text-sm text-red-400"
+            style={{ borderColor: 'var(--border-color)' }}
+          >
+            {catalog.error}
+          </div>
+        ) : (
+          <>
+            <PointOfSale slug={slug} catalog={catalog} />
+            <ShiftSalesList sales={shiftSales.sales} />
+            {shiftSales.error && (
+              <p role="alert" className="text-sm text-red-400">{shiftSales.error}</p>
+            )}
+          </>
+        )}
+      </FeatureGate>
     </div>
   )
 }
