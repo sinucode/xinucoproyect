@@ -195,6 +195,11 @@ async function ensureExpenseCategories(supabase: Supabase, businessId: string): 
       })),
       { onConflict: 'business_id,slug', ignoreDuplicates: true },
     )
+    // En producción se vio una primera carga que devolvió la lista vacía justo después de
+    // crear las por defecto: se reintenta una vez antes de rendirse.
+    const created = await fetchCategories(supabase, businessId)
+    if (created.length > 0) return created
+    await new Promise(resolve => setTimeout(resolve, 250))
     return await fetchCategories(supabase, businessId)
   } catch (err) {
     console.error('[expenses] categorías no disponibles, usando las por defecto:', err)
