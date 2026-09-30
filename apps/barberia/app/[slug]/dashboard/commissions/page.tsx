@@ -2,22 +2,37 @@ import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { getCommissionRules } from '@/actions/commissions'
-import { getServices } from '@/actions/services'
+import { getCommissionsOverview } from '@/actions/commissions'
 import { CommissionManager } from '@/components/dashboard/commissions/CommissionManager'
-import type { Staff, BusinessFeatures, Profile } from '@xinuco/types'
+import { addDaysToDateKey, businessTodayISODate } from '@/lib/agenda-time'
+import type { BusinessFeatures, Profile } from '@xinuco/types'
 
 export const metadata: Metadata = {
   title: 'Comisiones — Xinuco',
-  description: 'Motor de comisiones variables para el equipo',
+  description: 'Comisiones automáticas para el equipo',
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** Toma el primer valor de un searchParam si vino repetido. */
+function firstParam(v: string | string[] | undefined): string | undefined {
+  return Array.isArray(v) ? v[0] : v
+}
+
+/** Fecha 'YYYY-MM-DD' real (rechaza 2026-02-31, etc.). */
+function validDateKey(v: string | undefined): v is string {
+  return !!v && DATE_RE.test(v) && addDaysToDateKey(v, 0) === v
 }
 
 export default async function CommissionsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
   const { slug } = await params
+  const sp = await searchParams
 
   // 1. Auth guard
   const supabase = await createClient()
@@ -40,8 +55,6 @@ export default async function CommissionsPage({
     redirect(`/${slug}/dashboard`)
   }
 
-  const businessId = profile.business_id
-
   // Feature gate: check commissions flag server-side
   const { data: biz } = await supabase
     .from('businesses')
@@ -51,33 +64,21 @@ export default async function CommissionsPage({
   const features = (biz?.features_enabled ?? {}) as unknown as BusinessFeatures
   if (!features?.commissions) redirect(`/${slug}/dashboard`)
 
-  // 3. Cargar datos en paralelo
-  const [rules, services, staffResult] = await Promise.all([
-    getCommissionRules(businessId),
-    getServices(businessId),
-    supabase
-      .from('staff')
-      .select('id, full_name, specialty_role, is_active')
-      .eq('business_id', businessId)
-      .eq('is_active', true)
-      .order('full_name'),
-  ])
+  // 3. Período: por defecto el mes actual (día 1 → hoy, hora del negocio)
+  const today = businessTodayISODate()
+  const qFrom = firstParam(sp.from)
+  const qTo   = firstParam(sp.to)
+  const from = validDateKey(qFrom) ? qFrom : `${today.slice(0, 8)}01`
+  const to   = validDateKey(qTo)   ? qTo   : today
 
-  const staff = (staffResult.data ?? []) as Pick<
-    Staff,
-    'id' | 'full_name' | 'specialty_role' | 'is_active'
-  >[]
+  // 4. Datos (business_id sale del perfil dentro de la acción)
+  const overview = await getCommissionsOverview({ from, to })
+  if ('error' in overview) redirect(`/${slug}/dashboard`)
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto pb-24">
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
       <Suspense fallback={<CommissionsSkeleton />}>
-        <CommissionManager
-          initialRules={rules}
-          staff={staff}
-          services={services}
-          businessId={businessId}
-          slug={slug}
-        />
+        <CommissionManager overview={overview} slug={slug} />
       </Suspense>
     </div>
   )

@@ -24,6 +24,10 @@ export type {
   AppointmentStatus,
   Customer,
   SaleItem,
+  CommissionRule,
+  LedgerEntryType,
+  StaffLedgerEntry,
+  StaffLedgerBalance,
 } from './database'
 
 export type { Database as DatabaseGenerated } from './database.types'

@@ -1,30 +1,35 @@
 'use client'
 
-import { useState, useTransition, useCallback, useRef, useEffect } from 'react'
+import { useState, useTransition, useRef, useEffect, useMemo } from 'react'
+import { useRouter, usePathname } from 'next/navigation'
+import Link from 'next/link'
 import {
   Plus,
   X,
   Loader2,
   Trash2,
+  Pencil,
   Percent,
   DollarSign,
   RefreshCw,
-  Globe,
-  User,
-  Layers,
-  ChevronDown,
 } from 'lucide-react'
 import {
   createCommissionRule,
+  updateCommissionRule,
   deleteCommissionRule,
-  calculatePendingCommissions,
+  applyPendingCommissions,
 } from '@/actions/commissions'
-import type { CommissionRuleWithRelations } from '@/actions/commissions'
-import type { Staff, Service } from '@xinuco/types'
-import { AdminPageHeader } from '@xinuco/ui'
-import { AdminEmptyState } from '@xinuco/ui'
+import type {
+  CommissionRuleWithRelations,
+  CommissionRuleInput,
+  CommissionsOverview,
+  CommissionSummaryRow,
+} from '@/actions/commissions'
+import { AdminPageHeader, AdminEmptyState } from '@xinuco/ui'
+import { addDaysToDateKey, businessTodayISODate } from '@/lib/agenda-time'
+import { AUDIENCE_LABELS } from '@/lib/service-audience'
 
-// ── Helpers de formato COP ────────────────────────────────────────────────────
+// ── Formato ───────────────────────────────────────────────────────────────────
 
 function formatCOP(amount: number): string {
   return new Intl.NumberFormat('es-CO', {
@@ -35,238 +40,98 @@ function formatCOP(amount: number): string {
   }).format(amount)
 }
 
-// ── Nivel de prioridad para badge visual ─────────────────────────────────────
+const MAX_RANGE_DAYS = 366
 
-type PriorityLevel = 'global' | 'staff' | 'staff_service'
-
-function getRulePriority(rule: CommissionRuleWithRelations): PriorityLevel {
-  if (!rule.staff_id && !rule.service_id) return 'global'
-  if (rule.staff_id && !rule.service_id)  return 'staff'
-  return 'staff_service'
-}
-
-function getRuleLabel(rule: CommissionRuleWithRelations): string {
-  if (!rule.staff_id && !rule.service_id) return 'Regla Global del Negocio'
-  if (rule.staff_id && !rule.service_id) {
-    const name = rule.staff?.full_name ?? 'Barbero desconocido'
-    return `Todas las citas de ${name}`
-  }
-  const staffName   = rule.staff?.full_name   ?? 'Barbero desconocido'
-  const serviceName = rule.service?.name ?? 'Servicio desconocido'
-  return `${staffName} — ${serviceName}`
-}
-
-// Badge de prioridad: oro=global, plata=por barbero, bronce=barbero+servicio
-function PriorityBadge({ level }: { level: PriorityLevel }) {
-  const config: Record<PriorityLevel, { label: string; colors: string; icon: React.ReactNode }> = {
-    global: {
-      label:  'Global',
-      colors: 'text-amber-400 bg-amber-400/10 border-amber-400/20',
-      icon:   <Globe size={10} />,
-    },
-    staff: {
-      label:  'Barbero',
-      colors: 'text-slate-300 bg-slate-400/10 border-slate-400/20',
-      icon:   <User size={10} />,
-    },
-    staff_service: {
-      label:  'Específica',
-      colors: 'text-orange-400 bg-orange-400/10 border-orange-400/20',
-      icon:   <Layers size={10} />,
-    },
-  }
-
-  const { label, colors, icon } = config[level]
-  return (
-    <span
-      className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${colors}`}
-    >
-      {icon}
-      {label}
-    </span>
+function daysBetween(from: string, to: string): number {
+  return Math.round(
+    (new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86_400_000,
   )
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// COMPONENTE PRINCIPAL — CommissionManager
-// ════════════════════════════════════════════════════════════════════════════
+// ── Períodos rápidos ──────────────────────────────────────────────────────────
 
-interface CommissionManagerProps {
-  initialRules: CommissionRuleWithRelations[]
-  staff:        Pick<Staff, 'id' | 'full_name' | 'specialty_role' | 'is_active'>[]
-  services:     Service[]
-  businessId:   string
-  slug:         string
+function thisMonthRange(today: string) {
+  return { from: `${today.slice(0, 8)}01`, to: today }
 }
 
-export function CommissionManager({
-  initialRules,
-  staff,
-  services,
-  businessId,
-}: CommissionManagerProps) {
-  const [rules, setRules]         = useState<CommissionRuleWithRelations[]>(initialRules)
-  const [sheetOpen, setSheetOpen] = useState(false)
-  const [queueMsg, setQueueMsg]   = useState<string | null>(null)
-  const [isPendingQueue, startQueue] = useTransition()
+function lastMonthRange(today: string) {
+  const firstThisMonth = `${today.slice(0, 8)}01`
+  const lastDay = addDaysToDateKey(firstThisMonth, -1)
+  return { from: `${lastDay.slice(0, 8)}01`, to: lastDay }
+}
 
-  // Añadir regla nueva a la lista local tras guardar
-  const handleRuleCreated = useCallback((rule: CommissionRuleWithRelations) => {
-    setRules(prev => [rule, ...prev])
-    setSheetOpen(false)
-  }, [])
+// ════════════════════════════════════════════════════════════════════════════
+// COMPONENTE PRINCIPAL
+// ════════════════════════════════════════════════════════════════════════════
 
-  // Eliminar regla de la lista local tras confirmar
-  const handleRuleDeleted = useCallback((ruleId: string) => {
-    setRules(prev => prev.filter(r => r.id !== ruleId))
-  }, [])
+type ServiceOption = CommissionsOverview['services'][number]
 
-  // Procesar cola de comisiones pendientes
-  function handleProcessQueue() {
-    setQueueMsg(null)
-    startQueue(async () => {
-      const result = await calculatePendingCommissions(businessId)
-      if (result.error) {
-        setQueueMsg(`Error: ${result.error}`)
-      } else {
-        setQueueMsg(
-          `Procesadas ${result.processed ?? 0} cita(s). ${
-            result.errors ? `${result.errors} error(es).` : ''
-          }`
-        )
-      }
-    })
+interface CommissionManagerProps {
+  overview: CommissionsOverview
+  slug:     string
+}
+
+export function CommissionManager({ overview, slug }: CommissionManagerProps) {
+  const { rules, staff, services, summary, range } = overview
+  const router = useRouter()
+
+  const [modal, setModal] = useState<{ rule: CommissionRuleWithRelations | null } | null>(null)
+
+  // Etiqueta de público solo si el negocio tiene servicios de más de un público
+  const showAudience = useMemo(
+    () => new Set(services.map(s => s.audience)).size > 1,
+    [services],
+  )
+  const serviceLabel = (svc: { id: string; name: string } | null): string => {
+    if (!svc) return 'Servicio'
+    const full = services.find(s => s.id === svc.id)
+    if (!full || !showAudience) return svc.name
+    const suffix = full.audience === 'all' ? 'Unisex' : AUDIENCE_LABELS[full.audience]?.singular
+    return suffix ? `${svc.name} · ${suffix}` : svc.name
   }
 
   return (
     <>
       <AdminPageHeader
         title="Comisiones"
-        subtitle="Define las reglas de comisión para tu equipo. Cascada: barbero+servicio › barbero › global."
+        subtitle="Se registran solas al cobrar y quedan en la cuenta de cada profesional."
         hasData={true}
         actionButton={
-          <div className="flex items-center gap-2">
-            {/* Procesar cola manualmente */}
-            <button
-              type="button"
-              onClick={handleProcessQueue}
-              disabled={isPendingQueue}
-              className="btn-ghost flex items-center gap-2 text-xs"
-              title="Calcular comisiones pendientes de la cola"
-            >
-              {isPendingQueue ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <RefreshCw size={14} />
-              )}
-              <span className="hidden sm:inline">Calcular Pendientes</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setSheetOpen(true)}
-              className="btn-primary flex items-center gap-2 animate-fade-in"
-            >
-              <Plus size={16} strokeWidth={2.5} />
-              <span className="hidden sm:inline">Nueva Regla</span>
-              <span className="sm:hidden">Nueva</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setModal({ rule: null })}
+            className="btn-primary flex items-center gap-2 animate-fade-in"
+          >
+            <Plus size={16} strokeWidth={2.5} />
+            <span className="hidden sm:inline">Nueva regla</span>
+            <span className="sm:hidden">Nueva</span>
+          </button>
         }
       />
 
-      {/* Mensaje de resultado del procesamiento */}
-      {queueMsg && (
-        <p
-          role="status"
-          className="text-xs px-4 py-2.5 rounded-lg border animate-fade-in"
-          style={{
-            background:   'rgba(197,160,89,0.08)',
-            borderColor:  'rgba(197,160,89,0.2)',
-            color:        'var(--primary-color)',
-          }}
-        >
-          {queueMsg}
-        </p>
-      )}
+      <EarningsSection
+        summary={summary}
+        range={range}
+        slug={slug}
+        onApplied={() => router.refresh()}
+      />
 
-      {/* Tabla de reglas */}
-      <section aria-label="Reglas de comisión" className="mt-6">
-        {rules.length === 0 ? (
-          <AdminEmptyState
-            icon={Percent}
-            title="Sin reglas de comisión"
-            description="Aún no tienes reglas configuradas. Crea una regla global para aplicar a todo el equipo, o reglas específicas por barbero y servicio."
-            actionLabel="Crear Primera Regla"
-            onAction={() => setSheetOpen(true)}
-          />
-        ) : (
-          <div
-            className="overflow-x-auto rounded-xl animate-fade-in"
-            style={{ border: '1px solid var(--border-color)' }}
-          >
-            <table
-              className="w-full text-sm"
-              aria-label="Tabla de reglas de comisión"
-            >
-              <thead>
-                <tr
-                  style={{
-                    borderBottom: '1px solid var(--border-color)',
-                    background:   'var(--surface-color, rgba(255,255,255,0.03))',
-                  }}
-                >
-                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-                    Alcance
-                  </th>
-                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-xinuco-muted uppercase tracking-wider hidden sm:table-cell">
-                    Prioridad
-                  </th>
-                  <th className="px-5 py-3.5 text-center text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-                    Comisión
-                  </th>
-                  <th className="px-5 py-3.5 text-right text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-                    Acciones
-                  </th>
-                </tr>
-              </thead>
+      <RulesSection
+        rules={rules}
+        serviceLabel={serviceLabel}
+        onNew={() => setModal({ rule: null })}
+        onEdit={rule => setModal({ rule })}
+        onDeleted={() => router.refresh()}
+      />
 
-              <tbody>
-                {rules.map(rule => (
-                  <CommissionRuleRow
-                    key={rule.id}
-                    rule={rule}
-                    onDelete={handleRuleDeleted}
-                  />
-                ))}
-              </tbody>
-
-              <tfoot>
-                <tr
-                  style={{
-                    borderTop: '1px solid var(--border-color)',
-                    background: 'var(--surface-color, rgba(255,255,255,0.02))',
-                  }}
-                >
-                  <td colSpan={4} className="px-5 py-3 text-xs text-xinuco-muted">
-                    {rules.length} regla{rules.length !== 1 ? 's' : ''} configurada
-                    {rules.length !== 1 ? 's' : ''} · Propinas: 100% del barbero (excluidas del cálculo)
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* Sheet Panel */}
-      {sheetOpen && (
-        <CommissionRuleSheet
-          businessId={businessId}
+      {modal && (
+        <RuleModal
+          rule={modal.rule}
           staff={staff}
           services={services}
-          onClose={() => setSheetOpen(false)}
-          onSuccess={handleRuleCreated}
+          serviceLabel={serviceLabel}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); router.refresh() }}
         />
       )}
     </>
@@ -274,157 +139,559 @@ export function CommissionManager({
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// FILA DE LA TABLA — Una regla
+// SECCIÓN "GANADO EN EL PERÍODO"
 // ════════════════════════════════════════════════════════════════════════════
 
-function CommissionRuleRow({
-  rule,
-  onDelete,
+function EarningsSection({
+  summary,
+  range,
+  slug,
+  onApplied,
 }: {
-  rule:     CommissionRuleWithRelations
-  onDelete: (id: string) => void
+  summary:   CommissionSummaryRow[]
+  range:     { from: string; to: string }
+  slug:      string
+  onApplied: () => void
 }) {
-  const [menuOpen, setMenuOpen]           = useState(false)
-  const [isPendingDelete, startDelete]    = useTransition()
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [applyMsg, setApplyMsg] = useState<{ text: string; error: boolean } | null>(null)
+  const [isApplying, startApply] = useTransition()
 
-  const priority = getRulePriority(rule)
-  const label    = getRuleLabel(rule)
+  const totals = summary.reduce(
+    (acc, r) => ({
+      services: acc.services + r.services_amount,
+      count:    acc.count + r.services_count,
+      products: acc.products + r.products_amount,
+      tips:     acc.tips + r.tips_amount,
+      total:    acc.total + r.total,
+    }),
+    { services: 0, count: 0, products: 0, tips: 0, total: 0 },
+  )
 
-  function handleDelete() {
-    if (!confirmDelete) {
-      setConfirmDelete(true)
-      return
-    }
-    setMenuOpen(false)
-    startDelete(async () => {
-      const result = await deleteCommissionRule(rule.id)
-      if (!result.error) onDelete(rule.id)
+  function handleApply() {
+    setApplyMsg(null)
+    startApply(async () => {
+      const result = await applyPendingCommissions(range)
+      if ('error' in result) {
+        setApplyMsg({ text: result.error, error: true })
+        return
+      }
+      setApplyMsg({
+        text: result.entries > 0
+          ? `Se registraron ${result.entries} ${result.entries === 1 ? 'movimiento' : 'movimientos'} en ${result.sales} ${result.sales === 1 ? 'venta' : 'ventas'}.`
+          : 'No había ventas pendientes en este período.',
+        error: false,
+      })
+      onApplied()
     })
   }
 
   return (
-    <tr
-      className="transition-all duration-200 hover:bg-white/[0.02]"
-      style={{
-        borderTop: '1px solid var(--border-color)',
-        opacity:   isPendingDelete ? 0.4 : 1,
-      }}
-    >
-      {/* Alcance */}
-      <td className="px-5 py-4">
-        <div className="flex flex-col gap-1">
-          <span className="font-medium text-xinuco-text leading-tight text-sm">
-            {label}
-          </span>
-          {/* Badge en mobile (la columna Prioridad está oculta) */}
-          <span className="sm:hidden">
-            <PriorityBadge level={priority} />
-          </span>
-        </div>
-      </td>
+    <section aria-label="Ganado en el período" className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold text-xinuco-text">Ganado en el período</h2>
+        <PeriodBar range={range} />
+      </div>
 
-      {/* Prioridad — desktop */}
-      <td className="px-5 py-4 hidden sm:table-cell">
-        <PriorityBadge level={priority} />
-      </td>
-
-      {/* Comisión */}
-      <td className="px-5 py-4 text-center">
-        {rule.commission_percentage > 0 ? (
-          <span
-            className="inline-flex items-center gap-1 text-sm font-bold tabular-nums"
-            style={{ color: 'var(--primary-color)' }}
+      {summary.length === 0 ? (
+        <p
+          className="text-sm text-xinuco-muted rounded-xl px-5 py-8 text-center"
+          style={{ border: '1px dashed var(--border-color)' }}
+        >
+          Aún no hay comisiones en este período.
+        </p>
+      ) : (
+        <div
+          className="rounded-xl overflow-hidden animate-fade-in"
+          style={{ border: '1px solid var(--border-color)' }}
+        >
+          {/* Encabezado (solo escritorio) */}
+          <div
+            className="hidden sm:grid grid-cols-[1.4fr_1.2fr_1fr_1fr_1fr] gap-3 px-5 py-3 text-xs font-semibold text-xinuco-muted uppercase tracking-wider"
+            style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
           >
-            <Percent size={12} />
-            {rule.commission_percentage}%
-          </span>
-        ) : rule.fixed_amount > 0 ? (
-          <span
-            className="inline-flex items-center gap-1 text-sm font-bold tabular-nums"
-            style={{ color: 'var(--primary-color)' }}
-          >
-            <DollarSign size={12} />
-            {formatCOP(rule.fixed_amount)}
-          </span>
-        ) : (
-          <span className="text-xs text-xinuco-muted">Sin comisión</span>
-        )}
-      </td>
+            <span>Profesional</span>
+            <span className="text-right">Servicios</span>
+            <span className="text-right">Productos</span>
+            <span className="text-right">Propinas</span>
+            <span className="text-right">Total</span>
+          </div>
 
-      {/* Acciones */}
-      <td className="px-5 py-4 text-right">
-        <div className="relative inline-block">
-          <button
-            type="button"
-            onClick={() => { setMenuOpen(!menuOpen); setConfirmDelete(false) }}
-            disabled={isPendingDelete}
-            className="p-1.5 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors disabled:opacity-40"
-            aria-label={`Acciones para regla ${label}`}
-          >
-            {isPendingDelete ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <ChevronDown size={16} />
-            )}
-          </button>
+          {summary.map(row => (
+            <SummaryRow
+              key={row.staff_id}
+              name={row.staff_name}
+              servicesAmount={row.services_amount}
+              servicesCount={row.services_count}
+              productsAmount={row.products_amount}
+              tipsAmount={row.tips_amount}
+              total={row.total}
+            />
+          ))}
 
-          {menuOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => { setMenuOpen(false); setConfirmDelete(false) }} />
-              <div
-                className="absolute right-0 top-full mt-1 w-48 rounded-xl shadow-2xl z-20 py-1.5 overflow-hidden animate-fade-in origin-top-right"
-                style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}
-              >
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-xs font-medium hover:bg-white/[0.04] transition-colors text-left"
-                  style={{ color: confirmDelete ? '#f87171' : 'var(--text-color)' }}
-                >
-                  <Trash2
-                    size={13}
-                    className={confirmDelete ? 'text-red-400' : 'text-red-400/60'}
-                  />
-                  {confirmDelete ? 'Confirmar eliminación' : 'Eliminar regla'}
-                </button>
-              </div>
-            </>
+          {summary.length > 1 && (
+            <SummaryRow
+              name="Total"
+              servicesAmount={totals.services}
+              servicesCount={totals.count}
+              productsAmount={totals.products}
+              tipsAmount={totals.tips}
+              total={totals.total}
+              footer
+            />
           )}
         </div>
-      </td>
-    </tr>
+      )}
+
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            href={`/${slug}/dashboard/ledger`}
+            className="inline-flex items-center gap-1 text-sm font-medium hover:underline"
+            style={{ color: 'var(--primary-color)' }}
+          >
+            Ver cuentas y pagos →
+          </Link>
+
+          <button
+            type="button"
+            onClick={handleApply}
+            disabled={isApplying}
+            className="btn-ghost !px-4 !py-2 text-xs disabled:opacity-50"
+          >
+            {isApplying ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+            Aplicar reglas a ventas sin comisión
+          </button>
+        </div>
+
+        <p className="text-xs text-xinuco-muted sm:text-right">
+          Úsalo si creaste o cambiaste reglas después de cobrar. Lo ya registrado no cambia.
+        </p>
+
+        {applyMsg && (
+          <p
+            role="status"
+            className={`text-xs rounded-lg border px-4 py-2.5 animate-fade-in ${
+              applyMsg.error
+                ? 'text-red-400 bg-red-400/10 border-red-400/20'
+                : ''
+            }`}
+            style={applyMsg.error ? undefined : {
+              background:  'rgba(197,160,89,0.08)',
+              borderColor: 'rgba(197,160,89,0.2)',
+              color:       'var(--primary-color)',
+            }}
+          >
+            {applyMsg.text}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function SummaryRow({
+  name,
+  servicesAmount,
+  servicesCount,
+  productsAmount,
+  tipsAmount,
+  total,
+  footer = false,
+}: {
+  name:           string
+  servicesAmount: number
+  servicesCount:  number
+  productsAmount: number
+  tipsAmount:     number
+  total:          number
+  footer?:        boolean
+}) {
+  return (
+    <div
+      className="grid grid-cols-3 sm:grid-cols-[1.4fr_1.2fr_1fr_1fr_1fr] gap-x-3 gap-y-2 px-5 py-4 items-center"
+      style={{
+        borderTop:  '1px solid var(--border-color)',
+        background: footer ? 'var(--surface-color, rgba(255,255,255,0.02))' : undefined,
+      }}
+    >
+      {/* Nombre + total (en móvil comparten la primera línea) */}
+      <div className="col-span-2 sm:col-span-1 font-medium text-sm text-xinuco-text truncate">
+        {name}
+      </div>
+      <div className="sm:hidden text-right text-sm font-bold tabular-nums text-xinuco-text">
+        {formatCOP(total)}
+      </div>
+
+      <div className="sm:text-right flex flex-col">
+        <span className="sm:hidden text-[10px] uppercase tracking-wide text-xinuco-muted">Servicios</span>
+        <span className="text-sm tabular-nums text-xinuco-text">{formatCOP(servicesAmount)}</span>
+        <span className="text-[11px] text-xinuco-muted">
+          {servicesCount} {servicesCount === 1 ? 'servicio' : 'servicios'}
+        </span>
+      </div>
+      <div className="sm:text-right flex flex-col">
+        <span className="sm:hidden text-[10px] uppercase tracking-wide text-xinuco-muted">Productos</span>
+        <span className="text-sm tabular-nums text-xinuco-text">{formatCOP(productsAmount)}</span>
+      </div>
+      <div className="sm:text-right flex flex-col">
+        <span className="sm:hidden text-[10px] uppercase tracking-wide text-xinuco-muted">Propinas</span>
+        <span className="text-sm tabular-nums text-xinuco-text">{formatCOP(tipsAmount)}</span>
+      </div>
+      <div className="hidden sm:block text-right text-sm font-bold tabular-nums text-xinuco-text">
+        {formatCOP(total)}
+      </div>
+    </div>
+  )
+}
+
+// ── Barra de período (una línea, actualiza la URL) ───────────────────────────
+
+function PeriodBar({ range }: { range: { from: string; to: string } }) {
+  const router   = useRouter()
+  const pathname = usePathname()
+
+  const today = businessTodayISODate()
+  const month = thisMonthRange(today)
+  const prev  = lastMonthRange(today)
+
+  const active: 'month' | 'prev' | 'custom' =
+    range.from === month.from && range.to === month.to ? 'month'
+    : range.from === prev.from && range.to === prev.to ? 'prev'
+    : 'custom'
+
+  const [showRange, setShowRange] = useState(active === 'custom')
+  const [from, setFrom] = useState(range.from)
+  const [to, setTo]     = useState(range.to)
+  const [error, setError] = useState<string | null>(null)
+
+  // Mantener los inputs sincronizados si el rango cambia desde afuera
+  useEffect(() => { setFrom(range.from); setTo(range.to) }, [range.from, range.to])
+
+  function go(f: string, t: string) {
+    router.push(`${pathname}?from=${f}&to=${t}`, { scroll: false })
+  }
+
+  function pick(r: { from: string; to: string }) {
+    setError(null)
+    setShowRange(false)
+    go(r.from, r.to)
+  }
+
+  function onDates(nextFrom: string, nextTo: string) {
+    setFrom(nextFrom)
+    setTo(nextTo)
+    if (!nextFrom || !nextTo) return
+    if (nextFrom > nextTo) return setError('La fecha inicial no puede ser posterior a la final.')
+    if (daysBetween(nextFrom, nextTo) + 1 > MAX_RANGE_DAYS) {
+      return setError('El período no puede superar 366 días.')
+    }
+    setError(null)
+    go(nextFrom, nextTo)
+  }
+
+  const chip = (isActive: boolean) =>
+    `px-3.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+      isActive ? '' : 'text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.04]'
+    }`
+  const chipStyle = (isActive: boolean) =>
+    isActive
+      ? { background: 'var(--primary-color)', color: '#080808', borderColor: 'var(--primary-color)' }
+      : { borderColor: 'var(--border-color)' }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => pick(month)} className={chip(active === 'month')} style={chipStyle(active === 'month')}>
+          Este mes
+        </button>
+        <button type="button" onClick={() => pick(prev)} className={chip(active === 'prev')} style={chipStyle(active === 'prev')}>
+          Mes pasado
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowRange(v => !v)}
+          className={chip(active === 'custom')}
+          style={chipStyle(active === 'custom')}
+          aria-expanded={showRange}
+        >
+          Rango
+        </button>
+
+        {showRange && (
+          <div className="flex items-center gap-2 animate-fade-in">
+            <input
+              type="date"
+              aria-label="Desde"
+              value={from}
+              max={to || undefined}
+              onChange={e => onDates(e.target.value, to)}
+              className="input-base !w-auto !py-1.5 !px-3 text-xs"
+            />
+            <span className="text-xs text-xinuco-muted">a</span>
+            <input
+              type="date"
+              aria-label="Hasta"
+              value={to}
+              min={from || undefined}
+              onChange={e => onDates(from, e.target.value)}
+              className="input-base !w-auto !py-1.5 !px-3 text-xs"
+            />
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <p role="alert" className="text-xs text-red-400">{error}</p>
+      )}
+    </div>
   )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// SHEET PANEL — Crear nueva regla
+// SECCIÓN "REGLAS"
+// ════════════════════════════════════════════════════════════════════════════
+
+type RuleGroupKey = 'general' | 'service' | 'staff' | 'staff_service'
+
+const RULE_GROUPS: { key: RuleGroupKey; title: string }[] = [
+  { key: 'general',       title: 'General (todo el equipo)' },
+  { key: 'service',       title: 'Por servicio' },
+  { key: 'staff',         title: 'Por profesional' },
+  { key: 'staff_service', title: 'Profesional + servicio' },
+]
+
+function ruleGroupOf(rule: CommissionRuleWithRelations): RuleGroupKey {
+  if (!rule.staff_id && !rule.service_id) return 'general'
+  if (!rule.staff_id && rule.service_id)  return 'service'
+  if (rule.staff_id && !rule.service_id)  return 'staff'
+  return 'staff_service'
+}
+
+function RulesSection({
+  rules,
+  serviceLabel,
+  onNew,
+  onEdit,
+  onDeleted,
+}: {
+  rules:        CommissionRuleWithRelations[]
+  serviceLabel: (svc: { id: string; name: string } | null) => string
+  onNew:        () => void
+  onEdit:       (rule: CommissionRuleWithRelations) => void
+  onDeleted:    () => void
+}) {
+  const grouped = RULE_GROUPS
+    .map(g => ({ ...g, items: rules.filter(r => ruleGroupOf(r) === g.key) }))
+    .filter(g => g.items.length > 0)
+
+  return (
+    <section aria-label="Reglas de comisión" className="flex flex-col gap-4">
+      <h2 className="text-sm font-semibold text-xinuco-text">Reglas</h2>
+
+      {rules.length === 0 ? (
+        <AdminEmptyState
+          icon={Percent}
+          title="Aún no hay reglas"
+          description="Empieza con una regla general: por ejemplo 50% de cada servicio para todo el equipo. Después puedes afinar por servicio o por profesional."
+          actionLabel="Crear regla general"
+          onAction={onNew}
+        />
+      ) : (
+        <>
+          {grouped.map(g => (
+            <div key={g.key} className="flex flex-col gap-2">
+              <h3 className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
+                {g.title}
+              </h3>
+              <div
+                className="rounded-xl overflow-hidden"
+                style={{ border: '1px solid var(--border-color)' }}
+              >
+                {g.items.map((rule, i) => (
+                  <RuleRow
+                    key={rule.id}
+                    rule={rule}
+                    first={i === 0}
+                    serviceLabel={serviceLabel}
+                    onEdit={() => onEdit(rule)}
+                    onDeleted={onDeleted}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+
+          <p className="text-xs text-xinuco-muted">
+            Se aplica la regla más específica: profesional + servicio › servicio › profesional › general.
+          </p>
+        </>
+      )}
+    </section>
+  )
+}
+
+function RuleRow({
+  rule,
+  first,
+  serviceLabel,
+  onEdit,
+  onDeleted,
+}: {
+  rule:         CommissionRuleWithRelations
+  first:        boolean
+  serviceLabel: (svc: { id: string; name: string } | null) => string
+  onEdit:       () => void
+  onDeleted:    () => void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [isDeleting, startDelete] = useTransition()
+
+  const group = ruleGroupOf(rule)
+  const staffName = rule.staff?.full_name ?? 'Profesional'
+  const title =
+    group === 'general'       ? 'Todo el equipo, todos los servicios'
+    : group === 'service'     ? `${serviceLabel(rule.service)} (todo el equipo)`
+    : group === 'staff'       ? staffName
+    : `${staffName} — ${serviceLabel(rule.service)}`
+
+  const chips: string[] = []
+  if (rule.commission_percentage > 0) chips.push(`Servicios: ${rule.commission_percentage}%`)
+  else if (rule.fixed_amount > 0)     chips.push(`Servicios: ${formatCOP(rule.fixed_amount)} fijo`)
+  if (!rule.service_id && rule.product_percentage > 0) chips.push(`Productos: ${rule.product_percentage}%`)
+
+  function handleDelete() {
+    setError(null)
+    startDelete(async () => {
+      const result = await deleteCommissionRule(rule.id)
+      if (result.error) {
+        setError(result.error)
+        setConfirming(false)
+        return
+      }
+      onDeleted()
+    })
+  }
+
+  return (
+    <div
+      className="flex flex-col gap-2 px-5 py-3.5 transition-opacity"
+      style={{
+        borderTop: first ? undefined : '1px solid var(--border-color)',
+        opacity:   isDeleting ? 0.5 : 1,
+      }}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex flex-col gap-1.5 min-w-0">
+          <span className="text-sm font-medium text-xinuco-text truncate">{title}</span>
+          <div className="flex flex-wrap gap-1.5">
+            {chips.map(c => (
+              <span
+                key={c}
+                className="text-[11px] font-semibold px-2 py-0.5 rounded-full tabular-nums"
+                style={{
+                  color:      'var(--primary-color)',
+                  background: 'rgba(197,160,89,0.10)',
+                  border:     '1px solid rgba(197,160,89,0.2)',
+                }}
+              >
+                {c}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {confirming ? (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-xinuco-muted">¿Eliminar esta regla?</span>
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="px-3 py-1.5 rounded-lg font-medium text-red-400 border border-red-400/30 hover:bg-red-400/10 transition-colors disabled:opacity-50 inline-flex items-center gap-1.5"
+            >
+              {isDeleting && <Loader2 size={12} className="animate-spin" />}
+              Sí, eliminar
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              disabled={isDeleting}
+              className="px-3 py-1.5 rounded-lg text-xinuco-muted border hover:text-xinuco-text transition-colors"
+              style={{ borderColor: 'var(--border-color)' }}
+            >
+              Cancelar
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={onEdit}
+              className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+              aria-label={`Editar regla: ${title}`}
+              title="Editar"
+            >
+              <Pencil size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className="p-2 rounded-lg text-red-400/70 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+              aria-label={`Eliminar regla: ${title}`}
+              title="Eliminar"
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <p role="alert" className="text-xs text-red-400">{error}</p>
+      )}
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MODAL — Crear / editar regla
 // ════════════════════════════════════════════════════════════════════════════
 
 type CommissionMode = 'percentage' | 'fixed'
 
-function CommissionRuleSheet({
-  businessId,
+function RuleModal({
+  rule,
   staff,
   services,
+  serviceLabel,
   onClose,
-  onSuccess,
+  onSaved,
 }: {
-  businessId: string
-  staff:      Pick<Staff, 'id' | 'full_name' | 'specialty_role' | 'is_active'>[]
-  services:   Service[]
-  onClose:    () => void
-  onSuccess:  (rule: CommissionRuleWithRelations) => void
+  rule:         CommissionRuleWithRelations | null
+  staff:        { id: string; full_name: string }[]
+  services:     ServiceOption[]
+  serviceLabel: (svc: { id: string; name: string } | null) => string
+  onClose:      () => void
+  onSaved:      () => void
 }) {
   const backdropRef = useRef<HTMLDivElement>(null)
+  const isEdit = rule !== null
 
-  const [selectedStaffId,   setSelectedStaffId]   = useState<string>('')
-  const [selectedServiceId, setSelectedServiceId] = useState<string>('')
-  const [mode,              setMode]              = useState<CommissionMode>('percentage')
-  const [percentage,        setPercentage]        = useState<string>('')
-  const [fixedAmount,       setFixedAmount]       = useState<string>('')
-  const [formError,         setFormError]         = useState<string | null>(null)
-  const [isPending,         startTransition]      = useTransition()
+  const [staffId,   setStaffId]   = useState<string>(rule?.staff_id ?? '')
+  const [serviceId, setServiceId] = useState<string>(rule?.service_id ?? '')
+  const [mode, setMode] = useState<CommissionMode>(
+    rule && rule.commission_percentage === 0 && rule.fixed_amount > 0 ? 'fixed' : 'percentage',
+  )
+  const [value, setValue] = useState<string>(() => {
+    if (!rule) return ''
+    if (rule.commission_percentage > 0) return String(rule.commission_percentage)
+    if (rule.fixed_amount > 0)          return String(rule.fixed_amount)
+    return ''
+  })
+  const [productPct, setProductPct] = useState<string>(String(rule?.product_percentage ?? 0))
+  const [formError, setFormError]   = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
 
   // Cerrar con ESC
   useEffect(() => {
@@ -439,93 +706,101 @@ function CommissionRuleSheet({
     return () => { document.body.style.overflow = '' }
   }, [])
 
-  // Reset del campo contrario al cambiar de modo
-  function handleModeChange(newMode: CommissionMode) {
-    setMode(newMode)
-    if (newMode === 'percentage') setFixedAmount('')
-    else                          setPercentage('')
+  const allServices = serviceId === ''
+  const valueNum = value.trim() === '' ? 0 : Number(value)
+
+  function changeMode(next: CommissionMode) {
+    setMode(next)
+    setValue('')
     setFormError(null)
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function changeService(next: string) {
+    setServiceId(next)
+    // El % de productos solo aplica a reglas sin servicio específico
+    if (next !== '') setProductPct('0')
+    setFormError(null)
+  }
+
+  // Validación de cliente: refleja la del servidor
+  function validate(): { input: CommissionRuleInput } | { error: string } {
+    const pp = productPct.trim() === '' ? 0 : Number(productPct)
+    if (!Number.isInteger(valueNum) || valueNum < 0) {
+      return { error: 'El valor de la comisión debe ser un número entero.' }
+    }
+    if (!Number.isInteger(pp) || pp < 0 || pp > 100) {
+      return { error: 'El porcentaje de productos debe ser un número entero entre 0 y 100.' }
+    }
+    if (serviceId && pp > 0) {
+      return { error: 'El % de productos solo aplica a reglas sin servicio específico.' }
+    }
+    if (valueNum === 0) {
+      if (!(allServices && pp > 0)) {
+        return { error: 'Define una comisión por servicio o por productos mayor a 0.' }
+      }
+    } else if (mode === 'percentage' && valueNum > 100) {
+      return { error: 'El porcentaje debe estar entre 1 y 100.' }
+    } else if (mode === 'fixed' && valueNum > 10_000_000) {
+      return { error: 'El monto fijo no puede superar $10.000.000.' }
+    }
+    return {
+      input: {
+        staff_id:           staffId || null,
+        service_id:         serviceId || null,
+        mode,
+        value:              valueNum,
+        product_percentage: pp,
+      },
+    }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setFormError(null)
 
-    const pct   = mode === 'percentage' ? parseInt(percentage,  10) || 0 : 0
-    const fixed = mode === 'fixed'      ? parseInt(fixedAmount, 10) || 0 : 0
-
-    if (pct === 0 && fixed === 0) {
-      return setFormError('Ingresa un porcentaje o un monto fijo mayor a 0.')
-    }
-    if (mode === 'percentage' && (pct < 1 || pct > 100)) {
-      return setFormError('El porcentaje debe estar entre 1 y 100.')
-    }
-    if (mode === 'fixed' && fixed < 1) {
-      return setFormError('El monto fijo debe ser mayor a $0 COP.')
-    }
+    const v = validate()
+    if ('error' in v) return setFormError(v.error)
 
     startTransition(async () => {
       try {
-        const result = await createCommissionRule(businessId, {
-          staff_id:              selectedStaffId   || null,
-          service_id:            selectedServiceId || null,
-          commission_percentage: pct,
-          fixed_amount:          fixed,
-        })
-
+        const result = rule
+          ? await updateCommissionRule(rule.id, v.input)
+          : await createCommissionRule(v.input)
         if (result.error) {
           setFormError(result.error)
           return
         }
-
-        // Construir el objeto enriquecido para actualizar la UI local
-        const staffObj   = staff.find(s => s.id === selectedStaffId)   ?? null
-        const serviceObj = services.find(s => s.id === selectedServiceId) ?? null
-
-        const mockRule: CommissionRuleWithRelations = {
-          id:                    crypto.randomUUID(),
-          business_id:           businessId,
-          staff_id:              selectedStaffId   || null,
-          service_id:            selectedServiceId || null,
-          commission_percentage: pct,
-          fixed_amount:          fixed,
-          created_at:            new Date().toISOString(),
-          staff:   staffObj   ? { id: staffObj.id,   full_name: staffObj.full_name }   : null,
-          service: serviceObj ? { id: serviceObj.id, name: serviceObj.name } : null,
-        }
-
-        onSuccess(mockRule)
+        onSaved()
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Error inesperado. Intenta de nuevo.'
-        setFormError(message)
+        setFormError(err instanceof Error ? err.message : 'Error inesperado. Intenta de nuevo.')
       }
     })
   }
 
-  // Label descriptivo del alcance mientras el usuario configura
-  function getScopePreview(): string {
-    const sName = staff.find(s => s.id === selectedStaffId)?.full_name
-    const svName = services.find(s => s.id === selectedServiceId)?.name
-    if (!selectedStaffId && !selectedServiceId) return 'Regla Global del Negocio'
-    if (selectedStaffId && !selectedServiceId)  return `Todas las citas de ${sName}`
-    if (selectedStaffId && selectedServiceId)   return `${sName} — ${svName}`
-    return 'Alcance no válido'
-  }
+  // Resumen del alcance mientras se configura
+  const staffName = staff.find(s => s.id === staffId)?.full_name ?? 'Profesional'
+  const svc = services.find(s => s.id === serviceId) ?? null
+  const scopePreview =
+    !staffId && !serviceId ? 'Regla general: todo el equipo, todos los servicios'
+    : !staffId ? `${serviceLabel(svc)} · todo el equipo`
+    : !serviceId ? `${staffName} · todos los servicios`
+    : `${staffName} · ${serviceLabel(svc)}`
+
+  const labelCls = 'text-xs font-semibold text-xinuco-muted uppercase tracking-wider'
 
   return (
     <div
       ref={backdropRef}
-      className="fixed inset-0 z-50 flex justify-end"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
       style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => { if (e.target === backdropRef.current) onClose() }}
+      onClick={e => { if (e.target === backdropRef.current) onClose() }}
     >
-      {/* Panel Sheet */}
       <div
-        className="h-full overflow-y-auto animate-slide-in-right w-[95vw] sm:w-[420px]"
-        style={{
-          background: 'var(--bg-color)',
-          borderLeft: '1px solid var(--border-color)',
-        }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rule-modal-title"
+        className="w-full sm:max-w-md max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl animate-fade-in"
+        style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}
       >
         {/* Header */}
         <div
@@ -533,191 +808,150 @@ function CommissionRuleSheet({
           style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-color)' }}
         >
           <div>
-            <h2 className="text-lg font-bold text-xinuco-text">Nueva Regla</h2>
+            <h2 id="rule-modal-title" className="text-lg font-bold text-xinuco-text">
+              {isEdit ? 'Editar regla' : 'Nueva regla'}
+            </h2>
             <p className="text-xs text-xinuco-muted mt-0.5">
-              Define el alcance y el monto de comisión.
+              Define a quién aplica y cuánto gana.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
-            aria-label="Cerrar panel"
+            aria-label="Cerrar"
           >
             <X size={20} />
           </button>
         </div>
 
-        {/* Formulario */}
         <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-5">
-
-          {/* Preview del alcance */}
           <div
             className="px-4 py-3 rounded-xl text-xs font-medium"
             style={{
-              background:  'rgba(197,160,89,0.07)',
-              border:      '1px solid rgba(197,160,89,0.15)',
-              color:       'var(--primary-color)',
+              background: 'rgba(197,160,89,0.07)',
+              border:     '1px solid rgba(197,160,89,0.15)',
+              color:      'var(--primary-color)',
             }}
           >
-            {getScopePreview()}
+            {scopePreview}
           </div>
 
-          {/* Select Barbero */}
+          {/* Profesional */}
           <div className="flex flex-col gap-2">
-            <label
-              htmlFor="cr-staff"
-              className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider"
-            >
-              Barbero <span className="normal-case font-normal">(opcional)</span>
-            </label>
+            <label htmlFor="cr-staff" className={labelCls}>Profesional</label>
             <select
               id="cr-staff"
-              value={selectedStaffId}
-              onChange={e => setSelectedStaffId(e.target.value)}
+              value={staffId}
+              onChange={e => { setStaffId(e.target.value); setFormError(null) }}
               className="input-base"
             >
-              <option value="">Todos los barberos</option>
+              <option value="">Todo el equipo</option>
               {staff.map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.full_name}
-                </option>
+                <option key={s.id} value={s.id}>{s.full_name}</option>
               ))}
             </select>
-            <p className="text-xs text-xinuco-muted">
-              Deja en &quot;Todos&quot; para crear una regla global del negocio.
-            </p>
           </div>
 
-          {/* Select Servicio */}
+          {/* Servicio */}
           <div className="flex flex-col gap-2">
-            <label
-              htmlFor="cr-service"
-              className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider"
-            >
-              Servicio <span className="normal-case font-normal">(opcional)</span>
-            </label>
+            <label htmlFor="cr-service" className={labelCls}>Servicio</label>
             <select
               id="cr-service"
-              value={selectedServiceId}
-              onChange={e => setSelectedServiceId(e.target.value)}
+              value={serviceId}
+              onChange={e => changeService(e.target.value)}
               className="input-base"
             >
               <option value="">Todos los servicios</option>
-              {services.map(sv => (
-                <option key={sv.id} value={sv.id}>
-                  {sv.name}
-                </option>
+              {services.map(s => (
+                <option key={s.id} value={s.id}>{serviceLabel(s)}</option>
               ))}
             </select>
-            <p className="text-xs text-xinuco-muted">
-              Deja en &quot;Todos&quot; para aplicar a cualquier servicio del barbero.
-            </p>
           </div>
 
-          {/* Separador */}
           <div style={{ borderTop: '1px solid var(--border-color)' }} />
 
-          {/* Radio toggle: Porcentaje / Monto Fijo */}
+          {/* Comisión por servicio */}
           <div className="flex flex-col gap-3">
-            <p className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-              Tipo de comisión
-            </p>
+            <p className={labelCls}>Comisión por servicio</p>
             <div
               className="grid grid-cols-2 gap-1 p-1 rounded-xl"
               style={{ background: 'rgba(255,255,255,0.04)' }}
             >
-              <button
-                type="button"
-                onClick={() => handleModeChange('percentage')}
-                className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all duration-200"
-                style={{
-                  background: mode === 'percentage' ? 'var(--primary-color)' : 'transparent',
-                  color:      mode === 'percentage' ? '#080808' : 'var(--text-color)',
-                }}
-              >
-                <Percent size={14} />
-                Porcentaje
-              </button>
-              <button
-                type="button"
-                onClick={() => handleModeChange('fixed')}
-                className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all duration-200"
-                style={{
-                  background: mode === 'fixed' ? 'var(--primary-color)' : 'transparent',
-                  color:      mode === 'fixed' ? '#080808' : 'var(--text-color)',
-                }}
-              >
-                <DollarSign size={14} />
-                Monto Fijo
-              </button>
+              {([
+                ['percentage', 'Porcentaje', Percent],
+                ['fixed',      'Monto fijo', DollarSign],
+              ] as const).map(([m, label, Icon]) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => changeMode(m)}
+                  className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all duration-200"
+                  style={{
+                    background: mode === m ? 'var(--primary-color)' : 'transparent',
+                    color:      mode === m ? '#080808' : 'var(--text-color)',
+                  }}
+                >
+                  <Icon size={14} />
+                  {label}
+                </button>
+              ))}
             </div>
+
+            <div className="relative">
+              {mode === 'fixed' && (
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-xinuco-muted pointer-events-none">$</span>
+              )}
+              <input
+                id="cr-value"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={mode === 'percentage' ? 100 : 10_000_000}
+                step={mode === 'percentage' ? 1 : 500}
+                value={value}
+                onChange={e => setValue(e.target.value)}
+                placeholder={mode === 'percentage' ? 'Ej: 50' : 'Ej: 5000'}
+                aria-label={mode === 'percentage' ? 'Porcentaje por servicio' : 'Monto fijo por servicio'}
+                className={`input-base ${mode === 'fixed' ? 'pl-7' : 'pr-10'}`}
+                autoFocus
+              />
+              {mode === 'percentage' && (
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-xinuco-muted pointer-events-none">%</span>
+              )}
+            </div>
+            <p className="text-xs text-xinuco-muted">
+              {mode === 'percentage'
+                ? 'Sobre el valor del servicio después del descuento. La propina es 100% del profesional.'
+                : `Se paga por cada servicio realizado${valueNum > 0 ? ` (${formatCOP(valueNum)})` : ''}.`}
+            </p>
           </div>
 
-          {/* Input según modo */}
-          {mode === 'percentage' ? (
+          {/* Comisión por productos (solo con "Todos los servicios") */}
+          {allServices && (
             <div className="flex flex-col gap-2">
-              <label
-                htmlFor="cr-pct"
-                className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider"
-              >
-                Porcentaje de comisión *
-              </label>
+              <label htmlFor="cr-products" className={labelCls}>Comisión por productos (%)</label>
               <div className="relative">
                 <input
-                  id="cr-pct"
+                  id="cr-products"
                   type="number"
                   inputMode="numeric"
-                  min={1}
+                  min={0}
                   max={100}
-                  value={percentage}
-                  onChange={e => setPercentage(e.target.value)}
-                  placeholder="Ej: 40"
-                  required
-                  autoFocus
+                  step={1}
+                  value={productPct}
+                  onChange={e => setProductPct(e.target.value)}
+                  placeholder="0"
                   className="input-base pr-10"
                 />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-xinuco-muted pointer-events-none">
-                  %
-                </span>
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-xinuco-muted pointer-events-none">%</span>
               </div>
               <p className="text-xs text-xinuco-muted">
-                Sobre el subtotal después del descuento. Propinas no incluidas.
-              </p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="cr-fixed"
-                className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider"
-              >
-                Monto fijo COP *
-              </label>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-xinuco-muted pointer-events-none">
-                  $
-                </span>
-                <input
-                  id="cr-fixed"
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  step={1000}
-                  value={fixedAmount}
-                  onChange={e => setFixedAmount(e.target.value)}
-                  placeholder="Ej: 15000"
-                  required
-                  autoFocus
-                  className="input-base pl-7"
-                />
-              </div>
-              <p className="text-xs text-xinuco-muted">
-                Monto fijo en COP entero (ej: 15000 = $15.000). Se aplica por cita completada.
+                Lo que gana el profesional al vender un producto. Déjalo en 0 si no aplica.
               </p>
             </div>
           )}
 
-          {/* Error */}
           {formError && (
             <p
               role="alert"
@@ -727,7 +961,6 @@ function CommissionRuleSheet({
             </p>
           )}
 
-          {/* Botones */}
           <div className="flex gap-3 pt-2">
             <button
               type="button"
@@ -748,21 +981,10 @@ function CommissionRuleSheet({
                   Guardando…
                 </>
               ) : (
-                <>
-                  <Plus size={15} />
-                  Guardar Regla
-                </>
+                isEdit ? 'Guardar cambios' : 'Guardar regla'
               )}
             </button>
           </div>
-
-          {/* Nota sobre propinas */}
-          <p
-            className="text-[11px] text-xinuco-muted text-center px-2"
-            style={{ lineHeight: '1.5' }}
-          >
-            Las propinas son 100% del barbero y no entran al cálculo de comisiones.
-          </p>
         </form>
       </div>
     </div>

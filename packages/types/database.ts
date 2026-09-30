@@ -680,6 +680,7 @@ export interface CommissionRule {
   service_id:            string | null   // null = aplica a todos los servicios
   commission_percentage: number          // INTEGER: ej. 40 = 40%
   fixed_amount:          number          // INTEGER COP — alternativa al porcentaje
+  product_percentage:    number          // INTEGER 0–100: % sobre productos vendidos (solo reglas sin servicio)
   created_at:            string
 }
 
@@ -705,6 +706,8 @@ export interface StaffLedgerEntry {
   notes:        string | null
   reference_id: string | null   // UUID → appointments.id o sales.id
   created_at:   string
+  sale_id?:      string | null  // UUID → sales.id (comisiones/propinas automáticas)
+  sale_item_id?: string | null  // UUID → sale_items.id (una comisión por línea)
 }
 
 // Vista: staff_ledger_balances — saldo acumulado por empleado
