@@ -252,7 +252,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
           products: selectedProducts.map(({ item_id, quantity }) => ({ item_id, quantity })),
         })
 
-        if (res.error) {
+        if ('error' in res && res.error) {
           if (res.error === 'collision') {
             setError('¡Uy! Alguien se te adelantó. Este horario acaba de ser ocupado.')
             dispatch({ type: 'RESET_FROM_COLLISION' })

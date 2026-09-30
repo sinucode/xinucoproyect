@@ -965,6 +965,12 @@ export interface InventoryMovement {
   notes:         string | null
   created_by:    string | null
   created_at:    string
+  // Compras con costo (migración 20260930140000) — opcionales: filas antiguas no los tienen
+  unit_cost?:      number | null   // INTEGER COP
+  total_cost?:     number | null   // INTEGER COP
+  supplier?:       string | null
+  payment_method?: 'cash_register' | 'transfer' | 'other' | null
+  shift_id?:       string | null
 }
 
 export interface InventoryMovementResult {

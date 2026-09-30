@@ -6,46 +6,29 @@ import { useRouter } from 'next/navigation'
 import {
   Package,
   Plus,
-  X,
   Search,
   AlertTriangle,
-  ArrowUpCircle,
-  ArrowDownCircle,
+  ArrowDownToLine,
+  ClipboardCheck,
+  Trash2,
+  History,
+  Pencil,
+  PowerOff,
   Loader2,
   MoreVertical,
   ChevronDown,
   Globe,
   CalendarClock,
 } from 'lucide-react'
-import {
-  createInventoryItem,
-  updateInventoryItem,
-  deactivateInventoryItem,
-  recordMovement,
-} from '@/actions/inventory'
-import type {
-  InventoryItem,
-  InventoryCategory,
-  MovementType,
-} from '@xinuco/types'
+import { deactivateInventoryItem } from '@/actions/inventory'
+import { INVENTORY_CATEGORIES } from '@/lib/inventory-utils'
+import type { InventoryItem, InventoryCategory } from '@xinuco/types'
 import { formatApptTime, apptDateKey, dayLabel, businessTodayISODate } from '@/lib/agenda-time'
 import { reservedByItem, reservationsForItem, type InventoryReservation } from '@/lib/inventory-reservations'
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-function formatCOP(n: number): string {
-  return '$' + n.toLocaleString('es-CO')
-}
-
-const CATEGORY_LABELS: Record<InventoryCategory, string> = {
-  general:  'General',
-  hair:     'Cabello',
-  skincare: 'Skincare',
-  tools:    'Herramientas',
-  other:    'Otro',
-}
-
-const ALL_CATEGORIES: InventoryCategory[] = ['general', 'hair', 'skincare', 'tools', 'other']
+import { formatCOP } from './SidePanel'
+import { ItemSheet, CATEGORY_LABELS } from './ItemSheet'
+import { PurchaseSheet, CountSheet, WasteSheet } from './StockSheets'
+import { MovementHistorySheet } from './MovementHistorySheet'
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -53,9 +36,11 @@ interface InventoryManagerProps {
   items:          InventoryItem[]
   lowStockItems:  InventoryItem[]
   reservations:   InventoryReservation[]
-  businessId:     string
-  slug:           string
+  /** Hay un turno de caja abierto (habilita pagar compras con el efectivo de la caja). */
+  hasOpenShift:   boolean
 }
+
+type PanelAction = 'purchase' | 'count' | 'waste' | 'history' | 'edit'
 
 /** "Hoy 10:30 a. m." — hora del negocio (start_time guarda hora local como UTC). */
 function reservationWhen(iso: string): string {
@@ -114,170 +99,19 @@ function CategoryBadge({ category }: { category: InventoryCategory }) {
   )
 }
 
-// ── Movement Form (inline) ─────────────────────────────────────────────────────
-
-interface MovementFormProps {
-  item:          InventoryItem
-  direction:     'in' | 'out'
-  businessId:    string
-  slug:          string
-  onClose:       () => void
-  onSuccess:     () => void
-}
-
-function MovementForm({ item, direction, businessId, slug, onClose, onSuccess }: MovementFormProps) {
-  const [qty, setQty]       = useState('')
-  const [type, setType]     = useState<MovementType>(direction === 'in' ? 'purchase' : 'sale')
-  const [notes, setNotes]   = useState('')
-  const [error, setError]   = useState<string | null>(null)
-  const [isPending, startTransition] = useTransition()
-
-  const inTypes:  MovementType[] = ['purchase', 'adjustment']
-  const outTypes: MovementType[] = ['sale', 'waste', 'adjustment']
-  const typeOptions = direction === 'in' ? inTypes : outTypes
-
-  const typeLabels: Record<MovementType, string> = {
-    purchase:   'Compra',
-    sale:       'Venta',
-    adjustment: 'Ajuste',
-    waste:      'Merma',
-  }
-
-  const inputCls   = 'w-full rounded-lg px-3 py-2 text-sm border outline-none transition-colors placeholder-zinc-600'
-  const inputStyle = {
-    backgroundColor: 'var(--bg-color)',
-    borderColor:     'var(--border-color)',
-    color:           'var(--text-color, #F4F4F4)',
-  }
-
-  const handleConfirm = () => {
-    setError(null)
-    const quantity = Math.floor(Number(qty))
-    if (!qty || quantity <= 0) {
-      setError('La cantidad debe ser un entero mayor a 0.')
-      return
-    }
-    const finalQty = direction === 'out' ? -quantity : quantity
-
-    startTransition(async () => {
-      const result = await recordMovement(businessId, item.id, finalQty, type, notes.trim() || null, slug)
-      if (result.error) {
-        setError(result.error)
-      } else {
-        onSuccess()
-        onClose()
-      }
-    })
-  }
-
-  return (
-    <div
-      className="mt-2 rounded-xl p-4 border flex flex-col gap-3"
-      style={{ backgroundColor: '#0D0D0D', borderColor: 'var(--border-color)' }}
-    >
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-zinc-300">
-          {direction === 'in' ? 'Registrar entrada' : 'Registrar salida'}
-        </span>
-        <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 transition-colors">
-          <X size={14} />
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        {/* Cantidad */}
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-            Cantidad
-          </label>
-          <input
-            type="number"
-            min={1}
-            step={1}
-            className={inputCls}
-            style={inputStyle}
-            placeholder="0"
-            value={qty}
-            onChange={(e) => setQty(e.target.value)}
-            autoFocus
-          />
-        </div>
-
-        {/* Tipo */}
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-            Tipo
-          </label>
-          <select
-            className={inputCls}
-            style={inputStyle}
-            value={type}
-            onChange={(e) => setType(e.target.value as MovementType)}
-          >
-            {typeOptions.map((t) => (
-              <option key={t} value={t}>{typeLabels[t]}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Notas */}
-      <div className="flex flex-col gap-1">
-        <label className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-          Notas <span className="text-zinc-700 font-normal normal-case">(opcional)</span>
-        </label>
-        <input
-          className={inputCls}
-          style={inputStyle}
-          placeholder="Observaciones..."
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-        />
-      </div>
-
-      {error && (
-        <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
-      )}
-
-      <div className="flex gap-2 justify-end">
-        <button
-          onClick={onClose}
-          className="text-xs px-3 py-1.5 rounded-lg border text-zinc-400 hover:text-zinc-200 transition-colors"
-          style={{ borderColor: 'var(--border-color)' }}
-        >
-          Cancelar
-        </button>
-        <button
-          onClick={handleConfirm}
-          disabled={isPending}
-          className="text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all disabled:opacity-50"
-          style={{ backgroundColor: 'var(--primary-color)', color: '#080808' }}
-        >
-          {isPending ? <Loader2 size={11} className="animate-spin" /> : null}
-          Confirmar
-        </button>
-      </div>
-    </div>
-  )
-}
-
 // ── Item Row ──────────────────────────────────────────────────────────────────
 
 interface ItemRowProps {
   item:             InventoryItem
   reservations:     InventoryReservation[]
-  businessId:       string
-  slug:             string
-  onEdit:           (item: InventoryItem) => void
+  onAction:         (action: PanelAction, item: InventoryItem) => void
   onDeactivate:     (itemId: string) => void
   isDeactivating:   boolean
 }
 
-function ItemRow({ item, reservations, businessId, slug, onEdit, onDeactivate, isDeactivating }: ItemRowProps) {
-  const router                            = useRouter()
+function ItemRow({ item, reservations, onAction, onDeactivate, isDeactivating }: ItemRowProps) {
   const [menuOpen, setMenuOpen]           = useState(false)
   const [confirmDrop, setConfirmDrop]     = useState(false)
-  const [movement, setMovement]           = useState<'in' | 'out' | null>(null)
   const [showReserved, setShowReserved]   = useState(false)
 
   const isLow = item.current_stock < item.min_stock
@@ -285,6 +119,9 @@ function ItemRow({ item, reservations, businessId, slug, onEdit, onDeactivate, i
   const reservedTooltip = reservations
     .map((r) => `${r.customer_name ?? 'Cliente'} — ${reservationWhen(r.start_time)} (${r.quantity})`)
     .join('\n')
+
+  const menuItemCls = 'w-full flex items-center gap-2.5 text-left text-sm px-4 py-2.5 hover:bg-white/[0.05] transition-colors text-zinc-200'
+  const pick = (action: PanelAction) => { setMenuOpen(false); onAction(action, item) }
 
   return (
     <div
@@ -328,9 +165,14 @@ function ItemRow({ item, reservations, businessId, slug, onEdit, onDeactivate, i
             )}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {item.unit_price && (
+            {item.unit_price ? (
               <span className="text-[11px] text-zinc-500">{formatCOP(item.unit_price)}</span>
-            )}
+            ) : null}
+            {item.unit_cost ? (
+              <span className="text-[11px] text-zinc-600" title="Costo promedio">
+                Costo {formatCOP(item.unit_cost)}
+              </span>
+            ) : null}
             {reservedQty > 0 && (
               <button
                 type="button"
@@ -354,24 +196,20 @@ function ItemRow({ item, reservations, businessId, slug, onEdit, onDeactivate, i
         {/* Actions */}
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
-            onClick={() => setMovement(movement === 'in' ? null : 'in')}
-            title="Entrada de stock"
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-emerald-400 hover:bg-emerald-400/10 transition-colors"
+            onClick={() => onAction('purchase', item)}
+            title="Registrar compra"
+            className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-emerald-400/10 transition-colors"
           >
-            <ArrowUpCircle size={16} />
-          </button>
-          <button
-            onClick={() => setMovement(movement === 'out' ? null : 'out')}
-            title="Salida de stock"
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-colors"
-          >
-            <ArrowDownCircle size={16} />
+            <ArrowDownToLine size={15} />
+            <span className="hidden sm:inline">Compra</span>
           </button>
 
           {/* 3-dot menu */}
           <div className="relative">
             <button
               onClick={() => setMenuOpen((v) => !v)}
+              aria-label="Más acciones"
+              aria-expanded={menuOpen}
               className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.05] transition-colors"
             >
               <MoreVertical size={15} />
@@ -380,20 +218,30 @@ function ItemRow({ item, reservations, businessId, slug, onEdit, onDeactivate, i
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
                 <div
-                  className="absolute right-0 top-8 z-20 rounded-xl shadow-xl border min-w-[140px] overflow-hidden"
+                  className="absolute right-0 top-8 z-20 rounded-xl shadow-xl border min-w-[190px] overflow-hidden"
                   style={{ backgroundColor: '#1A1A1A', borderColor: 'var(--border-color)' }}
                 >
-                  <button
-                    onClick={() => { setMenuOpen(false); onEdit(item) }}
-                    className="w-full text-left text-sm px-4 py-2.5 hover:bg-white/[0.05] transition-colors text-zinc-200"
-                  >
-                    Editar
+                  <button onClick={() => pick('purchase')} className={menuItemCls}>
+                    <ArrowDownToLine size={14} className="text-zinc-500" /> Registrar compra
+                  </button>
+                  <button onClick={() => pick('count')} className={menuItemCls}>
+                    <ClipboardCheck size={14} className="text-zinc-500" /> Conteo físico
+                  </button>
+                  <button onClick={() => pick('waste')} className={menuItemCls}>
+                    <Trash2 size={14} className="text-zinc-500" /> Merma
+                  </button>
+                  <button onClick={() => pick('history')} className={menuItemCls}>
+                    <History size={14} className="text-zinc-500" /> Historial
+                  </button>
+                  <div className="border-t" style={{ borderColor: 'var(--border-color)' }} />
+                  <button onClick={() => pick('edit')} className={menuItemCls}>
+                    <Pencil size={14} className="text-zinc-500" /> Editar
                   </button>
                   <button
                     onClick={() => { setMenuOpen(false); setConfirmDrop(true) }}
-                    className="w-full text-left text-sm px-4 py-2.5 hover:bg-red-500/10 text-red-400 transition-colors"
+                    className="w-full flex items-center gap-2.5 text-left text-sm px-4 py-2.5 hover:bg-red-500/10 text-red-400 transition-colors"
                   >
-                    Desactivar
+                    <PowerOff size={14} /> Desactivar
                   </button>
                 </div>
               </>
@@ -427,19 +275,6 @@ function ItemRow({ item, reservations, businessId, slug, onEdit, onDeactivate, i
         </ul>
       )}
 
-      {/* Movement form */}
-      {movement && (
-        <div className="px-4 pb-4">
-          <MovementForm
-            item={item}
-            direction={movement}
-            businessId={businessId}
-            slug={slug}
-            onClose={() => setMovement(null)}
-            onSuccess={() => { router.refresh() }}
-          />
-        </div>
-      )}
 
       {/* Confirm deactivation */}
       {confirmDrop && (
@@ -469,378 +304,25 @@ function ItemRow({ item, reservations, businessId, slug, onEdit, onDeactivate, i
   )
 }
 
-// ── Item Sheet (Add / Edit) ───────────────────────────────────────────────────
 
-interface ItemSheetProps {
-  businessId: string
-  slug:       string
-  editItem:   InventoryItem | null
-  onClose:    () => void
-  onSuccess:  () => void
-}
-
-interface ItemFormState {
-  name:          string
-  sku:           string
-  category:      InventoryCategory
-  description:   string
-  current_stock: string
-  min_stock:     string
-  unit_price:    string
-  unit_cost:     string
-  bookable_online: boolean
-}
-
-const EMPTY_FORM: ItemFormState = {
-  name:          '',
-  sku:           '',
-  category:      'general',
-  description:   '',
-  current_stock: '0',
-  min_stock:     '0',
-  unit_price:    '',
-  unit_cost:     '',
-  bookable_online: false,
-}
-
-function itemToFormState(item: InventoryItem): ItemFormState {
-  return {
-    name:          item.name,
-    sku:           item.sku           ?? '',
-    category:      item.category,
-    description:   item.description   ?? '',
-    current_stock: String(item.current_stock),
-    min_stock:     String(item.min_stock),
-    unit_price:    item.unit_price !== null ? String(item.unit_price) : '',
-    unit_cost:     item.unit_cost  !== null ? String(item.unit_cost)  : '',
-    bookable_online: item.bookable_online ?? false,
-  }
-}
-
-function ItemSheet({ businessId, slug, editItem, onClose, onSuccess }: ItemSheetProps) {
-  const [form, setForm]               = useState<ItemFormState>(
-    editItem ? itemToFormState(editItem) : EMPTY_FORM
-  )
-  const [error, setError]             = useState<string | null>(null)
-  const [isPending, startTransition]  = useTransition()
-  const formRef                       = React.useRef<HTMLFormElement>(null)
-
-  const inputCls =
-    'w-full rounded-xl px-3 py-2.5 text-sm border outline-none transition-colors placeholder-zinc-600'
-  const inputStyle = {
-    backgroundColor: 'var(--bg-color)',
-    borderColor:     'var(--border-color)',
-    color:           'var(--text-color, #F4F4F4)',
-  }
-  const labelCls = 'text-xs font-semibold text-zinc-500 uppercase tracking-wide'
-
-  const set = (key: keyof ItemFormState) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-      setForm((p) => ({ ...p, [key]: e.target.value }))
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    setError(null)
-
-    const current_stock = Math.floor(Number(form.current_stock))
-    const min_stock     = Math.floor(Number(form.min_stock))
-    const unit_price    = form.unit_price ? Math.floor(Number(form.unit_price)) : null
-    const unit_cost     = form.unit_cost  ? Math.floor(Number(form.unit_cost))  : null
-
-    if (!form.name.trim()) { setError('El nombre del producto es requerido.'); return }
-    if (isNaN(current_stock) || current_stock < 0) {
-      setError('El stock inicial debe ser un número mayor o igual a 0.')
-      return
-    }
-    if (isNaN(min_stock) || min_stock < 0) {
-      setError('El stock mínimo debe ser un número mayor o igual a 0.')
-      return
-    }
-    if (unit_price !== null && (isNaN(unit_price) || unit_price < 0)) {
-      setError('El precio de venta debe ser un número mayor o igual a 0.')
-      return
-    }
-    if (unit_cost !== null && (isNaN(unit_cost) || unit_cost < 0)) {
-      setError('El costo unitario debe ser un número mayor o igual a 0.')
-      return
-    }
-
-    startTransition(async () => {
-      const input = {
-        name:          form.name.trim(),
-        sku:           form.sku.trim()          || null,
-        category:      form.category,
-        description:   form.description.trim()  || null,
-        current_stock,
-        min_stock,
-        unit_price,
-        unit_cost,
-        bookable_online: form.bookable_online,
-      }
-
-      let result: { success?: boolean; error?: string }
-
-      if (editItem) {
-        result = await updateInventoryItem(businessId, editItem.id, input, slug)
-      } else {
-        result = await createInventoryItem(businessId, input, slug)
-      }
-
-      if (result.error) {
-        setError(result.error)
-      } else {
-        onSuccess()
-        onClose()
-      }
-    })
-  }
-
-  return (
-    <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      {/* Panel */}
-      <div
-        className="fixed right-0 top-0 h-full z-50 w-full max-w-md flex flex-col shadow-2xl"
-        style={{ backgroundColor: 'var(--bg-color)', borderLeft: '1px solid var(--border-color)' }}
-      >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between px-5 py-4 border-b"
-          style={{ borderColor: 'var(--border-color)' }}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{ backgroundColor: 'color-mix(in srgb, var(--primary-color) 15%, transparent)' }}
-            >
-              <Package size={16} style={{ color: 'var(--primary-color)' }} />
-            </div>
-            <span className="font-semibold text-sm text-zinc-100">
-              {editItem ? 'Editar producto' : 'Agregar producto'}
-            </span>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Form */}
-        <form
-          ref={formRef}
-          onSubmit={handleSubmit}
-          className="flex-1 overflow-y-auto p-5 flex flex-col gap-4"
-        >
-          {/* Nombre */}
-          <div className="flex flex-col gap-1.5">
-            <label className={labelCls}>
-              Nombre <span className="text-red-400">*</span>
-            </label>
-            <input
-              className={inputCls}
-              style={inputStyle}
-              placeholder="Ej: Pomada capilar matte"
-              value={form.name}
-              onChange={set('name')}
-              autoFocus
-            />
-          </div>
-
-          {/* SKU */}
-          <div className="flex flex-col gap-1.5">
-            <label className={labelCls}>
-              SKU / Código{' '}
-              <span className="text-zinc-600 font-normal normal-case">(opcional)</span>
-            </label>
-            <input
-              className={inputCls}
-              style={inputStyle}
-              placeholder="Ej: POMADA-001"
-              value={form.sku}
-              onChange={set('sku')}
-            />
-          </div>
-
-          {/* Categoría */}
-          <div className="flex flex-col gap-1.5">
-            <label className={labelCls}>Categoría</label>
-            <select
-              className={inputCls}
-              style={inputStyle}
-              value={form.category}
-              onChange={set('category')}
-            >
-              {ALL_CATEGORIES.map((cat) => (
-                <option key={cat} value={cat}>{CATEGORY_LABELS[cat]}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Descripción */}
-          <div className="flex flex-col gap-1.5">
-            <label className={labelCls}>
-              Descripción{' '}
-              <span className="text-zinc-600 font-normal normal-case">(opcional)</span>
-            </label>
-            <textarea
-              className={`${inputCls} resize-none`}
-              style={inputStyle}
-              rows={2}
-              placeholder="Descripción del producto..."
-              value={form.description}
-              onChange={set('description')}
-            />
-          </div>
-
-          {/* Stock inicial + Stock mínimo */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <label className={labelCls}>
-                Stock {editItem ? 'actual' : 'inicial'} <span className="text-red-400">*</span>
-              </label>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                className={inputCls}
-                style={inputStyle}
-                placeholder="0"
-                value={form.current_stock}
-                onChange={set('current_stock')}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className={labelCls}>
-                Stock mínimo <span className="text-red-400">*</span>
-              </label>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                className={inputCls}
-                style={inputStyle}
-                placeholder="0"
-                value={form.min_stock}
-                onChange={set('min_stock')}
-              />
-            </div>
-          </div>
-
-          {/* Precio venta + Costo unitario */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <label className={labelCls}>
-                Precio venta COP{' '}
-                <span className="text-zinc-600 font-normal normal-case">(opcional)</span>
-              </label>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                className={inputCls}
-                style={inputStyle}
-                placeholder="25000"
-                value={form.unit_price}
-                onChange={set('unit_price')}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className={labelCls}>
-                Costo unitario COP{' '}
-                <span className="text-zinc-600 font-normal normal-case">(opcional)</span>
-              </label>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                className={inputCls}
-                style={inputStyle}
-                placeholder="15000"
-                value={form.unit_cost}
-                onChange={set('unit_cost')}
-              />
-            </div>
-          </div>
-
-          {/* Reserva en línea */}
-          <label
-            className="flex items-start justify-between gap-4 rounded-xl border px-3 py-3 cursor-pointer"
-            style={{ borderColor: 'var(--border-color)' }}
-          >
-            <span className="flex flex-col gap-0.5">
-              <span className="text-sm font-medium text-zinc-200">Disponible para reserva en línea</span>
-              <span className="text-[11px] text-zinc-500">
-                El cliente podrá apartarlo al reservar (requiere precio de venta). Se paga en el local.
-              </span>
-            </span>
-            <input
-              type="checkbox"
-              role="switch"
-              checked={form.bookable_online}
-              onChange={(e) => setForm((p) => ({ ...p, bookable_online: e.target.checked }))}
-              className="mt-0.5 h-5 w-5 shrink-0 rounded accent-[var(--primary-color)]"
-            />
-          </label>
-
-          {error && (
-            <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
-          )}
-        </form>
-
-        {/* Footer */}
-        <div
-          className="px-5 py-4 border-t flex gap-3"
-          style={{ borderColor: 'var(--border-color)' }}
-        >
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors"
-            style={{ borderColor: 'var(--border-color)' }}
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={() => formRef.current?.requestSubmit()}
-            disabled={isPending}
-            className="flex-1 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all hover:scale-105 disabled:opacity-50 disabled:scale-100"
-            style={{ backgroundColor: 'var(--primary-color)', color: '#080808' }}
-          >
-            {isPending ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Plus size={14} />
-            )}
-            {editItem ? 'Guardar cambios' : 'Agregar producto'}
-          </button>
-        </div>
-      </div>
-    </>
-  )
-}
+// ── Main Component ────────────────────────────────────────────────────────────
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function InventoryManager({
-  items: initialItems,
+  items: serverItems,
   lowStockItems,
   reservations,
-  businessId,
-  slug,
+  hasOpenShift,
 }: InventoryManagerProps) {
   const router                                  = useRouter()
-  const [items, setItems]                       = useState<InventoryItem[]>(initialItems)
-  const [showSheet, setShowSheet]               = useState(false)
-  const [editingItem, setEditingItem]           = useState<InventoryItem | null>(null)
+  // Los ítems vienen del servidor (se actualizan con router.refresh); solo se oculta al instante el desactivado
+  const [removedIds, setRemovedIds]             = useState<Set<string>>(new Set())
+  const items                                   = serverItems.filter((i) => !removedIds.has(i.id))
+  const [showCreate, setShowCreate]             = useState(false)
+  const [panel, setPanel]                       = useState<{ action: PanelAction; itemId: string } | null>(null)
   const [deactivatingId, setDeactivatingId]     = useState<string | null>(null)
+  const [deactivateError, setDeactivateError]   = useState<string | null>(null)
   const [, startTransition]                     = useTransition()
 
   // Search & filter state
@@ -874,30 +356,31 @@ export function InventoryManager({
 
   const handleDeactivate = (itemId: string) => {
     setDeactivatingId(itemId)
+    setDeactivateError(null)
     startTransition(async () => {
       try {
-        await deactivateInventoryItem(businessId, itemId, slug)
-        setItems((prev) => prev.filter((i) => i.id !== itemId))
-        router.refresh()
+        const result = await deactivateInventoryItem(itemId)
+        if (result.error) {
+          setDeactivateError(result.error)
+        } else {
+          setRemovedIds((prev) => new Set(prev).add(itemId))
+          router.refresh()
+        }
       } finally {
         setDeactivatingId(null)
       }
     })
   }
 
-  const handleEdit = (item: InventoryItem) => {
-    setEditingItem(item)
-    setShowSheet(true)
+  const handleAction = (action: PanelAction, item: InventoryItem) => {
+    setPanel({ action, itemId: item.id })
   }
 
-  const handleCloseSheet = () => {
-    setShowSheet(false)
-    setEditingItem(null)
-  }
+  const closePanel = () => setPanel(null)
+  const handleSuccess = () => router.refresh()
 
-  const handleSuccess = () => {
-    router.refresh()
-  }
+  // El ítem del panel se busca en la lista viva: tras una compra el stock del panel se mantiene coherente
+  const panelItem = panel ? items.find((i) => i.id === panel.itemId) ?? null : null
 
   const inputStyle = {
     backgroundColor: '#0D0D0D',
@@ -906,7 +389,7 @@ export function InventoryManager({
   }
 
   return (
-    <div className="flex flex-col gap-5 pt-6">
+    <div className="flex flex-col gap-5">
       {/* Page Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -935,13 +418,13 @@ export function InventoryManager({
               )}
             </div>
             <p className="text-xs text-zinc-500 mt-0.5">
-              Control de stock de productos del negocio
+              Stock, compras, conteos y mermas de tus productos
             </p>
           </div>
         </div>
 
         <button
-          onClick={() => { setEditingItem(null); setShowSheet(true) }}
+          onClick={() => setShowCreate(true)}
           className="flex items-center gap-2 text-sm font-bold px-4 py-2.5 rounded-xl transition-all hover:scale-105 flex-shrink-0"
           style={{ backgroundColor: 'var(--primary-color)', color: '#080808' }}
         >
@@ -1081,13 +564,17 @@ export function InventoryManager({
             onChange={(e) => setCategoryFilter(e.target.value as InventoryCategory | 'all')}
           >
             <option value="all">Todas las categorías</option>
-            {ALL_CATEGORIES.map((cat) => (
+            {INVENTORY_CATEGORIES.map((cat) => (
               <option key={cat} value={cat}>{CATEGORY_LABELS[cat]}</option>
             ))}
           </select>
           <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
         </div>
       </div>
+
+      {deactivateError && (
+        <p role="alert" className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{deactivateError}</p>
+      )}
 
       {/* Items list or empty state */}
       {filteredItems.length === 0 ? (
@@ -1116,7 +603,7 @@ export function InventoryManager({
           </div>
           {items.length === 0 && (
             <button
-              onClick={() => { setEditingItem(null); setShowSheet(true) }}
+              onClick={() => setShowCreate(true)}
               className="flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-xl transition-all hover:scale-105"
               style={{
                 backgroundColor: 'color-mix(in srgb, var(--primary-color) 15%, transparent)',
@@ -1136,9 +623,7 @@ export function InventoryManager({
               key={item.id}
               item={item}
               reservations={reservationsForItem(reservations, item.id)}
-              businessId={businessId}
-              slug={slug}
-              onEdit={handleEdit}
+              onAction={handleAction}
               onDeactivate={handleDeactivate}
               isDeactivating={deactivatingId === item.id}
             />
@@ -1146,16 +631,28 @@ export function InventoryManager({
         </div>
       )}
 
-      {/* Add / Edit Sheet */}
-      {showSheet && (
-        <ItemSheet
-          businessId={businessId}
-          slug={slug}
-          editItem={editingItem}
-          onClose={handleCloseSheet}
-          onSuccess={handleSuccess}
-        />
+      {/* Crear producto */}
+      {showCreate && (
+        <ItemSheet editItem={null} onClose={() => setShowCreate(false)} onSuccess={handleSuccess} />
+      )}
+
+      {/* Paneles por producto: compra, conteo, merma, historial, edición */}
+      {panel && panelItem && panel.action === 'purchase' && (
+        <PurchaseSheet item={panelItem} hasOpenShift={hasOpenShift} onClose={closePanel} onDone={handleSuccess} />
+      )}
+      {panel && panelItem && panel.action === 'count' && (
+        <CountSheet item={panelItem} onClose={closePanel} onDone={handleSuccess} />
+      )}
+      {panel && panelItem && panel.action === 'waste' && (
+        <WasteSheet item={panelItem} onClose={closePanel} onDone={handleSuccess} />
+      )}
+      {panel && panelItem && panel.action === 'history' && (
+        <MovementHistorySheet item={panelItem} onClose={closePanel} />
+      )}
+      {panel && panelItem && panel.action === 'edit' && (
+        <ItemSheet editItem={panelItem} onClose={closePanel} onSuccess={handleSuccess} />
       )}
     </div>
   )
 }
+

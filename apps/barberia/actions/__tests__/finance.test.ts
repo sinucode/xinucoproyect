@@ -42,7 +42,7 @@ describe('Finance Server Actions', () => {
   describe('getShiftSummary', () => {
     it('mapea el resumen del RPC get_shift_cash_summary', async () => {
       mockSupabase.rpc.mockResolvedValueOnce({
-        data: { total_sales: 300, cash_collected: 50, cash_expenses: 25, cash_team_payments: 17 },
+        data: { total_sales: 300, cash_collected: 50, cash_expenses: 25, cash_team_payments: 17, cash_inventory_purchases: 9 },
         error: null,
       })
 
@@ -53,6 +53,7 @@ describe('Finance Server Actions', () => {
         totalCashCollected: 50,
         totalCashExpenses: 25,
         totalCashTeamPayments: 17,
+        totalCashInventoryPurchases: 9,
       })
     })
 
@@ -62,7 +63,7 @@ describe('Finance Server Actions', () => {
         error: null,
       })
       expect(await getShiftSummary('shift1')).toEqual({
-        totalSales: 300, totalCashCollected: 50, totalCashExpenses: 0, totalCashTeamPayments: 0,
+        totalSales: 300, totalCashCollected: 50, totalCashExpenses: 0, totalCashTeamPayments: 0, totalCashInventoryPurchases: 0,
       })
     })
 
@@ -71,24 +72,25 @@ describe('Finance Server Actions', () => {
       mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'function does not exist' } })
 
       expect(await getShiftSummary('shift1')).toEqual({
-        totalSales: 0, totalCashCollected: 0, totalCashExpenses: 0, totalCashTeamPayments: 0,
+        totalSales: 0, totalCashCollected: 0, totalCashExpenses: 0, totalCashTeamPayments: 0, totalCashInventoryPurchases: 0,
       })
       expect(spy).toHaveBeenCalled()
       spy.mockRestore()
     })
 
-    it('getActiveShiftDetails resta gastos y pagos al equipo del efectivo esperado', async () => {
+    it('getActiveShiftDetails resta gastos, pagos al equipo y compras de inventario del efectivo esperado', async () => {
       // Turno abierto (maybeSingle del getActiveShift)
       mockSupabase.maybeSingle.mockResolvedValueOnce({ data: { id: 'shift1', opening_balance: 100 }, error: null })
       mockSupabase.rpc.mockResolvedValueOnce({
-        data: { total_sales: 300, cash_collected: 50, cash_expenses: 20, cash_team_payments: 17 },
+        data: { total_sales: 300, cash_collected: 50, cash_expenses: 20, cash_team_payments: 17, cash_inventory_purchases: 10 },
         error: null,
       })
 
       const details = await getActiveShiftDetails('b1')
       expect(details?.totalCashTeamPayments).toBe(17)
-      // 100 base + 50 cobros − 20 gastos − 17 equipo
-      expect(details?.expectedCashBalance).toBe(113)
+      expect(details?.totalCashInventoryPurchases).toBe(10)
+      // 100 base + 50 cobros − 20 gastos − 17 equipo − 10 compras de inventario
+      expect(details?.expectedCashBalance).toBe(103)
     })
   })
 

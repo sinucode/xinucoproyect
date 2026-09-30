@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
 import { getInventoryItems, getLowStockItems, getInventoryReservations } from '@/actions/inventory'
+import { getActiveShift } from '@/actions/finance'
 import { InventoryManager } from '@/components/dashboard/inventory/InventoryManager'
 import { FeatureGate } from '@/components/dashboard/FeatureGate'
 import type { Profile } from '@xinuco/types'
@@ -44,11 +45,12 @@ export default async function InventoryPage({
 
   const businessId = profile.business_id
 
-  // 3. Cargar ítems y alertas de stock bajo en paralelo
-  const [itemsResult, lowStockResult, reservationsResult] = await Promise.all([
+  // 3. Cargar ítems, alertas de stock bajo, apartados y turno de caja (para pagar compras con efectivo)
+  const [itemsResult, lowStockResult, reservationsResult, openShift] = await Promise.all([
     getInventoryItems(businessId),
-    getLowStockItems(businessId),
+    getLowStockItems(),
     getInventoryReservations(businessId),
+    getActiveShift(businessId),
   ])
 
   const items        = itemsResult.data    ?? []
@@ -56,15 +58,14 @@ export default async function InventoryPage({
   const reservations  = reservationsResult.data ?? []
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto pb-24">
+    <div className="flex flex-col gap-6 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
       <Suspense fallback={<InventorySkeleton />}>
         <FeatureGate featureKey="inventory" planName="Élite">
           <InventoryManager
             items={items}
             lowStockItems={lowStockItems}
             reservations={reservations}
-            businessId={businessId}
-            slug={slug}
+            hasOpenShift={!!openShift}
           />
         </FeatureGate>
       </Suspense>
@@ -76,7 +77,7 @@ export default async function InventoryPage({
 
 function InventorySkeleton() {
   return (
-    <div className="flex flex-col gap-6 animate-pulse pt-6">
+    <div className="flex flex-col gap-6 animate-pulse">
       {/* Header skeleton */}
       <div
         className="flex items-center justify-between pb-6 border-b"

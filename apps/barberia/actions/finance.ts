@@ -55,6 +55,7 @@ export async function getShiftSummary(shiftId: string) {
     totalCashCollected: num(summary.cash_collected),
     totalCashExpenses: num(summary.cash_expenses),
     totalCashTeamPayments: num(summary.cash_team_payments),
+    totalCashInventoryPurchases: num(summary.cash_inventory_purchases),
   }
 }
 
@@ -73,10 +74,16 @@ export async function getActiveShiftDetails(businessId: string) {
     totalCashCollected: summary.totalCashCollected,
     totalCashExpenses: summary.totalCashExpenses,
     totalCashTeamPayments: summary.totalCashTeamPayments,
+    totalCashInventoryPurchases: summary.totalCashInventoryPurchases,
     // Efectivo esperado = base + cobros en efectivo − gastos pagados con efectivo de la caja
     //                     − pagos/anticipos al equipo pagados con efectivo de la caja
+    //                     − compras de inventario pagadas con efectivo de la caja
     expectedCashBalance:
-      shift.opening_balance + summary.totalCashCollected - summary.totalCashExpenses - summary.totalCashTeamPayments,
+      shift.opening_balance +
+      summary.totalCashCollected -
+      summary.totalCashExpenses -
+      summary.totalCashTeamPayments -
+      summary.totalCashInventoryPurchases,
   }
 }
 

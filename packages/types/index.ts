@@ -39,6 +39,11 @@ export type {
   CashRegisterShift,
   Sale,
   Payment,
+  InventoryItem,
+  InventoryCategory,
+  InventoryMovement,
+  InventoryMovementResult,
+  MovementType,
 } from './database'
 
 export type { Database as DatabaseGenerated } from './database.types'
