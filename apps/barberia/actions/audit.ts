@@ -16,6 +16,7 @@ import {
   type AuditAlertRow,
   type AuditFilters,
 } from '@/lib/audit-utils'
+import { DEFAULT_AUDIT_RETENTION_MONTHS } from '@/lib/audit-retention'
 
 const NOT_ADMIN = 'Solo un administrador puede ver la auditoría.'
 const PAGE_SIZE = 50
@@ -150,4 +151,18 @@ export async function getAuditAlerts(): Promise<AuditAlertItem[] | { error: stri
   }
 
   return summarizeAlerts((data ?? []) as AuditAlertRow[])
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// getAuditRetentionMonths — cuánto tiempo se conserva la auditoría (36 si falla)
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function getAuditRetentionMonths(): Promise<number> {
+  const auth = await requireAdmin()
+  if ('error' in auth) return DEFAULT_AUDIT_RETENTION_MONTHS
+
+  const { data, error } = await (auth.supabase as any).rpc('get_audit_retention_months')
+  const months = Number(data)
+  if (error || !Number.isInteger(months) || months <= 0) return DEFAULT_AUDIT_RETENTION_MONTHS
+  return months
 }

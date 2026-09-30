@@ -6,6 +6,8 @@ import {
   GitBranch, Clock,
 } from 'lucide-react'
 import { adminLoginUrl, BARBERIA_URL } from '@xinuco/utils'
+import { getAuditRetentionSetting } from '@/actions/platform-settings'
+import { AuditRetentionCard } from '@/components/admin/AuditRetentionCard'
 
 export const metadata: Metadata = {
   title: 'Configuración — Xinuco Admin',
@@ -54,6 +56,8 @@ export default async function SettingsPage() {
     .from('businesses')
     .select('*', { count: 'exact', head: true })
     .eq('is_active', true)
+
+  const retention = await getAuditRetentionSetting()
 
   const now  = new Date()
   const date = now.toLocaleDateString('es-CO', {
@@ -120,6 +124,20 @@ export default async function SettingsPage() {
           </div>
         ))}
       </div>
+
+      {/* Auditoría: plazo de conservación */}
+      {'error' in retention ? (
+        <div className="rounded-xl border border-xinuco-border px-5 py-4">
+          <h2 className="text-sm font-semibold text-xinuco-text">Auditoría de las barberías</h2>
+          <p className="text-xs text-red-400 mt-2">{retention.error}</p>
+        </div>
+      ) : (
+        <AuditRetentionCard
+          initialMonths={retention.months}
+          initialUpdatedAt={retention.updatedAt}
+          initialUpdatedByName={retention.updatedByName}
+        />
+      )}
 
       {/* Estado del servidor */}
       <div className="rounded-xl border border-xinuco-border overflow-hidden">

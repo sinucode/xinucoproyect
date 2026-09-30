@@ -1,0 +1,90 @@
+'use server'
+
+// actions/platform-settings.ts — Ajustes globales de la plataforma (solo super_admin).
+// La BD refuerza lo mismo: RLS de platform_settings solo deja leer/cambiar al super_admin
+// y un trigger rechaza plazos fuera de 12/24/36/60/120 meses.
+
+import { createClient } from '@xinuco/supabase/server'
+import { revalidatePath } from 'next/cache'
+import { isValidRetention } from '@/lib/audit-retention'
+
+const NOT_SUPER_ADMIN = 'Acceso denegado. Se requieren privilegios de super_admin.'
+const SETTING_KEY = 'audit_retention_months'
+
+export interface AuditRetentionSetting {
+  months:        number
+  updatedAt:     string | null
+  updatedByName: string | null
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// getAuditRetentionSetting — plazo vigente + quién/cuándo lo cambió
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function getAuditRetentionSetting(): Promise<AuditRetentionSetting | { error: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user || user.app_metadata?.role !== 'super_admin') return { error: NOT_SUPER_ADMIN }
+
+  const { data, error } = await (supabase as any)
+    .from('platform_settings')
+    .select('value, updated_at, updated_by_name')
+    .eq('key', SETTING_KEY)
+    .maybeSingle()
+
+  if (error || !data) return { error: 'No se pudo leer el plazo de la auditoría.' }
+
+  const months = Number(data.value)
+  if (!isValidRetention(months)) return { error: 'No se pudo leer el plazo de la auditoría.' }
+
+  return {
+    months,
+    updatedAt:     (data.updated_at as string | null) ?? null,
+    updatedByName: (data.updated_by_name as string | null) ?? null,
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// updateAuditRetention — cambia el plazo (12, 24, 36, 60 o 120 meses)
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function updateAuditRetention(
+  months: number,
+): Promise<
+  { success: true; months: number; updatedAt: string; updatedByName: string } | { success: false; error: string }
+> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user || user.app_metadata?.role !== 'super_admin') {
+    return { success: false, error: NOT_SUPER_ADMIN }
+  }
+
+  if (!isValidRetention(months)) return { success: false, error: 'Plazo no permitido.' }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('full_name')
+    .eq('id', user.id)
+    .maybeSingle()
+  const fullName = (profile as { full_name?: string | null } | null)?.full_name?.trim()
+  const updatedByName = fullName || user.email || 'Super admin'
+
+  const { data, error } = await (supabase as any)
+    .from('platform_settings')
+    .update({ value: months, updated_by: user.id, updated_by_name: updatedByName })
+    .eq('key', SETTING_KEY)
+    .select('key')
+
+  if (error) {
+    return {
+      success: false,
+      error: String(error.message ?? '').includes('invalid_retention')
+        ? 'Plazo no permitido.'
+        : 'No se pudo guardar.',
+    }
+  }
+  if (!data || data.length === 0) return { success: false, error: 'No se pudo guardar.' }
+
+  revalidatePath('/adminbarberia/settings')
+  return { success: true, months, updatedAt: new Date().toISOString(), updatedByName }
+}

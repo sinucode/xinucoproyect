@@ -1,9 +1,10 @@
 import { createClient } from '@xinuco/supabase/server'
 import { redirect } from 'next/navigation'
 import { AdminPageHeader } from '@xinuco/ui'
-import { getAuditActors, getAuditAlerts, getAuditLogs } from '@/actions/audit'
+import { getAuditActors, getAuditAlerts, getAuditLogs, getAuditRetentionMonths } from '@/actions/audit'
 import { AuditLogViewer } from '@/components/dashboard/audit/AuditLogViewer'
 import { businessTodayISODate } from '@/lib/agenda-time'
+import { retentionNotice } from '@/lib/audit-retention'
 import type { BusinessFeatures } from '@xinuco/types'
 
 interface AuditPageProps {
@@ -39,10 +40,11 @@ export default async function AuditPage({ params }: AuditPageProps) {
   if (!featureFlags?.audit_logs) redirect(`/${slug}/dashboard`)
 
   // ── Primera página, alertas de la semana y personas para el filtro ──────────
-  const [logs, alerts, actors] = await Promise.all([
+  const [logs, alerts, actors, retentionMonths] = await Promise.all([
     getAuditLogs({}),
     getAuditAlerts(),
     getAuditActors(),
+    getAuditRetentionMonths(),
   ])
 
   return (
@@ -51,6 +53,8 @@ export default async function AuditPage({ params }: AuditPageProps) {
         title="Auditoría"
         subtitle="Quién hizo qué y cuándo: dinero, caja, inventario, citas y configuración. Solo lo ve el administrador."
       />
+
+      <p className="-mt-3 text-xs text-xinuco-muted">{retentionNotice(retentionMonths)}</p>
 
       <AuditLogViewer
         initialLogs={'error' in logs ? [] : logs.logs}

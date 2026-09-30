@@ -126,6 +126,20 @@ export async function GET(request: Request) {
     recurringExpenses = { error: msg }
   }
 
+  // ── 7. Auditoría: borrar lo vencido según el plazo configurado ────────────
+  // Aislado igual que los gastos fijos: nunca debe romper los pasos anteriores.
+  let auditPurge: unknown
+  try {
+    const { data, error } = await supabase.rpc('purge_audit_logs', { p_batch: 5000 })
+    if (error) throw new Error(error.message)
+    auditPurge = data
+    console.info(`[cron/send-reminders] AuditoriaPurga=${JSON.stringify(data)}`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[cron/send-reminders] Error al depurar auditoría:', msg)
+    auditPurge = { error: msg }
+  }
+
   return NextResponse.json({
     ok:          true,
     window:      { from, to },
@@ -135,5 +149,6 @@ export async function GET(request: Request) {
     failed,
     ...(errors.length > 0 && { errors }),
     recurringExpenses,
+    auditPurge,
   })
 }
