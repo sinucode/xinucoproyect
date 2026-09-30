@@ -230,7 +230,7 @@ export function DashboardSidebar({
 
       {/* Main Content Wrapper */}
       <div
-        className={`flex-1 flex flex-col transition-all duration-300 ease-in-out md:min-h-screen w-full
+        className={`flex-1 min-w-0 flex flex-col transition-all duration-300 ease-in-out md:min-h-screen w-full
           ${isCollapsed ? 'md:ml-16' : 'md:ml-64'}`}
       >
         {children}

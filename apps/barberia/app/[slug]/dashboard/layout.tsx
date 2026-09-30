@@ -56,7 +56,7 @@ export default async function DashboardLayout({
             <TrialBanner slug={slug} />
 
             {/* Área de contenido principal */}
-            <div className="flex-1 w-full pb-safe-bottom">
+            <div className="flex-1 min-w-0 w-full pb-safe-bottom">
               {children}
             </div>
 
