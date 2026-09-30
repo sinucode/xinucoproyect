@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Users, CalendarDays, Scissors, Wallet, Settings, UserPlus, type LucideIcon } from 'lucide-react'
+import { Home, CalendarDays, Scissors, Wallet, Settings, UserPlus, type LucideIcon } from 'lucide-react'
 import { useFeatures } from '@/lib/features/context'
 import { useIsAdmin } from '@/lib/features/role-context'
 import type { BusinessFeatures } from '@xinuco/types'
@@ -38,12 +38,12 @@ export function BottomNav({ slug }: BottomNavProps) {
   const isAdmin  = useIsAdmin()
 
   const allItems: NavItem[] = [
+    { id: 'nav-home',         href: `/${slug}/dashboard`,              icon: Home,         label: 'Inicio',    feature: null,             adminOnly: false },
     { id: 'nav-appointments', href: `/${slug}/dashboard/appointments`, icon: CalendarDays, label: 'Agenda',    feature: null,             adminOnly: false },
     { id: 'nav-walk-ins',     href: `/${slug}/dashboard/walk-ins`,     icon: UserPlus,     label: 'Fila',      feature: 'walk_ins',       adminOnly: false },
     { id: 'nav-services',     href: `/${slug}/dashboard/services`,     icon: Scissors,     label: 'Servicios', feature: null,             adminOnly: true  },
     // Admin: pagos de todo el equipo. Barbero/manicurista: su propia cuenta.
     { id: 'nav-ledger',       href: `/${slug}/dashboard/ledger`,       icon: Wallet,       label: 'Mi cuenta', feature: 'staff_ledger',   adminOnly: false, adminLabel: 'Pagos', adminAriaLabel: 'Pagos al equipo' },
-    { id: 'nav-staff',        href: `/${slug}/dashboard/staff`,        icon: Users,        label: 'Equipo',    feature: null,             adminOnly: true  },
     { id: 'nav-settings',     href: `/${slug}/dashboard/settings`,     icon: Settings,     label: 'Ajustes',   feature: null,             adminOnly: true  },
   ]
 
@@ -67,7 +67,9 @@ export function BottomNav({ slug }: BottomNavProps) {
       <div className="glass border-t border-xinuco-border">
         <ul className="flex items-center justify-around px-2 py-2 max-w-2xl mx-auto">
           {navItems.map(({ id, href, icon: Icon, label, ariaLabel }) => {
-            const isActive = pathname === href || pathname.startsWith(`${href}/`)
+            const isActive = href.endsWith('/dashboard')
+              ? pathname === href
+              : pathname === href || pathname.startsWith(`${href}/`)
 
             return (
               <li key={id} className="flex-1">

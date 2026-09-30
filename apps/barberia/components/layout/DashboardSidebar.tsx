@@ -4,6 +4,7 @@ import { useState, useTransition, createContext } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
+  Home,
   CalendarDays, Scissors, BarChart2, Settings, ChevronRight,
   Users, Store, Percent, Wallet, Receipt, Gift, LayoutGrid, Shield, UserPlus,
   BookUser, Package, BookOpen, ShoppingBag, Archive, Lock, LogOut, Loader2,
@@ -34,6 +35,7 @@ interface NavLink {
 
 function buildLinks(slug: string, features: BusinessFeatures): NavLink[] {
   const all: NavLink[] = [
+    { href: `/${slug}/dashboard`,              icon: Home,         label: 'Inicio',          feature: null,               adminOnly: false },
     { href: `/${slug}/dashboard/appointments`, icon: CalendarDays, label: 'Agenda',         feature: null,               adminOnly: false },
     { href: `/${slug}/dashboard/walk-ins`,     icon: UserPlus,     label: 'Fila de espera',   feature: 'walk_ins',         adminOnly: false },
     { href: `/${slug}/dashboard/crm`,          icon: BookUser,     label: 'Clientes',        feature: 'crm',              adminOnly: false },
@@ -166,7 +168,10 @@ export function DashboardSidebar({
 
         <nav className="flex-1 py-6 flex flex-col gap-2 px-3 overflow-y-auto">
           {links.map((link) => {
-            const isActive = pathname.startsWith(link.href)
+            // Inicio solo se marca en /dashboard exacto (todas las demás rutas empiezan igual)
+            const isActive = link.href.endsWith('/dashboard')
+              ? pathname === link.href
+              : pathname.startsWith(link.href)
             return (
               <Link
                 key={link.href}
