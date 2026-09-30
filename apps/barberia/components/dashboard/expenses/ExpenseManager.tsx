@@ -130,7 +130,7 @@ function StatementRow({
   hint,
   strong,
 }: {
-  sign?:   '−' | '='
+  sign?:   '−' | '=' | '+'
   label:   string
   value:   number
   hint?:   string
@@ -144,7 +144,7 @@ function StatementRow({
         {hint && <p className="text-[11px] text-xinuco-muted mt-0.5">{hint}</p>}
       </div>
       <span className={`text-sm tabular-nums whitespace-nowrap ${strong ? 'font-bold' : 'font-medium'} text-xinuco-text`}>
-        {sign === '−' && value > 0 ? '−' : ''}{formatCOP(value)}
+        {sign === '−' && value > 0 ? '−' : sign === '+' && value > 0 ? '+' : ''}{formatCOP(value)}
       </span>
     </div>
   )
@@ -193,6 +193,22 @@ function ProfitLossStatement({ pl, plError, monthLabel }: { pl: ProfitLossResult
         <StatementRow sign="=" label="Utilidad bruta" value={pl.gross_profit} strong />
         <StatementRow sign="−" label="Comisiones del equipo" value={pl.commissions} />
         <StatementRow sign="−" label="Gastos" value={pl.expenses.total} />
+        {(pl.depreciation ?? 0) > 0 && (
+          <StatementRow
+            sign="−"
+            label="Desgaste de equipos"
+            value={pl.depreciation}
+            hint="Lo que se gastaron tus equipos este período (se calcula en Activos fijos)"
+          />
+        )}
+        {(pl.asset_disposals ?? 0) !== 0 && (
+          <StatementRow
+            sign={pl.asset_disposals > 0 ? '+' : '−'}
+            label="Venta o baja de equipos"
+            value={Math.abs(pl.asset_disposals)}
+            hint={pl.asset_disposals > 0 ? 'Ganancia al vender equipos por más de lo que valían' : 'Pérdida al vender o dar de baja equipos'}
+          />
+        )}
       </div>
 
       <div

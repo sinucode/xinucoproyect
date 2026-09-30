@@ -130,6 +130,8 @@ export function auditSentence(log: SentenceLog): string {
       return `registró el activo fijo${quoted}`
     case 'fixed_asset.updated':
       return `editó el activo fijo${quoted}`
+    case 'fixed_asset.disposed':
+      return `dio de baja el equipo${quoted}`
     case 'fixed_asset.deactivated':
       return `dio de baja el activo fijo${quoted}`
     default:
@@ -380,12 +382,17 @@ const FIELD_LABEL: Record<string, string> = {
   duration_minutes: 'Duración (min)',
   price_cop: 'Precio',
   is_active: 'Activo',
+  vida_util_meses: 'Vida útil (meses)',
+  medio_de_pago: 'Medio de pago',
+  valor_residual: 'Valor residual',
+  metodo: 'Método',
+  valor_en_libros: 'Valor en libros',
 }
 
 const MONEY_KEYS = new Set([
   'precio', 'monto', 'esperado', 'contado', 'diferencia', 'subtotal', 'descuento', 'total', 'costo_total',
   'fixed_amount', 'opening_balance', 'actual_closing_balance', 'purchase_price', 'salvage_value',
-  'unit_price', 'unit_cost', 'amount',
+  'unit_price', 'unit_cost', 'amount', 'valor_residual', 'valor_en_libros',
 ])
 
 const VALUE_LABEL: Record<string, string> = {
@@ -396,6 +403,7 @@ const VALUE_LABEL: Record<string, string> = {
   stamps: 'sellos', points: 'puntos',
   cash: 'efectivo', cash_register: 'efectivo de la caja', transfer: 'transferencia', other: 'otro',
   todos: 'todos',
+  straight_line: 'Línea recta', declining_balance: 'Saldo decreciente',
 }
 
 // Categorías de gasto por defecto: slug → nombre (las propias del negocio se muestran tal cual)
@@ -403,7 +411,7 @@ const EXPENSE_CATEGORY_NAME: Record<string, string> = Object.fromEntries(
   DEFAULT_EXPENSE_CATEGORIES.map(c => [c.slug, c.name]),
 )
 
-const TRANSLATED_VALUE_KEYS = new Set(['estado', 'status', 'tipo', 'payment_method'])
+const TRANSLATED_VALUE_KEYS = new Set(['estado', 'status', 'tipo', 'payment_method', 'medio_de_pago', 'metodo'])
 
 function isHiddenKey(key: string): boolean {
   return key === 'id' || key === 'business_id' || key.endsWith('_id') || key.endsWith('_at')

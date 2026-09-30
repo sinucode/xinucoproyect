@@ -200,6 +200,16 @@ export function CashShiftManager({
                   Compras de inventario desde la caja: −{formatCurrency(shiftDetails.totalCashInventoryPurchases)}
                 </span>
               )}
+              {shiftDetails.totalCashAssetPurchases > 0 && (
+                <span className="text-[11px] text-xinuco-muted block mt-1">
+                  Compras de equipos: −{formatCurrency(shiftDetails.totalCashAssetPurchases)}
+                </span>
+              )}
+              {shiftDetails.totalCashAssetSales > 0 && (
+                <span className="text-[11px] text-xinuco-muted block mt-1">
+                  Venta de equipos: +{formatCurrency(shiftDetails.totalCashAssetSales)}
+                </span>
+              )}
             </div>
           </div>
 
@@ -346,6 +356,22 @@ export function CashShiftManager({
                     <span>Compras de inventario desde la caja:</span>
                     <span className="font-semibold text-zinc-300">
                       −{formatCurrency(shiftDetails.totalCashInventoryPurchases)}
+                    </span>
+                  </div>
+                )}
+                {shiftDetails.totalCashAssetPurchases > 0 && (
+                  <div className="flex justify-between text-xs text-xinuco-muted">
+                    <span>Compras de equipos:</span>
+                    <span className="font-semibold text-zinc-300">
+                      −{formatCurrency(shiftDetails.totalCashAssetPurchases)}
+                    </span>
+                  </div>
+                )}
+                {shiftDetails.totalCashAssetSales > 0 && (
+                  <div className="flex justify-between text-xs text-xinuco-muted">
+                    <span>Venta de equipos:</span>
+                    <span className="font-semibold text-zinc-300">
+                      +{formatCurrency(shiftDetails.totalCashAssetSales)}
                     </span>
                   </div>
                 )}

@@ -3,13 +3,14 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
 import { getFixedAssets, getAssetPortfolioSummary } from '@/actions/fixed-assets'
+import { getActiveShift } from '@/actions/finance'
 import { FixedAssetsManager } from '@/components/dashboard/fixed-assets/FixedAssetsManager'
 import { FeatureGate } from '@/components/dashboard/FeatureGate'
 import type { Profile } from '@xinuco/types'
 
 export const metadata: Metadata = {
-  title: 'Activos Fijos — Xinuco',
-  description: 'Inventario de activos fijos y cronograma de depreciación',
+  title: 'Activos fijos — Xinuco',
+  description: 'Los equipos del negocio: cuánto valen hoy y cuánto se desgastan cada mes',
 }
 
 // ── Página ────────────────────────────────────────────────────────────────────
@@ -42,26 +43,27 @@ export default async function FixedAssetsPage({
     redirect(`/${slug}/dashboard`)
   }
 
-  const businessId = profile.business_id
-
-  // 3. Cargar activos y resumen de portafolio en paralelo
-  const [assetsResult, summaryResult] = await Promise.all([
-    getFixedAssets(businessId),
-    getAssetPortfolioSummary(businessId),
+  // 3. Cargar equipos en uso, dados de baja, resumen y turno de caja (para pagar/recibir con efectivo).
+  //    El negocio sale del perfil dentro de las acciones; aquí solo se usa para el turno.
+  const [activeResult, disposedResult, summaryResult, openShift] = await Promise.all([
+    getFixedAssets({ status: 'active' }),
+    getFixedAssets({ status: 'disposed' }),
+    getAssetPortfolioSummary(),
+    getActiveShift(profile.business_id),
   ])
 
-  const assets  = assetsResult.data  ?? []
-  const summary = summaryResult.data ?? null
+  const loadError = activeResult.error ?? disposedResult.error ?? null
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto pb-24">
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
       <Suspense fallback={<FixedAssetsSkeleton />}>
         <FeatureGate featureKey="fixed_assets" planName="Élite">
           <FixedAssetsManager
-            assets={assets}
-            summary={summary}
-            businessId={businessId}
-            slug={slug}
+            assets={activeResult.data ?? []}
+            disposed={disposedResult.data ?? []}
+            summary={summaryResult.data ?? null}
+            hasOpenShift={!!openShift}
+            loadError={loadError}
           />
         </FeatureGate>
       </Suspense>

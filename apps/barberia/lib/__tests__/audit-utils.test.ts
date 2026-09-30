@@ -68,6 +68,12 @@ describe('auditSentence', () => {
     expect(auditSentence(log({ action: 'fixed_asset.updated', new_value: { name: 'Silla' } })))
       .toBe('editó el activo fijo "Silla"')
     expect(auditSentence(log({ action: 'fixed_asset.deactivated' }))).toBe('dio de baja el activo fijo')
+    expect(auditSentence(log({ action: 'fixed_asset.disposed', new_value: { nombre: 'Silla' } })))
+      .toBe('dio de baja el equipo "Silla"')
+    expect(auditSentence(log({ action: 'fixed_asset.disposed' }))).toBe('dio de baja el equipo')
+    // con resumen en español escrito por la base, se usa tal cual
+    expect(auditSentence(log({ action: 'fixed_asset.created', summary: 'registró el equipo "Silla" por $500.000' })))
+      .toBe('registró el equipo "Silla" por $500.000')
   })
 
   it('acción desconocida', () => {
@@ -89,6 +95,8 @@ describe('auditCategoryOf', () => {
     expect(c('product.price_changed')).toBe('inventory')
     expect(c('inventory.purchase')).toBe('inventory')
     expect(c('fixed_asset.created')).toBe('money')
+    expect(c('fixed_asset.disposed')).toBe('money')
+    expect(c('fixed_asset.updated')).toBe('money')
     expect(c('sale.voided')).toBe('money')
     expect(c('ledger.advance')).toBe('money')
     expect(c('expense.deleted')).toBe('money')
@@ -261,5 +269,32 @@ describe('diffRows', () => {
 
   it('sin datos devuelve vacío', () => {
     expect(diffRows(null, null)).toEqual([])
+  })
+
+  it('activos fijos: etiquetas, dinero y valores traducidos', () => {
+    const rows = diffRows(
+      { precio: 500000, vida_util_meses: 36, valor_residual: 0, metodo: 'straight_line' },
+      { precio: 600000, vida_util_meses: 60, valor_residual: 50000, metodo: 'declining_balance' },
+    )
+    expect(rows).toEqual([
+      { campo: 'Precio', antes: '$500.000', despues: '$600.000' },
+      { campo: 'Vida útil (meses)', antes: '36', despues: '60' },
+      { campo: 'Valor residual', antes: '$0', despues: '$50.000' },
+      { campo: 'Método', antes: 'Línea recta', despues: 'Saldo decreciente' },
+    ])
+  })
+
+  it('activos fijos: compra y baja', () => {
+    expect(diffRows(null, { nombre: 'Silla', precio: 800000, medio_de_pago: 'cash_register' })).toEqual([
+      { campo: 'Nombre', antes: '—', despues: 'Silla' },
+      { campo: 'Precio', antes: '—', despues: '$800.000' },
+      { campo: 'Medio de pago', antes: '—', despues: 'efectivo de la caja' },
+    ])
+    expect(diffRows({ estado: 'en uso' }, { estado: 'dado de baja', valor_en_libros: 350000, motivo: 'vendido', nota: 'x' })).toEqual([
+      { campo: 'Estado', antes: 'en uso', despues: 'dado de baja' },
+      { campo: 'Valor en libros', antes: '—', despues: '$350.000' },
+      { campo: 'Motivo', antes: '—', despues: 'vendido' },
+      { campo: 'Nota', antes: '—', despues: 'x' },
+    ])
   })
 })

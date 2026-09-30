@@ -46,6 +46,13 @@ export type {
   MovementType,
   AuditLog,
   AuditCategory,
+  FixedAsset,
+  FixedAssetCategory,
+  DepreciationMethod,
+  DepreciationSchedule,
+  AssetPortfolioSummary,
+  AssetPaymentMethod,
+  DisposalReason,
 } from './database'
 
 export type { Database as DatabaseGenerated } from './database.types'

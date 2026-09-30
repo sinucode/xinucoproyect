@@ -53,6 +53,8 @@ describe('Finance Server Actions', () => {
         totalCashExpenses: 25,
         totalCashTeamPayments: 17,
         totalCashInventoryPurchases: 9,
+        totalCashAssetPurchases: 0,
+        totalCashAssetSales: 0,
       })
     })
 
@@ -62,7 +64,7 @@ describe('Finance Server Actions', () => {
         error: null,
       })
       expect(await getShiftSummary('shift1')).toEqual({
-        totalSales: 300, totalCashCollected: 50, totalCashExpenses: 0, totalCashTeamPayments: 0, totalCashInventoryPurchases: 0,
+        totalSales: 300, totalCashCollected: 50, totalCashExpenses: 0, totalCashTeamPayments: 0, totalCashInventoryPurchases: 0, totalCashAssetPurchases: 0, totalCashAssetSales: 0,
       })
     })
 
@@ -71,7 +73,7 @@ describe('Finance Server Actions', () => {
       mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'function does not exist' } })
 
       expect(await getShiftSummary('shift1')).toEqual({
-        totalSales: 0, totalCashCollected: 0, totalCashExpenses: 0, totalCashTeamPayments: 0, totalCashInventoryPurchases: 0,
+        totalSales: 0, totalCashCollected: 0, totalCashExpenses: 0, totalCashTeamPayments: 0, totalCashInventoryPurchases: 0, totalCashAssetPurchases: 0, totalCashAssetSales: 0,
       })
       expect(spy).toHaveBeenCalled()
       spy.mockRestore()
@@ -90,6 +92,20 @@ describe('Finance Server Actions', () => {
       expect(details?.totalCashInventoryPurchases).toBe(10)
       // 100 base + 50 cobros − 20 gastos − 17 equipo − 10 compras de inventario
       expect(details?.expectedCashBalance).toBe(103)
+    })
+
+    it('getActiveShiftDetails resta compras de equipos y suma ventas de equipos en efectivo', async () => {
+      mockSupabase.maybeSingle.mockResolvedValueOnce({ data: { id: 'shift1', opening_balance: 100 }, error: null })
+      mockSupabase.rpc.mockResolvedValueOnce({
+        data: { total_sales: 300, cash_collected: 50, cash_expenses: 0, cash_team_payments: 0, cash_inventory_purchases: 0, cash_asset_purchases: 40, cash_asset_sales: 15 },
+        error: null,
+      })
+
+      const details = await getActiveShiftDetails('b1')
+      expect(details?.totalCashAssetPurchases).toBe(40)
+      expect(details?.totalCashAssetSales).toBe(15)
+      // 100 base + 50 cobros − 40 compra de equipo + 15 venta de equipo
+      expect(details?.expectedCashBalance).toBe(125)
     })
   })
 

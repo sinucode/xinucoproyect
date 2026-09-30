@@ -820,7 +820,9 @@ export interface ProfitLossResult {
   }
   gross_profit: number      // ingresos − costo de productos
   commissions:  number      // comisiones reales (staff_ledger)
-  net_profit:   number      // bruta − comisiones − gastos
+  depreciation:    number   // desgaste de equipos del período (se resta)
+  asset_disposals: number   // resultado de dar de baja equipos: ganancia (+) o pérdida (−)
+  net_profit:   number      // bruta − comisiones − gastos − desgaste ± bajas de equipos
   margin_pct:   number | null
 }
 
@@ -861,25 +863,39 @@ export interface LoyaltyLedger {
 // RF21 — Activos Fijos (Fixed Assets)
 // ══════════════════════════════════════════════════════════════════════════════
 
-export type FixedAssetCategory = 'equipment' | 'furniture' | 'technology' | 'vehicle' | 'other'
+export type FixedAssetCategory = 'furniture' | 'equipment' | 'technology' | 'improvements' | 'vehicle' | 'other'
 export type DepreciationMethod = 'straight_line' | 'declining_balance'
+/** Cómo se pagó el equipo (o cómo se recibió lo de su venta). null = activo anterior sin dato. */
+export type AssetPaymentMethod = 'cash_register' | 'transfer' | 'other'
+export type DisposalReason = 'sold' | 'damaged' | 'stolen' | 'donated' | 'other'
 
 export interface FixedAsset {
-  id:                  string
-  business_id:         string
-  name:                string
-  category:            FixedAssetCategory
-  description:         string | null
-  serial_number:       string | null
-  location:            string | null
-  purchase_date:       string            // DATE 'YYYY-MM-DD'
-  purchase_price:      number            // INTEGER COP
-  salvage_value:       number            // INTEGER COP
-  depreciation_method: DepreciationMethod
-  useful_life_months:  number            // INTEGER
-  is_active:           boolean
-  created_by:          string | null
-  created_at:          string
+  id:                      string
+  business_id:             string
+  name:                    string
+  category:                FixedAssetCategory
+  description:             string | null
+  serial_number:           string | null
+  location:                string | null
+  purchase_date:           string            // DATE 'YYYY-MM-DD'
+  purchase_price:          number            // INTEGER COP
+  salvage_value:           number            // INTEGER COP
+  depreciation_method:     DepreciationMethod
+  useful_life_months:      number            // INTEGER
+  is_active:               boolean
+  created_by:              string | null
+  created_at:              string
+  updated_at:              string
+  payment_method:          AssetPaymentMethod | null
+  shift_id:                string | null
+  // Baja
+  disposed_at:             string | null     // DATE 'YYYY-MM-DD'
+  disposal_reason:         DisposalReason | null
+  disposal_price:          number | null
+  disposal_payment_method: AssetPaymentMethod | null
+  disposal_shift_id:       string | null
+  disposal_notes:          string | null
+  book_value_at_disposal:  number | null
 }
 
 export interface DepreciationSchedule {
@@ -891,13 +907,18 @@ export interface DepreciationSchedule {
   accumulated_depreciation: number
   months_elapsed:           number
   months_remaining:         number
+  monthly_depreciation:     number
+  fully_depreciated_on:     string           // DATE 'YYYY-MM-DD'
   is_fully_depreciated:     boolean
+  disposed_at:              string | null
+  book_value_at_disposal:   number | null
 }
 
 export interface AssetPortfolioSummary {
   total_book_value:     number
   total_purchase_price: number
   total_depreciation:   number
+  monthly_depreciation: number
   asset_count:          number
 }
 
