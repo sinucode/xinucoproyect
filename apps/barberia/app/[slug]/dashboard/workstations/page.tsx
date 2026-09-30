@@ -2,13 +2,13 @@ import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { getWorkstations } from '@/actions/workstations'
+import { getWorkstationsOverview } from '@/actions/workstations'
 import { WorkstationManager } from '@/components/dashboard/workstations/WorkstationManager'
 import type { BusinessFeatures, Profile } from '@xinuco/types'
 
 export const metadata: Metadata = {
   title: 'Estaciones — Xinuco',
-  description: 'Gestión de estaciones de trabajo',
+  description: 'Espacios compartidos del negocio: lavacabezas, sillón de tinte, silla de niños',
 }
 
 export default async function WorkstationsPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -42,17 +42,14 @@ export default async function WorkstationsPage({ params }: { params: Promise<{ s
   const features = (biz?.features_enabled ?? {}) as unknown as BusinessFeatures
   if (!features?.workstations) redirect(`/${slug}/dashboard`)
 
-  // 3. Obtener estaciones de trabajo del negocio
-  const workstations = await getWorkstations(profile.business_id)
+  // 3. Estaciones + servicios que las necesitan (business_id sale del perfil)
+  const overview = await getWorkstationsOverview()
+  if ('error' in overview) redirect(`/${slug}/dashboard`)
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto pb-24">
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
       <Suspense fallback={<WorkstationsSkeleton />}>
-        <WorkstationManager
-          initialWorkstations={workstations}
-          businessId={profile.business_id}
-          slug={slug}
-        />
+        <WorkstationManager overview={overview} />
       </Suspense>
     </div>
   )
@@ -74,27 +71,20 @@ function WorkstationsSkeleton() {
         <div className="h-10 w-36 rounded-lg" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
       </div>
 
-      {/* Table skeleton */}
-      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-color)' }}>
-        {/* Header row */}
-        <div className="flex gap-4 px-5 py-3.5" style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))' }}>
-          <div className="h-3 w-32 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-          <div className="h-3 w-20 rounded hidden sm:block" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-          <div className="h-3 w-16 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-        </div>
-
-        {/* Data rows */}
+      {/* Cards skeleton */}
+      <div className="grid gap-4 sm:grid-cols-2">
         {[...Array(4)].map((_, i) => (
           <div
             key={i}
-            className="flex items-center gap-4 px-5 py-4"
-            style={{ borderTop: '1px solid var(--border-color)' }}
+            className="rounded-xl p-5 flex flex-col gap-3"
+            style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
           >
-            <div className="flex flex-col gap-1.5 flex-1">
-              <div className="h-4 w-32 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+            <div className="flex items-center justify-between">
+              <div className="h-5 w-32 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+              <div className="h-6 w-11 rounded-full" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
             </div>
-            <div className="h-6 w-11 rounded-full hidden sm:block" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="h-6 w-6 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+            <div className="h-3 w-48 rounded" style={{ background: 'var(--surface-color, #1a1a1a)', opacity: 0.6 }} />
+            <div className="h-3 w-28 rounded" style={{ background: 'var(--surface-color, #1a1a1a)', opacity: 0.6 }} />
           </div>
         ))}
       </div>

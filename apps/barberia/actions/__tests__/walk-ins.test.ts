@@ -233,6 +233,11 @@ describe('Walk-ins Server Actions', () => {
 
       mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'service_required' } })
       expect(await startWalkIn('wi1', 'staff1')).toEqual({ error: 'Elige el servicio para atender.' })
+
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'station_busy' } })
+      expect(await startWalkIn('wi1', 'staff1')).toEqual({
+        error: 'La estación que necesita este servicio está ocupada ahora. Espera a que se libere o elige otro servicio.',
+      })
       expect(revalidatePath).not.toHaveBeenCalled()
     })
 

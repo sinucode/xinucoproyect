@@ -1,140 +1,158 @@
 'use client'
 
-import { useState, useTransition, useCallback, useRef, useEffect } from 'react'
+import { useState, useTransition, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import {
-  Plus, X, Loader2, Armchair,
-  MoreVertical, Pencil, Power, Save,
+  Plus, X, Loader2, Armchair, Pencil, Trash2, Save, CheckCircle2, AlertCircle, Info,
 } from 'lucide-react'
 import {
-  createWorkstation,
-  updateWorkstation,
-  toggleWorkstationStatus,
+  createWorkstation, updateWorkstation, setWorkstationActive, deleteWorkstation,
+  type WorkstationOverviewItem, type WorkstationsOverview,
 } from '@/actions/workstations'
-import type { Workstation } from '@xinuco/types'
-import { AdminPageHeader } from '@xinuco/ui'
-import { AdminEmptyState } from '@xinuco/ui'
+import { AUDIENCE_LABELS } from '@/lib/service-audience'
+import { AdminPageHeader, AdminEmptyState } from '@xinuco/ui'
+
+type Notice = { type: 'success' | 'error'; text: string }
+type ServiceOption = WorkstationsOverview['services'][number]
+
+const EXPLAIN_SHARED =
+  'Registra solo lo que se comparte. Si tienes 1 lavacabezas, dos clientes no pueden usarlo a la vez aunque los atiendan barberos distintos. ' +
+  'Las sillas de cada barbero no hace falta registrarlas: eso ya lo controla su horario.'
+const EXPLAIN_CAPACITY = 'Con 2 estaciones iguales (ej. 2 sillas de niños) caben 2 citas a la vez.'
 
 // ════════════════════════════════════════════════════════════════════════════════
 // COMPONENTE PRINCIPAL — WorkstationManager (Client Island)
 // ════════════════════════════════════════════════════════════════════════════════
 
-interface WorkstationManagerProps {
-  initialWorkstations: Workstation[]
-  businessId: string
-  slug: string
-}
+export function WorkstationManager({ overview }: { overview: WorkstationsOverview }) {
+  const router = useRouter()
+  const { services, audiences } = overview
+  const [stations, setStations] = useState<WorkstationOverviewItem[]>(overview.workstations)
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const [editing, setEditing] = useState<WorkstationOverviewItem | null>(null)
+  const [toDelete, setToDelete] = useState<WorkstationOverviewItem | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
 
-export function WorkstationManager({ initialWorkstations, businessId }: WorkstationManagerProps) {
-  const [workstations, setWorkstations] = useState<Workstation[]>(initialWorkstations)
-  const [sheetOpen, setSheetOpen]       = useState(false)
-  const [editing, setEditing]           = useState<Workstation | null>(null)
+  // La fuente de verdad es el servidor: al hacer router.refresh() llegan props nuevas.
+  useEffect(() => { setStations(overview.workstations) }, [overview.workstations])
 
-  /** Callback de éxito para el sheet — actualiza la lista localmente */
-  const handleSaveSuccess = useCallback((saved: Workstation) => {
-    setWorkstations(prev => {
-      const exists = prev.find(w => w.id === saved.id)
-      return exists
-        ? prev.map(w => (w.id === saved.id ? saved : w)) // edición
-        : [...prev, saved]                                // creación (al final, por created_at asc)
-    })
+  useEffect(() => {
+    if (!notice) return
+    const t = setTimeout(() => setNotice(null), 8000)
+    return () => clearTimeout(t)
+  }, [notice])
+
+  const multiAudience = audiences.length > 1
+
+  const handleCreate = () => { setEditing(null); setSheetOpen(true) }
+  const handleEdit = (w: WorkstationOverviewItem) => { setEditing(w); setSheetOpen(true) }
+  const handleClose = () => { setSheetOpen(false); setEditing(null) }
+
+  const handleSaved = () => {
+    setNotice({ type: 'success', text: editing ? 'Estación actualizada.' : 'Estación creada.' })
     setSheetOpen(false)
     setEditing(null)
-  }, [])
-
-  const handleCreate = () => {
-    setEditing(null)
-    setSheetOpen(true)
+    router.refresh()
   }
 
-  const handleEdit = useCallback((workstation: Workstation) => {
-    setEditing(workstation)
-    setSheetOpen(true)
-  }, [])
-
-  const handleClose = () => {
-    setSheetOpen(false)
-    setEditing(null)
+  const handleDeleted = () => {
+    setToDelete(null)
+    setNotice({ type: 'success', text: 'Estación eliminada.' })
+    router.refresh()
   }
 
   return (
     <>
       <AdminPageHeader
-        title="Estaciones de Trabajo"
-        subtitle="Gestiona sillas, cabinas y espacios del negocio."
-        hasData={workstations.length > 0}
+        title="Estaciones"
+        subtitle="Espacios que se comparten: lavacabezas, sillón de tinte, silla de niños…"
+        hasData={stations.length > 0}
         actionButton={
-          <button
-            onClick={handleCreate}
-            className="btn-primary flex items-center gap-2 animate-fade-in"
-          >
+          <button onClick={handleCreate} className="btn-primary flex items-center gap-2 animate-fade-in">
             <Plus size={16} strokeWidth={2.5} />
-            <span className="hidden sm:inline">Añadir Estación</span>
-            <span className="sm:hidden">Añadir</span>
+            <span className="hidden sm:inline">Nueva estación</span>
+            <span className="sm:hidden">Nueva</span>
           </button>
         }
       />
 
-      {/* Lista de estaciones */}
-      <section aria-label="Lista de estaciones de trabajo" className="mt-6">
-        {workstations.length === 0 ? (
+      {notice && (
+        <div
+          role="status"
+          className={`flex items-start gap-2.5 text-sm rounded-lg px-4 py-3 border animate-fade-in ${
+            notice.type === 'error'
+              ? 'text-red-400 bg-red-400/10 border-red-400/20'
+              : 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
+          }`}
+        >
+          {notice.type === 'error'
+            ? <AlertCircle size={16} className="mt-0.5 shrink-0" />
+            : <CheckCircle2 size={16} className="mt-0.5 shrink-0" />}
+          <span className="flex-1">{notice.text}</span>
+          <button onClick={() => setNotice(null)} aria-label="Cerrar aviso" className="opacity-70 hover:opacity-100">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Cómo funcionan las estaciones */}
+      {stations.length > 0 && (
+        <div
+          className="flex items-start gap-3 rounded-xl px-4 py-3 text-sm text-xinuco-muted"
+          style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color)' }}
+        >
+          <Info size={16} className="mt-0.5 shrink-0" style={{ color: 'var(--primary-color)' }} />
+          <div className="flex flex-col gap-1.5 leading-relaxed">
+            <p>{EXPLAIN_SHARED}</p>
+            <p>{EXPLAIN_CAPACITY}</p>
+          </div>
+        </div>
+      )}
+
+      <section aria-label="Lista de estaciones">
+        {stations.length === 0 ? (
           <AdminEmptyState
             icon={Armchair}
-            title="Sin estaciones registradas"
-            description="Aún no tienes estaciones de trabajo. Añade tu primera silla o cabina para habilitar el agendamiento tri-factorial."
-            actionLabel="Añadir Primera Estación"
+            title="Aún no tienes estaciones"
+            description={`${EXPLAIN_SHARED} ${EXPLAIN_CAPACITY}`}
+            actionLabel="Nueva estación"
             onAction={handleCreate}
           />
         ) : (
-          <div className="overflow-x-auto rounded-xl animate-fade-in" style={{ border: '1px solid var(--border-color)' }}>
-            <table className="w-full text-sm" aria-label="Catálogo de estaciones de trabajo">
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.03))' }}>
-                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-                    Estación
-                  </th>
-                  <th className="px-5 py-3.5 text-center text-xs font-semibold text-xinuco-muted uppercase tracking-wider hidden sm:table-cell">
-                    Estado
-                  </th>
-                  <th className="px-5 py-3.5 text-right text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-                    Acciones
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {workstations.map((workstation) => (
-                  <WorkstationRow
-                    key={workstation.id}
-                    workstation={workstation}
-                    onEdit={() => handleEdit(workstation)}
-                    onToggle={(updated) =>
-                      setWorkstations(prev => prev.map(w => (w.id === updated.id ? updated : w)))
-                    }
-                  />
-                ))}
-              </tbody>
-
-              <tfoot>
-                <tr style={{ borderTop: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}>
-                  <td colSpan={3} className="px-5 py-3 text-xs text-xinuco-muted">
-                    {workstations.length} estación{workstations.length !== 1 ? 'es' : ''} registrada{workstations.length !== 1 ? 's' : ''}
-                    {' · '}
-                    {workstations.filter(w => w.is_active).length} activa{workstations.filter(w => w.is_active).length !== 1 ? 's' : ''}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
+          <div className="grid gap-4 sm:grid-cols-2 animate-fade-in">
+            {stations.map(station => (
+              <StationCard
+                key={station.id}
+                station={station}
+                services={services}
+                showAudience={multiAudience}
+                onOptimistic={updated =>
+                  setStations(prev => prev.map(w => (w.id === updated.id ? updated : w)))}
+                onEdit={() => handleEdit(station)}
+                onDelete={() => setToDelete(station)}
+                onNotice={setNotice}
+                onRefresh={() => router.refresh()}
+              />
+            ))}
           </div>
         )}
       </section>
 
-      {/* Sheet Panel — Crear/Editar */}
       {sheetOpen && (
         <WorkstationSheet
-          businessId={businessId}
-          workstation={editing}
+          station={editing}
+          services={services}
+          showAudience={multiAudience}
           onClose={handleClose}
-          onSuccess={handleSaveSuccess}
+          onSaved={handleSaved}
+        />
+      )}
+
+      {toDelete && (
+        <ConfirmDelete
+          station={toDelete}
+          onCancel={() => setToDelete(null)}
+          onDeleted={handleDeleted}
         />
       )}
     </>
@@ -142,231 +160,298 @@ export function WorkstationManager({ initialWorkstations, businessId }: Workstat
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// FILA DE LA TABLA — Con Toggle Optimista
+// TARJETA DE ESTACIÓN
 // ════════════════════════════════════════════════════════════════════════════════
 
-function WorkstationRow({
-  workstation,
-  onEdit,
-  onToggle,
+function audienceTag(s: ServiceOption): string {
+  return s.audience === 'all' ? 'Unisex' : (AUDIENCE_LABELS[s.audience]?.singular ?? '')
+}
+
+function StationCard({
+  station, services, showAudience, onOptimistic, onEdit, onDelete, onNotice, onRefresh,
 }: {
-  workstation: Workstation
+  station: WorkstationOverviewItem
+  services: ServiceOption[]
+  showAudience: boolean
+  onOptimistic: (w: WorkstationOverviewItem) => void
   onEdit: () => void
-  onToggle: (updated: Workstation) => void
+  onDelete: () => void
+  onNotice: (n: Notice) => void
+  onRefresh: () => void
 }) {
-  const [isPendingToggle, startToggle] = useTransition()
-  const [menuOpen, setMenuOpen]        = useState(false)
+  const [isPending, startToggle] = useTransition()
 
-  /** Toggle de estado con UI Optimista y rollback automático */
-  function handleToggleStatus() {
-    const newStatus = !workstation.is_active
+  // Solo se listan servicios activos; los inactivos no aparecen en el formulario.
+  const linked = services.filter(s => station.service_ids.includes(s.id))
 
-    // Optimistic: actualizar inmediatamente en la UI
-    onToggle({ ...workstation, is_active: newStatus })
-
+  /** Toggle con UI optimista y rollback si el servidor rechaza. */
+  function toggle() {
+    const next = !station.is_active
+    onOptimistic({ ...station, is_active: next })
     startToggle(async () => {
-      const result = await toggleWorkstationStatus(workstation.id, newStatus)
+      const result = await setWorkstationActive(station.id, next)
       if (result.error) {
-        // Rollback si el servidor rechaza
-        onToggle({ ...workstation, is_active: !newStatus })
+        onOptimistic({ ...station, is_active: !next })
+        onNotice({ type: 'error', text: result.error })
+        return
       }
+      onRefresh()
     })
-
-    setMenuOpen(false)
   }
 
   return (
-    <tr
-      className="transition-all duration-200 hover:bg-white/[0.02]"
+    <article
+      className="rounded-xl p-5 flex flex-col gap-4 transition-opacity"
       style={{
-        borderTop: '1px solid var(--border-color)',
-        opacity: isPendingToggle ? 0.4 : 1,
+        border: '1px solid var(--border-color)',
+        background: 'var(--surface-color)',
+        opacity: station.is_active ? 1 : 0.7,
       }}
     >
-      {/* Nombre de la estación */}
-      <td className="px-5 py-4">
-        <div className="flex items-center gap-3">
-          <div
-            className="flex-shrink-0 w-2 h-2 rounded-full"
-            style={{ background: workstation.is_active ? 'var(--primary-color)' : 'var(--border-color, #333)' }}
+      <header className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span
+            className="shrink-0 w-2 h-2 rounded-full"
+            style={{ background: station.is_active ? 'var(--primary-color)' : 'var(--border-color, #333)' }}
           />
-          <span className="font-medium text-xinuco-text leading-tight">{workstation.name}</span>
-          {/* Badge inactive — visible en mobile */}
-          {!workstation.is_active && (
-            <span className="text-xs text-xinuco-muted sm:hidden">(inactiva)</span>
-          )}
+          <h3 className="font-semibold text-xinuco-text leading-tight truncate">{station.name}</h3>
         </div>
-      </td>
-
-      {/* Estado — Switch Optimista — desktop */}
-      <td className="px-5 py-4 hidden sm:table-cell">
-        <div className="flex items-center justify-center">
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-xinuco-muted">{station.is_active ? 'Activa' : 'Inactiva'}</span>
           <button
             type="button"
             role="switch"
-            aria-checked={workstation.is_active}
-            aria-label={workstation.is_active ? 'Estación activa' : 'Estación inactiva'}
-            onClick={handleToggleStatus}
-            disabled={isPendingToggle}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${isPendingToggle ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
+            aria-checked={station.is_active}
+            aria-label={station.is_active ? 'Estación activa' : 'Estación inactiva'}
+            onClick={toggle}
+            disabled={isPending}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${isPending ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
             style={{
-              backgroundColor: workstation.is_active ? 'var(--primary-color)' : 'var(--surface-color, #333)',
-            }}
+              backgroundColor: station.is_active ? 'var(--primary-color)' : 'var(--surface-color, #333)',
+              border: '1px solid var(--border-color)',
+              '--tw-ring-color': 'var(--primary-color)',
+            } as React.CSSProperties}
           >
             <span
               className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
-                workstation.is_active ? 'translate-x-6' : 'translate-x-1'
+                station.is_active ? 'translate-x-6' : 'translate-x-1'
               }`}
             />
-            {isPendingToggle && (
-              <span className="absolute inset-0 flex items-center justify-center">
-                <Loader2 size={12} className="animate-spin text-white/70" />
-              </span>
-            )}
           </button>
         </div>
-      </td>
+      </header>
 
-      {/* Acciones — menú contextual */}
-      <td className="px-5 py-4 text-right">
-        <div className="relative inline-block">
-          <button
-            onClick={() => setMenuOpen(!menuOpen)}
-            disabled={isPendingToggle}
-            className="p-1.5 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors disabled:opacity-40"
-            aria-label={`Acciones para ${workstation.name}`}
-          >
-            {isPendingToggle
-              ? <Loader2 size={16} className="animate-spin" />
-              : <MoreVertical size={16} />
-            }
-          </button>
+      {/* Servicios que la necesitan */}
+      <div className="flex flex-wrap gap-1.5">
+        {linked.length === 0 ? (
+          <span className="text-xs text-xinuco-muted">Ningún servicio la usa todavía</span>
+        ) : (
+          linked.map(s => (
+            <span
+              key={s.id}
+              className="text-xs font-medium text-xinuco-text px-2.5 py-1 rounded-full"
+              style={{ border: '1px solid var(--border-color)' }}
+            >
+              {s.name}{showAudience && audienceTag(s) ? ` · ${audienceTag(s)}` : ''}
+            </span>
+          ))
+        )}
+      </div>
 
-          {menuOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+      <p className="text-xs text-xinuco-muted">
+        {station.in_use === 0
+          ? 'Sin citas próximas'
+          : `${station.in_use} ${station.in_use === 1 ? 'cita próxima la usa' : 'citas próximas la usan'}`}
+      </p>
 
-              <div
-                className="absolute right-0 top-full mt-1 w-44 rounded-xl shadow-2xl z-20 py-1.5 overflow-hidden animate-fade-in origin-top-right"
-                style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}
-              >
-                <button
-                  onClick={() => { onEdit(); setMenuOpen(false) }}
-                  className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-xs font-medium text-xinuco-text hover:bg-white/[0.04] transition-colors text-left"
-                >
-                  <Pencil size={13} style={{ color: 'var(--primary-color)' }} />
-                  Editar nombre
-                </button>
-
-                <button
-                  onClick={handleToggleStatus}
-                  disabled={isPendingToggle}
-                  className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-xs font-medium text-xinuco-text hover:bg-white/[0.04] transition-colors text-left"
-                >
-                  <Power
-                    size={13}
-                    className={workstation.is_active ? 'text-amber-400' : 'text-emerald-400'}
-                  />
-                  {workstation.is_active ? 'Desactivar' : 'Activar'}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </td>
-    </tr>
+      <footer className="flex items-center gap-2 pt-1">
+        <button
+          onClick={onEdit}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-xinuco-text border transition-colors hover:bg-white/[0.04]"
+          style={{ borderColor: 'var(--border-color)' }}
+        >
+          <Pencil size={13} style={{ color: 'var(--primary-color)' }} />
+          Editar
+        </button>
+        <button
+          onClick={onDelete}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 border transition-colors hover:bg-red-400/10"
+          style={{ borderColor: 'var(--border-color)' }}
+        >
+          <Trash2 size={13} />
+          Eliminar
+        </button>
+      </footer>
+    </article>
   )
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// SHEET PANEL — Crear / Editar Estación de Trabajo
+// CONFIRMACIÓN DE ELIMINAR (in-app)
+// ════════════════════════════════════════════════════════════════════════════════
+
+function ConfirmDelete({
+  station, onCancel, onDeleted,
+}: {
+  station: WorkstationOverviewItem
+  onCancel: () => void
+  onDeleted: () => void
+}) {
+  const [error, setError] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !isPending) onCancel() }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onCancel, isPending])
+
+  function confirmDelete() {
+    setError(null)
+    startTransition(async () => {
+      const result = await deleteWorkstation(station.id)
+      if (result.error) { setError(result.error); return }
+      onDeleted()
+    })
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+      onClick={e => { if (e.target === e.currentTarget && !isPending) onCancel() }}
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="ws-delete-title"
+        className="w-full max-w-sm rounded-xl p-6 flex flex-col gap-4 animate-fade-in"
+        style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}
+      >
+        <div className="flex flex-col gap-2">
+          <h2 id="ws-delete-title" className="text-lg font-bold text-xinuco-text">
+            ¿Eliminar &quot;{station.name}&quot;?
+          </h2>
+          <p className="text-sm text-xinuco-muted">
+            Se quitará de los servicios que la usan. Las citas no cambian.
+          </p>
+        </div>
+
+        {error && (
+          <p role="alert" className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2.5">
+            {error}
+          </p>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isPending}
+            className="flex-1 py-2.5 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
+            style={{ borderColor: 'var(--border-color)' }}
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={confirmDelete}
+            disabled={isPending}
+            className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+          >
+            {isPending ? <><Loader2 size={15} className="animate-spin" />Eliminando…</> : 'Eliminar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// SHEET PANEL — Crear / Editar estación
 // ════════════════════════════════════════════════════════════════════════════════
 
 function WorkstationSheet({
-  businessId,
-  workstation,
-  onClose,
-  onSuccess,
+  station, services, showAudience, onClose, onSaved,
 }: {
-  businessId: string
-  workstation: Workstation | null
+  station: WorkstationOverviewItem | null
+  services: ServiceOption[]
+  showAudience: boolean
   onClose: () => void
-  onSuccess: (saved: Workstation) => void
+  onSaved: () => void
 }) {
-  const isEditing   = Boolean(workstation)
+  const isEditing = Boolean(station)
   const backdropRef = useRef<HTMLDivElement>(null)
 
-  const [name, setName]           = useState(workstation?.name ?? '')
+  const [name, setName] = useState(station?.name ?? '')
+  const [selected, setSelected] = useState<string[]>(station?.service_ids ?? [])
   const [formError, setFormError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
-  // Cerrar con ESC
+  // Servicios ya vinculados que ya no están activos: se conservan al guardar.
+  const activeIds = new Set(services.map(s => s.id))
+  const hiddenLinked = (station?.service_ids ?? []).filter(id => !activeIds.has(id))
+
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
   }, [onClose])
 
-  // Prevenir scroll del body mientras el sheet está abierto
   useEffect(() => {
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = '' }
   }, [])
 
-  async function handleSubmit(e: React.FormEvent) {
+  const toggleService = (id: string) =>
+    setSelected(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))
+
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setFormError(null)
 
-    if (!name.trim()) return setFormError('El nombre de la estación es obligatorio.')
+    const trimmed = name.trim()
+    if (trimmed.length < 2 || trimmed.length > 40) {
+      return setFormError('El nombre debe tener entre 2 y 40 caracteres.')
+    }
 
+    const payload = { name: trimmed, service_ids: [...selected, ...hiddenLinked] }
     startTransition(async () => {
       try {
-        if (isEditing && workstation) {
-          const result = await updateWorkstation(workstation.id, { name })
-          if (result.error) { setFormError(result.error); return }
-          onSuccess({ ...workstation, name: name.trim() })
-        } else {
-          const result = await createWorkstation(businessId, { name })
-          if (result.error) { setFormError(result.error); return }
-          if (result.data && !Array.isArray(result.data)) {
-            onSuccess(result.data)
-          }
-        }
+        const result = station
+          ? await updateWorkstation(station.id, payload)
+          : await createWorkstation(payload)
+        if (result.error) { setFormError(result.error); return }
+        onSaved()
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Error inesperado. Intenta de nuevo.'
-        setFormError(message)
+        setFormError(err instanceof Error ? err.message : 'Error inesperado. Intenta de nuevo.')
       }
     })
   }
+
+  const label = 'text-xs font-semibold text-xinuco-muted uppercase tracking-wider'
 
   return (
     <div
       ref={backdropRef}
       className="fixed inset-0 z-50 flex justify-end"
       style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => { if (e.target === backdropRef.current) onClose() }}
+      onClick={e => { if (e.target === backdropRef.current) onClose() }}
     >
-      {/* Panel Sheet — responsivo */}
       <div
-        className="h-full overflow-y-auto animate-slide-in-right w-[95vw] sm:w-[400px]"
-        style={{
-          background:  'var(--bg-color)',
-          borderLeft:  '1px solid var(--border-color)',
-        }}
+        className="h-full overflow-y-auto animate-slide-in-right w-[95vw] sm:w-[420px]"
+        style={{ background: 'var(--bg-color)', borderLeft: '1px solid var(--border-color)' }}
       >
-        {/* Header del Sheet */}
         <div
           className="sticky top-0 z-10 flex items-center justify-between px-6 py-5"
           style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-color)' }}
         >
           <div>
             <h2 className="text-lg font-bold text-xinuco-text">
-              {isEditing ? 'Editar Estación' : 'Nueva Estación'}
+              {isEditing ? 'Editar estación' : 'Nueva estación'}
             </h2>
             <p className="text-xs text-xinuco-muted mt-0.5">
-              {isEditing
-                ? 'Actualiza el nombre de esta estación.'
-                : 'Añade una silla, cabina o espacio de trabajo.'}
+              Un espacio que se comparte entre barberos.
             </p>
           </div>
           <button
@@ -378,30 +463,61 @@ function WorkstationSheet({
           </button>
         </div>
 
-        {/* Formulario */}
         <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-5">
-
-          {/* Nombre */}
           <div className="flex flex-col gap-2">
-            <label htmlFor="ws-name" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-              Nombre de la estación *
-            </label>
+            <label htmlFor="ws-name" className={label}>Nombre *</label>
             <input
               id="ws-name"
               type="text"
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Ej: Silla 1, Cabina VIP, Spa Pedicure A"
+              onChange={e => setName(e.target.value)}
+              placeholder="Ej: Lavacabezas"
+              maxLength={40}
               required
               autoFocus
               className="input-base"
             />
-            <p className="text-xs text-xinuco-muted">
-              Usa nombres cortos y descriptivos para identificar el espacio físico.
-            </p>
           </div>
 
-          {/* Error de validación */}
+          <fieldset className="flex flex-col gap-2">
+            <legend className={`${label} mb-2`}>¿Qué servicios la necesitan?</legend>
+            {services.length === 0 ? (
+              <p className="text-xs text-xinuco-muted">
+                Aún no tienes servicios activos. Crea uno en Servicios y vuelve aquí.
+              </p>
+            ) : (
+              <div
+                className="flex flex-col gap-1 rounded-lg p-2 max-h-72 overflow-y-auto"
+                style={{ border: '1px solid var(--border-color)' }}
+              >
+                {services.map(s => (
+                  <label
+                    key={s.id}
+                    className="flex items-center gap-2.5 text-sm text-xinuco-text px-2 py-1.5 rounded-md hover:bg-white/[0.03] cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(s.id)}
+                      onChange={() => toggleService(s.id)}
+                    />
+                    <span className="flex-1">{s.name}</span>
+                    {showAudience && audienceTag(s) && (
+                      <span
+                        className="text-[11px] text-xinuco-muted px-2 py-0.5 rounded-full"
+                        style={{ border: '1px solid var(--border-color)' }}
+                      >
+                        {audienceTag(s)}
+                      </span>
+                    )}
+                  </label>
+                ))}
+              </div>
+            )}
+            <p className="text-xs text-xinuco-muted">
+              Si marcas varias estaciones iguales para un servicio, se suma la capacidad.
+            </p>
+          </fieldset>
+
           {formError && (
             <p
               role="alert"
@@ -411,7 +527,6 @@ function WorkstationSheet({
             </p>
           )}
 
-          {/* Botones */}
           <div className="flex gap-3 pt-2">
             <button
               type="button"
@@ -426,17 +541,9 @@ function WorkstationSheet({
               disabled={isPending}
               className="flex-1 btn-primary !py-3 flex items-center justify-center gap-2"
             >
-              {isPending ? (
-                <>
-                  <Loader2 size={15} className="animate-spin" />
-                  Guardando…
-                </>
-              ) : (
-                <>
-                  <Save size={15} />
-                  {isEditing ? 'Actualizar' : 'Guardar'}
-                </>
-              )}
+              {isPending
+                ? <><Loader2 size={15} className="animate-spin" />Guardando…</>
+                : <><Save size={15} />{isEditing ? 'Actualizar' : 'Guardar'}</>}
             </button>
           </div>
         </form>

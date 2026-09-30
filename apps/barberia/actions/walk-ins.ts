@@ -160,6 +160,7 @@ const START_WALK_IN_ERRORS: Record<string, string> = {
   walk_in_not_waiting: 'Este turno ya no está en espera.',
   staff_not_found:     'Elige un barbero válido.',
   service_required:    'Elige el servicio para atender.',
+  station_busy:        'La estación que necesita este servicio está ocupada ahora. Espera a que se libere o elige otro servicio.',
 }
 
 export async function startWalkIn(
