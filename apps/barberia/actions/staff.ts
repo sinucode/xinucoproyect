@@ -56,6 +56,8 @@ const SERVICES_INVALID = 'Algún servicio elegido no es válido.'
 
 type Supabase = Awaited<ReturnType<typeof createClient>>
 
+type WeeklyScheduleInput = { day_of_week: number; start_time: string; end_time: string }
+
 interface AdminContext {
   supabase:   Supabase
   userId:     string
@@ -327,6 +329,8 @@ export async function createStaffMember(
     full_name: string
     specialty_role: string
     service_ids?: string[] | 'all'
+    /** Horario semanal inicial (mismo formato que saveStaffSchedulesBatch). Omitido = sin horario. */
+    schedules?: WeeklyScheduleInput[]
   }
 ): Promise<ActionResult> {
   const auth = await requireAdmin()
@@ -336,6 +340,11 @@ export async function createStaffMember(
 
   const parsed = validateProfile(data)
   if ('error' in parsed) return { error: parsed.error }
+
+  // Validar el horario ANTES de crear nada: si es inválido no se crea el profesional.
+  const schedules = data.schedules ?? []
+  const scheduleError = validateWeeklySchedule(schedules)
+  if (scheduleError) return { error: scheduleError }
 
   let serviceIds: string[] = []
   if (Array.isArray(data.service_ids) && data.service_ids.length > 0) {
@@ -376,6 +385,17 @@ export async function createStaffMember(
       // Sin filas significaría "hace todo": mejor deshacer el alta que dejarlo mal configurado.
       await supabase.from('staff').delete().eq('id', created.id).eq('business_id', auth.businessId)
       return { error: `No se pudieron asignar los servicios: ${ssError.message}` }
+    }
+  }
+
+  if (schedules.length > 0) {
+    const { error: schedError } = await supabase
+      .from('staff_schedules')
+      .insert(toScheduleInsertRows(auth.businessId, created.id, schedules))
+    if (schedError) {
+      // Un profesional sin horario nunca aparece en la reserva: mejor deshacer el alta.
+      await supabase.from('staff').delete().eq('id', created.id).eq('business_id', auth.businessId)
+      return { error: `No se pudo guardar el horario: ${schedError.message}` }
     }
   }
 
@@ -545,15 +565,76 @@ export async function getStaffSchedules(staffId: string): Promise<StaffSchedule[
   return data as StaffSchedule[]
 }
 
+/** Filas listas para insertar: solo los campos esperados; los ids los fija el servidor. */
+function toScheduleInsertRows(businessId: string, staffId: string, schedules: WeeklyScheduleInput[]) {
+  return schedules.map(s => ({
+    business_id: businessId,
+    staff_id:    staffId,
+    day_of_week: s.day_of_week,
+    start_time:  s.start_time,
+    end_time:    s.end_time,
+  }))
+}
+
+/**
+ * Núcleo del reemplazo SEGURO del horario de UN profesional (ya validado y verificado como del negocio):
+ * guarda una copia del horario actual; si el insert falla, la restaura
+ * (así un error nunca deja a la persona sin horario).
+ */
+async function replaceStaffSchedule(
+  supabase: Supabase,
+  businessId: string,
+  staffId: string,
+  schedules: WeeklyScheduleInput[],
+): Promise<{ error?: string }> {
+  const toInsert = toScheduleInsertRows(businessId, staffId, schedules)
+
+  // PASO 1: copia del horario actual
+  const { data: snapshot, error: snapError } = await supabase
+    .from('staff_schedules')
+    .select('day_of_week, start_time, end_time')
+    .eq('staff_id', staffId)
+    .eq('business_id', businessId)
+  if (snapError) return { error: `No se pudo leer el horario actual: ${snapError.message}` }
+
+  // PASO 2: borrar
+  const { error: deleteError } = await supabase
+    .from('staff_schedules')
+    .delete()
+    .eq('staff_id', staffId)
+    .eq('business_id', businessId)
+  if (deleteError) return { error: `Error al limpiar horarios: ${deleteError.message}` }
+
+  // PASO 3: insertar el nuevo; si falla, restaurar la copia
+  if (toInsert.length > 0) {
+    const { error: insertError } = await supabase.from('staff_schedules').insert(toInsert)
+    if (insertError) {
+      const previous = ((snapshot ?? []) as WeeklyScheduleInput[])
+        .map(s => ({ ...s, business_id: businessId, staff_id: staffId }))
+      if (previous.length > 0) {
+        await supabase.from('staff_schedules').insert(previous)
+      }
+      return { error: 'No se pudo guardar el horario; se mantuvo el anterior.' }
+    }
+  }
+
+  return {}
+}
+
+function revalidateSchedulePaths() {
+  revalidatePath('/[slug]/dashboard/staff', 'page')
+  revalidatePath('/[slug]/dashboard/appointments', 'page')
+  revalidatePath('/[slug]/book', 'page')
+}
+
 /**
  * saveStaffSchedulesBatch — Reemplaza el horario semanal de un profesional.
- * Reemplazo SEGURO: guarda una copia del horario actual; si el insert falla, la restaura
- * (así un error nunca deja a la persona sin horario).
+ * Reemplazo SEGURO (ver replaceStaffSchedule).
  */
 export async function saveStaffSchedulesBatch(
   businessId: string,
   staffId: string,
-  schedules: { day_of_week: number; start_time: string; end_time: string }[]
+  schedules: WeeklyScheduleInput[]
 ): Promise<ActionResult> {
   const auth = await requireAdmin()
   if (!auth.ok) return { error: auth.error }
@@ -566,48 +647,57 @@ export async function saveStaffSchedulesBatch(
   const validation = validateWeeklySchedule(schedules)
   if (validation) return { error: validation }
 
-  // Solo los campos esperados; los ids los fija el servidor.
-  const toInsert = schedules.map(s => ({
-    business_id: auth.businessId,
-    staff_id:    staffId,
-    day_of_week: s.day_of_week,
-    start_time:  s.start_time,
-    end_time:    s.end_time,
-  }))
+  const result = await replaceStaffSchedule(supabase, auth.businessId, staffId, schedules)
+  if (result.error) return { error: result.error }
 
-  // PASO 1: copia del horario actual
-  const { data: snapshot, error: snapError } = await supabase
-    .from('staff_schedules')
-    .select('day_of_week, start_time, end_time')
-    .eq('staff_id', staffId)
-    .eq('business_id', auth.businessId)
-  if (snapError) return { error: `No se pudo leer el horario actual: ${snapError.message}` }
+  revalidateSchedulePaths()
+  return { success: true }
+}
 
-  // PASO 2: borrar
-  const { error: deleteError } = await supabase
-    .from('staff_schedules')
-    .delete()
-    .eq('staff_id', staffId)
-    .eq('business_id', auth.businessId)
-  if (deleteError) return { error: `Error al limpiar horarios: ${deleteError.message}` }
+const MAX_BULK_STAFF = 100
 
-  // PASO 3: insertar el nuevo; si falla, restaurar la copia
-  if (toInsert.length > 0) {
-    const { error: insertError } = await supabase.from('staff_schedules').insert(toInsert)
-    if (insertError) {
-      const previous = ((snapshot ?? []) as { day_of_week: number; start_time: string; end_time: string }[])
-        .map(s => ({ ...s, business_id: auth.businessId, staff_id: staffId }))
-      if (previous.length > 0) {
-        await supabase.from('staff_schedules').insert(previous)
-      }
-      return { error: 'No se pudo guardar el horario; se mantuvo el anterior.' }
-    }
+/**
+ * saveStaffSchedulesForMany — Aplica el MISMO horario semanal a varios profesionales
+ * ("Aplicar también a…"). Mismo guard de admin, verificación de negocio, validación y reemplazo
+ * seguro que saveStaffSchedulesBatch, por profesional. Un fallo en uno no detiene a los demás.
+ * `failed` trae los nombres de quienes no se pudieron guardar (o el id si no es del negocio).
+ */
+export async function saveStaffSchedulesForMany(
+  businessId: string,
+  staffIds: string[],
+  schedules: WeeklyScheduleInput[]
+): Promise<{ success?: boolean; error?: string; saved: number; failed: string[] }> {
+  const auth = await requireAdmin()
+  if (!auth.ok) return { error: auth.error, saved: 0, failed: [] }
+  const { supabase } = auth
+  if (businessId !== auth.businessId) return { error: DENIED, saved: 0, failed: [] }
+
+  if (!Array.isArray(staffIds) || staffIds.length === 0 || staffIds.some(id => typeof id !== 'string' || !id)) {
+    return { error: 'Elige al menos un profesional.', saved: 0, failed: [] }
+  }
+  const ids = Array.from(new Set(staffIds))
+  if (ids.length > MAX_BULK_STAFF) {
+    return { error: 'Demasiados profesionales en una sola operación.', saved: 0, failed: [] }
   }
 
-  revalidatePath('/[slug]/dashboard/staff', 'page')
-  revalidatePath('/[slug]/dashboard/appointments', 'page')
-  revalidatePath('/[slug]/book', 'page')
-  return { success: true }
+  const validation = validateWeeklySchedule(schedules)
+  if (validation) return { error: validation, saved: 0, failed: [] }
+
+  let saved = 0
+  const failed: string[] = []
+  for (const staffId of ids) {
+    const existing = await findOwnStaff(supabase, staffId, auth.businessId)
+    if (!existing) {
+      failed.push(staffId)
+      continue
+    }
+    const result = await replaceStaffSchedule(supabase, auth.businessId, staffId, schedules)
+    if (result.error) failed.push(existing.full_name)
+    else saved += 1
+  }
+
+  if (saved > 0) revalidateSchedulePaths()
+  return { success: failed.length === 0, saved, failed }
 }
 
 /**

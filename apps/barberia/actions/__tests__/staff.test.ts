@@ -3,6 +3,7 @@ import {
   updateStaffMember,
   toggleStaffStatus,
   saveStaffSchedulesBatch,
+  saveStaffSchedulesForMany,
 } from '../staff'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
@@ -177,6 +178,60 @@ describe('Staff Server Actions', () => {
       })
       expect(result.error).toBe('Algún servicio elegido no es válido.')
       expect(find(ops, 'staff', 'insert')).toHaveLength(0)
+    })
+    describe('con horario', () => {
+      const schedules = [
+        { day_of_week: 1, start_time: '09:00', end_time: '19:00' },
+        { day_of_week: 2, start_time: '09:00', end_time: '19:00' },
+      ]
+      const base = { full_name: 'John Doe', specialty_role: 'Barbero' }
+
+      it('inserta el horario con business_id y staff_id del servidor', async () => {
+        const { ops } = use({ handlers: { 'staff.insert': { data: { id: 'staff1' }, error: null } } })
+        const result = await createStaffMember('biz1', {
+          ...base,
+          schedules: [{ ...schedules[0], business_id: 'hack', staff_id: 'hack' } as any, schedules[1]],
+        })
+        expect(result.success).toBe(true)
+        expect(find(ops, 'staff_schedules', 'insert')[0].payload).toEqual([
+          { business_id: 'biz1', staff_id: 'staff1', day_of_week: 1, start_time: '09:00', end_time: '19:00' },
+          { business_id: 'biz1', staff_id: 'staff1', day_of_week: 2, start_time: '09:00', end_time: '19:00' },
+        ])
+      })
+
+      it('sin horario (omitido o vacío) no inserta filas', async () => {
+        const { ops } = use({ handlers: { 'staff.insert': { data: { id: 'staff1' }, error: null } } })
+        expect((await createStaffMember('biz1', base)).success).toBe(true)
+        expect((await createStaffMember('biz1', { ...base, schedules: [] })).success).toBe(true)
+        expect(find(ops, 'staff_schedules', 'insert')).toHaveLength(0)
+      })
+
+      it('si el horario es inválido no crea nada', async () => {
+        const { ops } = use({ handlers: { 'staff.insert': { data: { id: 'staff1' }, error: null } } })
+        const result = await createStaffMember('biz1', {
+          ...base,
+          schedules: [{ day_of_week: 1, start_time: '19:00', end_time: '09:00' }],
+        })
+        expect(result.error).toBe('Lunes: la hora de salida debe ser posterior a la de entrada.')
+        expect(find(ops, 'staff', 'insert')).toHaveLength(0)
+        expect(find(ops, 'staff_schedules', 'insert')).toHaveLength(0)
+      })
+
+      it('si falla el insert del horario borra el profesional creado', async () => {
+        const { ops } = use({
+          handlers: {
+            'staff.insert': { data: { id: 'staff1' }, error: null },
+            'staff_schedules.insert': { error: { message: 'boom' } },
+          },
+        })
+        const result = await createStaffMember('biz1', { ...base, schedules })
+        expect(result.error).toBe('No se pudo guardar el horario: boom')
+        expect(result.success).toBeUndefined()
+        const del = find(ops, 'staff', 'delete')
+        expect(del).toHaveLength(1)
+        expect(hasFilter(del[0], 'id', 'staff1') && hasFilter(del[0], 'business_id', 'biz1')).toBe(true)
+        expect(logAction).not.toHaveBeenCalled()
+      })
     })
   })
 
@@ -359,6 +414,81 @@ describe('Staff Server Actions', () => {
       expect(inserts[1].payload).toEqual([
         { day_of_week: 3, start_time: '10:00:00', end_time: '17:00:00', business_id: 'biz1', staff_id: 'staff1' },
       ])
+    })
+  })
+
+  describe('saveStaffSchedulesForMany', () => {
+    const schedule = [
+      { day_of_week: 1, start_time: '09:00', end_time: '19:00' },
+      { day_of_week: 2, start_time: '09:00', end_time: '19:00' },
+    ]
+
+    it('rechaza a quien no es administrador', async () => {
+      const { ops } = use({ role: 'barber' })
+      const result = await saveStaffSchedulesForMany('biz1', ['a', 'b'], schedule)
+      expect(result.error).toBe('Solo un administrador puede gestionar el equipo.')
+      expect(result.saved).toBe(0)
+      expect(find(ops, 'staff_schedules', 'delete')).toHaveLength(0)
+    })
+
+    it('rechaza si el businessId no coincide con el del perfil', async () => {
+      const { ops } = use()
+      const result = await saveStaffSchedulesForMany('otro-negocio', ['a'], schedule)
+      expect(result.error).toBe('Autorización denegada.')
+      expect(find(ops, 'staff_schedules', 'delete')).toHaveLength(0)
+    })
+
+    it('rechaza una lista vacía', async () => {
+      use()
+      const result = await saveStaffSchedulesForMany('biz1', [], schedule)
+      expect(result.error).toBe('Elige al menos un profesional.')
+    })
+
+    it('rechaza un horario inválido sin escribir nada', async () => {
+      const { ops } = use({ handlers: { 'staff.select': { data: STAFF_ROW, error: null } } })
+      const result = await saveStaffSchedulesForMany('biz1', ['a', 'b'], [
+        { day_of_week: 1, start_time: '18:00', end_time: '09:00' },
+      ])
+      expect(result.error).toBe('Lunes: la hora de salida debe ser posterior a la de entrada.')
+      expect(result.saved).toBe(0)
+      expect(find(ops, 'staff_schedules', 'delete')).toHaveLength(0)
+      expect(find(ops, 'staff_schedules', 'insert')).toHaveLength(0)
+    })
+
+    it('guarda el horario de cada profesional (sin duplicados) con ids del servidor', async () => {
+      const { ops } = use({ handlers: { 'staff.select': { data: STAFF_ROW, error: null } } })
+      const result = await saveStaffSchedulesForMany('biz1', ['a', 'b', 'a'], schedule)
+
+      expect(result).toEqual({ success: true, saved: 2, failed: [] })
+      const inserts = find(ops, 'staff_schedules', 'insert')
+      expect(inserts).toHaveLength(2)
+      expect(inserts.map(o => o.payload[0].staff_id)).toEqual(['a', 'b'])
+      expect(inserts.every(o => o.payload.every((r: any) => r.business_id === 'biz1'))).toBe(true)
+      expect(find(ops, 'staff_schedules', 'delete')).toHaveLength(2)
+      expect(revalidatePath).toHaveBeenCalledWith('/[slug]/book', 'page')
+    })
+
+    it('reporta a quien no es del negocio o falla, y sigue con los demás', async () => {
+      const { ops } = use({
+        handlers: {
+          // 'a' no es del negocio; 'b' y 'c' sí
+          'staff.select': (op) => {
+            const id = op.filters.find(f => f[1] === 'id')?.[2]
+            return { data: id === 'a' ? null : { ...STAFF_ROW, id, full_name: `Nombre ${id}` }, error: null }
+          },
+          // el insert de 'b' falla (y se restaura), el de 'c' funciona
+          'staff_schedules.insert': (op) =>
+            Array.isArray(op.payload) && op.payload[0]?.staff_id === 'b' && op.payload.length === schedule.length
+              ? { error: { message: 'boom' } }
+              : { error: null },
+        },
+      })
+      const result = await saveStaffSchedulesForMany('biz1', ['a', 'b', 'c'], schedule)
+
+      expect(result.success).toBe(false)
+      expect(result.saved).toBe(1)
+      expect(result.failed).toEqual(['a', 'Nombre b'])
+      expect(find(ops, 'staff_schedules', 'delete').every(o => !hasFilter(o, 'staff_id', 'a'))).toBe(true)
     })
   })
 })

@@ -1,8 +1,13 @@
 import {
   SPECIALTY_OPTIONS,
   STAFF_STATUS_LABELS,
+  WEEK_DAYS,
+  applyQuickSchedule,
   formatHour,
+  mostCommonSchedule,
+  scheduleRowsToState,
   specialtyLabel,
+  stateToScheduleRows,
   summarizeSchedule,
   validateWeeklySchedule,
 } from '../team-utils'
@@ -106,5 +111,96 @@ describe('validateWeeklySchedule', () => {
     expect(validateWeeklySchedule([row(0, '10:00', '10:00:30')])).toBe(
       'Domingo: la hora de salida debe ser posterior a la de entrada.',
     )
+  })
+})
+
+describe('scheduleRowsToState / stateToScheduleRows', () => {
+  it('devuelve los 7 días; los que no tienen filas descansan', () => {
+    const state = scheduleRowsToState([row(1, '09:00:00', '18:00:00')])
+    expect(Object.keys(state)).toHaveLength(7)
+    expect(state[1]).toEqual({ isWorking: true, start_time: '09:00', end_time: '18:00' })
+    expect(state[0].isWorking).toBe(false)
+    expect(state[3]).toEqual({ isWorking: false, start_time: '09:00', end_time: '19:00' })
+  })
+
+  it('con varias filas un día usa la entrada más temprana y la salida más tardía', () => {
+    const state = scheduleRowsToState([row(2, '13:00', '19:00'), row(2, '09:00', '12:00')])
+    expect(state[2]).toEqual({ isWorking: true, start_time: '09:00', end_time: '19:00' })
+  })
+
+  it('acepta null/undefined como sin horario', () => {
+    expect(stateToScheduleRows(scheduleRowsToState(null))).toEqual([])
+    expect(stateToScheduleRows(scheduleRowsToState(undefined))).toEqual([])
+  })
+
+  it('stateToScheduleRows: solo días que trabaja, lunes primero', () => {
+    const state = scheduleRowsToState([row(0, '10:00', '14:00'), row(6), row(1)])
+    expect(stateToScheduleRows(state)).toEqual([row(1), row(6), row(0, '10:00', '14:00')])
+  })
+
+  it('ida y vuelta conserva el horario', () => {
+    const rows = [row(1), row(2, '10:00', '17:00'), row(0, '10:00', '14:00')]
+    expect(stateToScheduleRows(scheduleRowsToState(rows))).toEqual([row(1), row(2, '10:00', '17:00'), row(0, '10:00', '14:00')])
+  })
+
+  it('WEEK_DAYS va de lunes a domingo', () => {
+    expect(WEEK_DAYS.map(d => d.index)).toEqual([1, 2, 3, 4, 5, 6, 0])
+  })
+})
+
+describe('applyQuickSchedule', () => {
+  it('los días elegidos trabajan con esas horas y los demás descansan', () => {
+    const start = scheduleRowsToState([row(0, '10:00', '14:00'), row(3, '08:00', '12:00')])
+    const next = applyQuickSchedule(start, [1, 2, 3, 4, 5], '09:00', '19:00')
+    expect(stateToScheduleRows(next)).toEqual([1, 2, 3, 4, 5].map(d => row(d, '09:00', '19:00')))
+    expect(next[0].isWorking).toBe(false)
+    expect(next[6].isWorking).toBe(false)
+  })
+
+  it('no muta el estado original', () => {
+    const start = scheduleRowsToState([row(0, '10:00', '14:00')])
+    const snapshot = JSON.parse(JSON.stringify(start))
+    applyQuickSchedule(start, [1], '09:00', '19:00')
+    expect(start).toEqual(snapshot)
+  })
+
+  it('sin días elegidos deja todo en descanso', () => {
+    const next = applyQuickSchedule(scheduleRowsToState([row(1)]), [], '09:00', '19:00')
+    expect(stateToScheduleRows(next)).toEqual([])
+  })
+
+  it('el resultado valida y se resume como Lun–Sáb', () => {
+    const next = applyQuickSchedule(scheduleRowsToState([]), [1, 2, 3, 4, 5, 6], '09:00', '19:00')
+    const rows = stateToScheduleRows(next)
+    expect(validateWeeklySchedule(rows)).toBeNull()
+    expect(summarizeSchedule(rows)).toBe('Lun–Sáb 9:00–19:00')
+  })
+})
+
+describe('mostCommonSchedule', () => {
+  const weekdays = (start: string, end: string) => [1, 2, 3, 4, 5].map(d => row(d, start, end))
+
+  it('elige el horario más repetido entre activos', () => {
+    const members = [
+      { is_active: true, schedules: weekdays('09:00', '18:00') },
+      { is_active: true, schedules: weekdays('10:00', '20:00') },
+      { is_active: true, schedules: weekdays('10:00:00', '20:00:00') },
+    ]
+    expect(mostCommonSchedule(members)).toEqual(members[1].schedules)
+  })
+
+  it('ignora inactivos y quienes no tienen horario', () => {
+    const members = [
+      { is_active: false, schedules: weekdays('08:00', '12:00') },
+      { is_active: false, schedules: weekdays('08:00', '12:00') },
+      { is_active: true, schedules: [] },
+      { is_active: true, schedules: weekdays('09:00', '18:00') },
+    ]
+    expect(mostCommonSchedule(members)).toEqual(members[3].schedules)
+  })
+
+  it('devuelve null si nadie tiene horario', () => {
+    expect(mostCommonSchedule([])).toBeNull()
+    expect(mostCommonSchedule([{ is_active: true, schedules: [] }])).toBeNull()
   })
 })

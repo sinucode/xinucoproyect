@@ -5,7 +5,7 @@
 import { useState, useEffect, useRef, useTransition, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { X, Loader2, Save, CalendarDays, Plus, Trash2, CheckCircle2 } from 'lucide-react'
-import { saveStaffSchedulesBatch } from '@/actions/staff'
+import { saveStaffSchedulesBatch, saveStaffSchedulesForMany } from '@/actions/staff'
 import {
   getStaffAvailability,
   deleteStaffBreak,
@@ -15,18 +15,16 @@ import {
 import { BreakForm, TimeOffForm } from '@/components/dashboard/agenda/StaffAvailabilityForms'
 import { TIME_OFF_KIND_LABEL } from '@/components/dashboard/agenda/staff-day-utils'
 import { apptDateKey, dayLabel } from '@/lib/agenda-time'
-import { formatHour, validateWeeklySchedule } from '@/lib/team-utils'
-
-// 0 = Domingo, 1 = Lunes ... 6 = Sábado (semana empezando en lunes)
-const DAYS_ORDER = [
-  { index: 1, name: 'Lunes',     short: 'Lun' },
-  { index: 2, name: 'Martes',    short: 'Mar' },
-  { index: 3, name: 'Miércoles', short: 'Mié' },
-  { index: 4, name: 'Jueves',    short: 'Jue' },
-  { index: 5, name: 'Viernes',   short: 'Vie' },
-  { index: 6, name: 'Sábado',    short: 'Sáb' },
-  { index: 0, name: 'Domingo',   short: 'Dom' },
-]
+import {
+  WEEK_DAYS,
+  formatHour,
+  scheduleRowsToState,
+  stateToScheduleRows,
+  summarizeSchedule,
+  validateWeeklySchedule,
+  type WeeklyScheduleState,
+} from '@/lib/team-utils'
+import { WeeklyScheduleEditor } from './WeeklyScheduleEditor'
 
 const TABS = [
   { id: 'weekly',   label: 'Horario semanal' },
@@ -34,13 +32,6 @@ const TABS = [
   { id: 'time_off', label: 'Permisos' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
-
-interface DayState {
-  day_of_week: number
-  isWorking: boolean
-  start_time: string
-  end_time: string
-}
 
 interface ScheduleRowInput {
   day_of_week: number
@@ -54,31 +45,11 @@ interface StaffScheduleSheetProps {
   staffName: string
   /** Horario semanal actual (viene del servidor con la página). */
   schedules: ScheduleRowInput[]
+  /** Todo el equipo (para "Copiar de…" y "Aplicar también a…"). Puede incluir a este profesional. */
+  teamMembers: { id: string; full_name: string; is_active?: boolean; schedules: ScheduleRowInput[] }[]
   /** Hoy en la zona del negocio ('YYYY-MM-DD'). */
   todayKey: string
   onClose: () => void
-}
-
-/** Estado inicial de los 7 días a partir de las filas guardadas. */
-function buildDaysState(schedules: ScheduleRowInput[]): Record<number, DayState> {
-  const state: Record<number, DayState> = {}
-  DAYS_ORDER.forEach(day => {
-    const rows = schedules.filter(s => s.day_of_week === day.index)
-    if (rows.length > 0) {
-      // Si hay varias filas ese día: entrada más temprana y salida más tardía
-      const starts = rows.map(r => r.start_time.substring(0, 5)).sort()
-      const ends = rows.map(r => r.end_time.substring(0, 5)).sort()
-      state[day.index] = {
-        day_of_week: day.index,
-        isWorking: true,
-        start_time: starts[0],
-        end_time: ends[ends.length - 1],
-      }
-    } else {
-      state[day.index] = { day_of_week: day.index, isWorking: false, start_time: '09:00', end_time: '18:00' }
-    }
-  })
-  return state
 }
 
 export function StaffScheduleSheet({
@@ -86,6 +57,7 @@ export function StaffScheduleSheet({
   staffId,
   staffName,
   schedules,
+  teamMembers,
   todayKey,
   onClose,
 }: StaffScheduleSheetProps) {
@@ -93,10 +65,16 @@ export function StaffScheduleSheet({
   const backdropRef = useRef<HTMLDivElement>(null)
 
   const [tab, setTab] = useState<TabId>('weekly')
-  const [daysState, setDaysState] = useState<Record<number, DayState>>(() => buildDaysState(schedules))
+  const [daysState, setDaysState] = useState<WeeklyScheduleState>(() => scheduleRowsToState(schedules))
   const [isSaving, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
+  const [savedMessage, setSavedMessage] = useState<string | null>(null)
+  const [copyFrom, setCopyFrom] = useState('')
+  const [applyTo, setApplyTo] = useState<Set<string>>(new Set())
+
+  // Otros profesionales: origen de "Copiar de…" y destino de "Aplicar también a…"
+  const otherMembers = teamMembers.filter(m => m.id !== staffId)
+  const otherActive = otherMembers.filter(m => m.is_active !== false)
 
   // Almuerzos/descansos y permisos
   const [availability, setAvailability] = useState<StaffAvailability | null>(null)
@@ -167,41 +145,42 @@ export function StaffScheduleSheet({
     }
   }
 
-  const handleToggleDay = (dayIndex: number) => {
-    setSaved(false)
-    setDaysState(prev => ({
-      ...prev,
-      [dayIndex]: {
-        ...prev[dayIndex],
-        isWorking: !prev[dayIndex].isWorking
-      }
-    }))
+  const handleScheduleChange = (next: WeeklyScheduleState) => {
+    setSavedMessage(null)
+    setDaysState(next)
   }
 
-  const handleTimeChange = (dayIndex: number, field: 'start_time' | 'end_time', value: string) => {
-    setSaved(false)
-    setDaysState(prev => ({
-      ...prev,
-      [dayIndex]: {
-        ...prev[dayIndex],
-        [field]: value
-      }
-    }))
+  const handleCopyFrom = (memberId: string) => {
+    setCopyFrom(memberId)
+    const source = otherMembers.find(m => m.id === memberId)
+    if (!source) return
+    setSavedMessage(null)
+    setError(null)
+    setDaysState(scheduleRowsToState(source.schedules))
+  }
+
+  const toggleApplyTo = (id: string) => {
+    setSavedMessage(null)
+    setApplyTo(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const allSelected = otherActive.length > 0 && otherActive.every(m => applyTo.has(m.id))
+  const toggleAllTeam = () => {
+    setSavedMessage(null)
+    setApplyTo(allSelected ? new Set() : new Set(otherActive.map(m => m.id)))
   }
 
   const handleSave = () => {
     setError(null)
-    setSaved(false)
+    setSavedMessage(null)
 
     // 1. Solo los días activos, en orden de semana
-    const activeSchedules = DAYS_ORDER
-      .map(d => daysState[d.index])
-      .filter(day => day?.isWorking)
-      .map(day => ({
-        day_of_week: day.day_of_week,
-        start_time: day.start_time,
-        end_time: day.end_time,
-      }))
+    const activeSchedules = stateToScheduleRows(daysState)
 
     // 2. Validar en el cliente (el servidor vuelve a validar)
     const validation = validateWeeklySchedule(activeSchedules)
@@ -210,17 +189,32 @@ export function StaffScheduleSheet({
       return
     }
 
+    const extraIds = otherActive.filter(m => applyTo.has(m.id)).map(m => m.id)
+
     startTransition(async () => {
       try {
         // 3. Enviar el horario completo en un solo viaje
-        const result = await saveStaffSchedulesBatch(businessId, staffId, activeSchedules)
-
-        if (result.error) {
-          setError(result.error)
-          return
+        if (extraIds.length === 0) {
+          const result = await saveStaffSchedulesBatch(businessId, staffId, activeSchedules)
+          if (result.error) {
+            setError(result.error)
+            return
+          }
+          setSavedMessage('Horario guardado.')
+        } else {
+          const result = await saveStaffSchedulesForMany(businessId, [staffId, ...extraIds], activeSchedules)
+          if (result.error) {
+            setError(result.error)
+            return
+          }
+          if (result.failed.length > 0) {
+            setError(`No se pudo guardar el horario de: ${result.failed.join(', ')}.`)
+          }
+          if (result.saved > 0) {
+            setSavedMessage(`Horario guardado para ${result.saved} ${result.saved === 1 ? 'profesional' : 'profesionales'}.`)
+            setApplyTo(new Set())
+          }
         }
-
-        setSaved(true)
         router.refresh()
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Ocurrió un error inesperado al guardar.')
@@ -228,7 +222,7 @@ export function StaffScheduleSheet({
     })
   }
 
-  const dayShort = (dow: number) => DAYS_ORDER.find(d => d.index === dow)?.short ?? ''
+  const dayShort = (dow: number) => WEEK_DAYS.find(d => d.index === dow)?.short ?? ''
   const hoursText = (start: string, end: string) => `${formatHour(start)}–${formatHour(end)}`
   const timeFromIso = (iso: string) => formatHour(iso.slice(11, 16))
 
@@ -312,101 +306,91 @@ export function StaffScheduleSheet({
         {tab === 'weekly' && (
           <>
             <div className="flex-1 p-6" role="tabpanel" id="schedule-panel-weekly" aria-labelledby="schedule-tab-weekly">
-              <div className="flex flex-col gap-0 rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}>
-                {DAYS_ORDER.map((day, idx) => {
-                  const state = daysState[day.index]
-                  if (!state) return null
-
-                  const isLast = idx === DAYS_ORDER.length - 1
-
-                  return (
-                    <div
-                      key={day.index}
-                      className="flex flex-col p-4 transition-colors"
-                      style={{
-                        borderBottom: isLast ? 'none' : '1px solid var(--border-color)',
-                        background: state.isWorking ? 'transparent' : 'rgba(0,0,0,0.2)'
-                      }}
+              <div className="flex flex-col gap-5">
+                {otherMembers.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    <label htmlFor="schedule-copy-from" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
+                      Copiar de…
+                    </label>
+                    <select
+                      id="schedule-copy-from"
+                      value={copyFrom}
+                      onChange={(e) => handleCopyFrom(e.target.value)}
+                      disabled={isSaving}
+                      className="input-base"
                     >
-                      {/* Fila del día + Toggle */}
-                      <div className="flex items-center justify-between">
-                        <span className={`text-sm font-semibold ${state.isWorking ? 'text-xinuco-text' : 'text-xinuco-muted'}`}>
-                          {day.name}
+                      <option value="" disabled>Elige a alguien del equipo…</option>
+                      {otherMembers.map(m => (
+                        <option key={m.id} value={m.id}>
+                          {m.full_name} — {summarizeSchedule(m.schedules)}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-xinuco-muted">Se carga aquí; no se guarda hasta que pulses Guardar horario.</p>
+                  </div>
+                )}
+
+                <WeeklyScheduleEditor value={daysState} onChange={handleScheduleChange} disabled={isSaving} />
+
+                <p className="text-xs text-xinuco-muted">
+                  ¿Un día puntual distinto (festivo, cita médica)? Usa la pestaña{' '}
+                  <button
+                    type="button"
+                    onClick={() => setTab('time_off')}
+                    className="font-semibold underline underline-offset-2 hover:text-xinuco-text transition-colors"
+                    style={{ color: 'var(--primary-color)' }}
+                  >
+                    Permisos
+                  </button>
+                  .
+                </p>
+
+                {otherActive.length > 0 && (
+                  <details className="rounded-xl group" style={{ border: '1px solid var(--border-color)' }}>
+                    <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-xinuco-text flex items-center justify-between gap-2">
+                      <span>Aplicar también a…</span>
+                      {applyTo.size > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ background: 'color-mix(in srgb, var(--primary-color) 18%, transparent)', color: 'var(--primary-color)' }}>
+                          {applyTo.size}
                         </span>
-
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={state.isWorking}
-                          aria-label={`Trabaja el ${day.name.toLowerCase()}`}
-                          onClick={() => handleToggleDay(day.index)}
-                          disabled={isSaving}
-                          className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none disabled:opacity-50"
-                          style={{
-                            backgroundColor: state.isWorking ? 'var(--primary-color)' : 'var(--border-color)',
-                          }}
-                        >
-                          <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
-                              state.isWorking ? 'translate-x-6' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      </div>
-
-                      {/* Fila de horas (condicional) */}
-                      {state.isWorking && (
-                        <div className="grid grid-cols-2 gap-4 mt-4 animate-fade-in">
-                          <div className="flex flex-col gap-1.5">
-                            <label htmlFor={`start-${day.index}`} className="text-[10px] font-semibold text-xinuco-muted uppercase tracking-wider">
-                              Entrada
-                            </label>
-                            <input
-                              id={`start-${day.index}`}
-                              type="time"
-                              value={state.start_time}
-                              onChange={(e) => handleTimeChange(day.index, 'start_time', e.target.value)}
-                              disabled={isSaving}
-                              className="w-full rounded-lg px-3 py-2.5 text-sm outline-none transition-all bg-xinuco-bg text-xinuco-text border focus:ring-2 disabled:opacity-50"
-                              style={{
-                                borderColor: 'var(--border-color)',
-                                '--tw-ring-color': 'color-mix(in srgb, var(--primary-color) 25%, transparent)'
-                              } as React.CSSProperties}
-                            />
-                          </div>
-                          <div className="flex flex-col gap-1.5">
-                            <label htmlFor={`end-${day.index}`} className="text-[10px] font-semibold text-xinuco-muted uppercase tracking-wider">
-                              Salida
-                            </label>
-                            <input
-                              id={`end-${day.index}`}
-                              type="time"
-                              value={state.end_time}
-                              onChange={(e) => handleTimeChange(day.index, 'end_time', e.target.value)}
-                              disabled={isSaving}
-                              className="w-full rounded-lg px-3 py-2.5 text-sm outline-none transition-all bg-xinuco-bg text-xinuco-text border focus:ring-2 disabled:opacity-50"
-                              style={{
-                                borderColor: 'var(--border-color)',
-                                '--tw-ring-color': 'color-mix(in srgb, var(--primary-color) 25%, transparent)'
-                              } as React.CSSProperties}
-                            />
-                          </div>
-                        </div>
                       )}
+                    </summary>
+                    <div className="flex flex-col" style={{ borderTop: '1px solid var(--border-color)' }}>
+                      <label
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-sm font-semibold text-xinuco-text cursor-pointer hover:bg-white/[0.03]"
+                        style={{ borderBottom: '1px solid var(--border-color)' }}
+                      >
+                        <input type="checkbox" checked={allSelected} onChange={toggleAllTeam} disabled={isSaving} />
+                        Todo el equipo
+                      </label>
+                      {otherActive.map((m, idx) => (
+                        <label
+                          key={m.id}
+                          className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-xinuco-text cursor-pointer hover:bg-white/[0.03]"
+                          style={{ borderBottom: idx === otherActive.length - 1 ? 'none' : '1px solid var(--border-color)' }}
+                        >
+                          <input type="checkbox" checked={applyTo.has(m.id)} onChange={() => toggleApplyTo(m.id)} disabled={isSaving} />
+                          <span className="flex-1 min-w-0 break-words">{m.full_name}</span>
+                          <span className="text-[11px] text-xinuco-muted shrink-0">{summarizeSchedule(m.schedules)}</span>
+                        </label>
+                      ))}
+                      <p className="px-4 py-2.5 text-[11px] text-xinuco-muted" style={{ borderTop: '1px solid var(--border-color)' }}>
+                        Su horario actual será reemplazado por este.
+                      </p>
                     </div>
-                  )
-                })}
+                  </details>
+                )}
               </div>
 
-              {error && (
+              {error && error !== validateWeeklySchedule(stateToScheduleRows(daysState)) && (
                 <p role="alert" className="mt-4 text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2.5 animate-fade-in">
                   {error}
                 </p>
               )}
-              {saved && !error && (
+              {savedMessage && (
                 <p role="status" className="mt-4 flex items-center gap-2 text-xs text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 rounded-lg px-4 py-2.5 animate-fade-in">
                   <CheckCircle2 size={14} />
-                  Horario guardado.
+                  {savedMessage}
                 </p>
               )}
             </div>

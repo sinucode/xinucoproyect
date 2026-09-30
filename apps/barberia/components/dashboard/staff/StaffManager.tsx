@@ -20,9 +20,19 @@ import { AUDIENCE_LABELS } from '@/lib/service-audience'
 import {
   SPECIALTY_OPTIONS,
   STAFF_STATUS_LABELS,
+  DEFAULT_END_TIME,
+  DEFAULT_START_TIME,
+  DEFAULT_WORK_DAYS,
+  applyQuickSchedule,
+  mostCommonSchedule,
+  scheduleRowsToState,
   specialtyLabel,
+  stateToScheduleRows,
   summarizeSchedule,
+  validateWeeklySchedule,
+  type WeeklyScheduleState,
 } from '@/lib/team-utils'
+import { WeeklyScheduleEditor } from './WeeklyScheduleEditor'
 
 type TeamService = TeamOverview['services'][number]
 
@@ -139,6 +149,7 @@ export function StaffManager({ businessId, members, services, todayKey }: StaffM
           businessId={businessId}
           member={editMember}
           services={services}
+          members={list}
           onClose={() => setSheet(null)}
           onDone={() => { setSheet(null); router.refresh() }}
         />
@@ -151,6 +162,7 @@ export function StaffManager({ businessId, members, services, todayKey }: StaffM
           staffId={scheduleMember.id}
           staffName={scheduleMember.full_name}
           schedules={scheduleMember.schedules}
+          teamMembers={list.map(m => ({ id: m.id, full_name: m.full_name, is_active: m.is_active, schedules: m.schedules }))}
           todayKey={todayKey}
           onClose={() => setScheduleMemberId(null)}
         />
@@ -435,6 +447,7 @@ function StaffSheet({
   businessId,
   member,
   services,
+  members,
   onClose,
   onDone,
 }: {
@@ -442,6 +455,7 @@ function StaffSheet({
   businessId: string
   member: TeamMember | null
   services: TeamService[]
+  members: TeamMember[]
   onClose: () => void
   onDone: () => void
 }) {
@@ -459,6 +473,14 @@ function StaffSheet({
   const [selected, setSelected] = useState<Set<string>>(
     new Set((member?.service_ids ?? []).filter(id => activeIds.has(id))),
   )
+  // Horario (solo al crear): el más común del equipo activo, o Lun–Sáb 9:00–19:00
+  const [scheduleState, setScheduleState] = useState<WeeklyScheduleState>(() => {
+    const common = mostCommonSchedule(members)
+    return common
+      ? scheduleRowsToState(common)
+      : applyQuickSchedule(scheduleRowsToState([]), DEFAULT_WORK_DAYS, DEFAULT_START_TIME, DEFAULT_END_TIME)
+  })
+  const [copyFrom, setCopyFrom] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
@@ -503,11 +525,17 @@ function StaffSheet({
 
     const serviceIds: string[] | 'all' = servicesMode === 'all' ? 'all' : Array.from(selected)
 
+    const scheduleRows = stateToScheduleRows(scheduleState)
+    if (mode === 'create') {
+      const scheduleError = validateWeeklySchedule(scheduleRows)
+      if (scheduleError) return setFormError(scheduleError)
+    }
+
     startTransition(async () => {
       try {
         const result = mode === 'edit' && member
           ? await updateStaffMember(member.id, { full_name: fullName, specialty_role: role, service_ids: serviceIds })
-          : await createStaffMember(businessId, { full_name: fullName, specialty_role: role, service_ids: serviceIds })
+          : await createStaffMember(businessId, { full_name: fullName, specialty_role: role, service_ids: serviceIds, schedules: scheduleRows })
 
         if (result.error) {
           setFormError(result.error)
@@ -658,6 +686,42 @@ function StaffSheet({
               )
             )}
           </fieldset>
+
+          {/* Horario (solo al crear; al editar vive en el sheet Horario) */}
+          {mode === 'create' && (
+            <fieldset className="flex flex-col gap-3">
+              <legend className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider mb-1">
+                Horario
+              </legend>
+
+              {members.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="staff-copy-from" className="text-xs text-xinuco-muted">
+                    Copiar de…
+                  </label>
+                  <select
+                    id="staff-copy-from"
+                    value={copyFrom}
+                    onChange={(e) => {
+                      setCopyFrom(e.target.value)
+                      const source = members.find(m => m.id === e.target.value)
+                      if (source) setScheduleState(scheduleRowsToState(source.schedules))
+                    }}
+                    className="input-base"
+                  >
+                    <option value="" disabled>Elige a alguien del equipo…</option>
+                    {members.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.full_name} — {summarizeSchedule(m.schedules)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <WeeklyScheduleEditor value={scheduleState} onChange={setScheduleState} disabled={isPending} />
+            </fieldset>
+          )}
 
           {formError && (
             <p role="alert" className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2.5 animate-fade-in">
