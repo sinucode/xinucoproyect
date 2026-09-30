@@ -28,6 +28,15 @@ export type {
   LedgerEntryType,
   StaffLedgerEntry,
   StaffLedgerBalance,
+  Expense,
+  ExpenseCategory,
+  ExpensePaymentMethod,
+  ProfitLossResult,
+  ProfitLossCategoryEntry,
+  PaymentMethod,
+  CashRegisterShift,
+  Sale,
+  Payment,
 } from './database'
 
 export type { Database as DatabaseGenerated } from './database.types'

@@ -54,12 +54,25 @@ export async function getShiftSummary(shiftId: string) {
     console.error('Error fetching cash payments for summary:', paymentsError)
   }
 
+  // Gastos pagados con efectivo de la caja en este turno (salen del cajón)
+  const { data: cashExpenses, error: expensesError } = await supabase
+    .from('expenses')
+    .select('amount')
+    .eq('shift_id', shiftId)
+    .eq('payment_method', 'cash_register')
+
+  if (expensesError) {
+    console.error('Error fetching cash expenses for summary:', expensesError)
+  }
+
   const totalSales = (sales ?? []).reduce((sum, s) => sum + (s.total_amount ?? 0), 0)
   const totalCashCollected = (cashPayments ?? []).reduce((sum, p) => sum + (p.amount ?? 0), 0)
+  const totalCashExpenses = (cashExpenses ?? []).reduce((sum, e) => sum + (e.amount ?? 0), 0)
 
   return {
     totalSales,
     totalCashCollected,
+    totalCashExpenses,
   }
 }
 
@@ -75,7 +88,10 @@ export async function getActiveShiftDetails(businessId: string) {
   return {
     shift,
     totalSales: summary.totalSales,
-    expectedCashBalance: shift.opening_balance + summary.totalCashCollected,
+    totalCashCollected: summary.totalCashCollected,
+    totalCashExpenses: summary.totalCashExpenses,
+    // Efectivo esperado = base + cobros en efectivo − gastos pagados con efectivo de la caja
+    expectedCashBalance: shift.opening_balance + summary.totalCashCollected - summary.totalCashExpenses,
   }
 }
 

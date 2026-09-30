@@ -356,8 +356,11 @@ export interface Database {
       }
       expenses: {
         Row:    Expense
-        Insert: Omit<Expense, 'id' | 'created_at'>
-        Update: Partial<Omit<Expense, 'id' | 'created_at'>>
+        Insert: Omit<Expense, 'id' | 'created_at' | 'updated_at' | 'payment_method' | 'shift_id'> & {
+          payment_method?: ExpensePaymentMethod
+          shift_id?:       string | null
+        }
+        Update: Partial<Omit<Expense, 'id' | 'created_at' | 'updated_at'>>
       }
       walk_ins: {
         Row:    WalkIn
@@ -721,18 +724,26 @@ export interface StaffLedgerBalance {
 }
 
 // ---------- Tabla: expenses (RF16) ----------
-export type ExpenseCategory = 'rent' | 'supplies' | 'utilities' | 'salary' | 'other'
+// Categoría como TEXT libre en BD; las categorías conocidas viven en lib/expense-utils.ts (app).
+export type ExpenseCategory =
+  | 'rent' | 'utilities' | 'supplies' | 'salary' | 'maintenance' | 'marketing' | 'taxes' | 'other'
+
+/** Cómo se pagó el gasto. 'cash_register' = efectivo de la caja (se resta al arqueo del turno). */
+export type ExpensePaymentMethod = 'cash_register' | 'transfer' | 'card' | 'other'
 
 export interface Expense {
-  id:           string
-  business_id:  string
-  category:     ExpenseCategory
-  description:  string
-  amount:       number   // INTEGER COP — NUNCA FLOAT
-  expense_date: string   // DATE string 'YYYY-MM-DD'
-  is_recurring: boolean
-  created_by:   string | null
-  created_at:   string
+  id:             string
+  business_id:    string
+  category:       ExpenseCategory | (string & {})
+  description:    string
+  amount:         number   // INTEGER COP — NUNCA FLOAT
+  expense_date:   string   // DATE string 'YYYY-MM-DD' (fecha local del negocio)
+  is_recurring:   boolean
+  created_by:     string | null
+  created_at:     string
+  payment_method: ExpensePaymentMethod
+  shift_id:       string | null   // turno de caja (solo si payment_method = 'cash_register')
+  updated_at:     string
 }
 
 // ---------- P&G Result (retorno de get_profit_loss RPC) ----------
@@ -743,17 +754,22 @@ export interface ProfitLossCategoryEntry {
 
 export interface ProfitLossResult {
   revenue: {
-    services: number
-    retail:   number
-    total:    number
+    services:    number
+    retail:      number
+    total:       number     // servicios + productos (sin propinas)
+    discounts:   number     // descuentos ya restados de los ingresos
+    sales_count: number
   }
+  tips:          number     // propinas: NO son ingreso del negocio
+  cost_of_goods: number     // costo de productos vendidos
   expenses: {
     total:       number
     by_category: ProfitLossCategoryEntry[]
   }
-  gross_profit: number
-  commissions:  number
-  net_profit:   number
+  gross_profit: number      // ingresos − costo de productos
+  commissions:  number      // comisiones reales (staff_ledger)
+  net_profit:   number      // bruta − comisiones − gastos
+  margin_pct:   number | null
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

@@ -1,513 +1,493 @@
 'use client'
 
-import { useState, useTransition, useCallback, useRef, useEffect } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Plus,
   X,
   Loader2,
   Trash2,
+  Pencil,
+  Repeat,
+  Lock,
+  ChevronLeft,
+  ChevronRight,
+  Banknote,
+  ArrowLeftRight,
+  CreditCard,
+  Wallet,
+  AlertCircle,
+  Info,
   Receipt,
-  TrendingUp,
-  TrendingDown,
-  ChevronDown,
   ToggleLeft,
   ToggleRight,
-  CalendarDays,
+  type LucideIcon,
 } from 'lucide-react'
 import {
   createExpense,
+  updateExpense,
   deleteExpense,
-  getProfitLoss,
+  registerRecurring,
+  type ExpensesOverview,
+  type ExpenseInput,
 } from '@/actions/expenses'
-import type { ExpenseCreateData } from '@/actions/expenses'
-import type { Expense, ProfitLossResult } from '@xinuco/types'
-import { AdminPageHeader } from '@xinuco/ui'
-import { AdminEmptyState } from '@xinuco/ui'
+import type { Expense, ExpensePaymentMethod, ProfitLossResult } from '@xinuco/types'
+import { AdminPageHeader, AdminEmptyState } from '@xinuco/ui'
 import { formatCOP } from '@xinuco/utils'
+import {
+  EXPENSE_CATEGORIES,
+  PAYMENT_METHODS,
+  categoryLabel,
+  categoryBadgeClass,
+  categoryBarColor,
+  paymentMethodLabel,
+  type PendingRecurringExpense,
+} from '@/lib/expense-utils'
 
-// ── Categorías de gasto ───────────────────────────────────────────────────────
+// ── Constantes / helpers ──────────────────────────────────────────────────────
 
-export const CATEGORY_LABELS: Record<string, string> = {
-  rent:      'Arriendo',
-  supplies:  'Insumos',
-  utilities: 'Servicios',
-  salary:    'Nómina',
-  other:     'Otros',
+const MAX_AMOUNT = 100_000_000
+
+const PAYMENT_ICONS: Record<ExpensePaymentMethod, LucideIcon> = {
+  cash_register: Banknote,
+  transfer:      ArrowLeftRight,
+  card:          CreditCard,
+  other:         Wallet,
 }
 
-const CATEGORY_OPTIONS = Object.entries(CATEGORY_LABELS).map(([value, label]) => ({
-  value,
-  label,
-}))
-
-const CATEGORY_COLORS: Record<string, string> = {
-  rent:      'text-blue-400 bg-blue-400/10 border-blue-400/20',
-  supplies:  'text-amber-400 bg-amber-400/10 border-amber-400/20',
-  utilities: 'text-purple-400 bg-purple-400/10 border-purple-400/20',
-  salary:    'text-green-400 bg-green-400/10 border-green-400/20',
-  other:     'text-zinc-400 bg-zinc-400/10 border-zinc-400/20',
+/** 'mar 29 sept' a partir de 'YYYY-MM-DD' (sin corrimientos de zona horaria). */
+function formatShortDate(dateKey: string): string {
+  const label = new Date(`${dateKey}T00:00:00Z`).toLocaleDateString('es-CO', {
+    weekday: 'short',
+    day:     'numeric',
+    month:   'short',
+    timeZone: 'UTC',
+  })
+  return label.replace(/[,.]/g, '').replace(/\bde\b\s*/g, '').replace(/\s+/g, ' ').trim()
 }
 
-// ── Helpers de fechas ─────────────────────────────────────────────────────────
-
-function getMonthRange(offset: number = 0): { from: string; to: string; label: string } {
-  const now = new Date()
-  const year  = now.getFullYear()
-  const month = now.getMonth() + offset
-
-  const from = new Date(year, month, 1)
-  const to   = new Date(year, month + 1, 0)
-
-  const label = from.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })
-
-  return {
-    from:  from.toISOString().slice(0, 10),
-    to:    to.toISOString().slice(0, 10),
-    label: label.charAt(0).toUpperCase() + label.slice(1),
-  }
+function formatPct(value: number): string {
+  return `${value.toLocaleString('es-CO', { maximumFractionDigits: 1 })}%`
 }
 
-// ── Sub-componentes ───────────────────────────────────────────────────────────
+function digitsOnly(value: string): string {
+  return value.replace(/\D/g, '').slice(0, 9)
+}
+
+function formatThousands(digits: string): string {
+  return digits ? Number(digits).toLocaleString('es-CO') : ''
+}
+
+// ── Sub-componentes de presentación ───────────────────────────────────────────
 
 function CategoryBadge({ category }: { category: string }) {
-  const colors = CATEGORY_COLORS[category] ?? CATEGORY_COLORS.other
-  const label  = CATEGORY_LABELS[category] ?? category
   return (
     <span
-      className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${colors}`}
+      className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${categoryBadgeClass(category)}`}
     >
-      {label}
+      {categoryLabel(category)}
     </span>
   )
 }
 
-function PLMetricCard({
+function PaymentMethodTag({ method }: { method: ExpensePaymentMethod }) {
+  const Icon = PAYMENT_ICONS[method] ?? Wallet
+  const isCash = method === 'cash_register'
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[11px] ${
+        isCash ? 'font-semibold px-2 py-0.5 rounded-full border' : 'text-xinuco-muted'
+      }`}
+      style={isCash ? {
+        color: 'var(--primary-color)',
+        borderColor: 'color-mix(in srgb, var(--primary-color) 35%, transparent)',
+        background: 'color-mix(in srgb, var(--primary-color) 10%, transparent)',
+      } : undefined}
+    >
+      <Icon size={11} />
+      {paymentMethodLabel(method)}
+    </span>
+  )
+}
+
+// ── Estado de resultados ──────────────────────────────────────────────────────
+
+function StatementRow({
+  sign,
   label,
   value,
-  positive,
-  neutral,
+  hint,
+  strong,
 }: {
-  label:    string
-  value:    number
-  positive?: boolean
-  neutral?:  boolean
+  sign?:   '−' | '='
+  label:   string
+  value:   number
+  hint?:   string
+  strong?: boolean
 }) {
-  const colorClass = neutral
-    ? 'text-xinuco-muted'
-    : positive
-      ? value >= 0 ? 'text-emerald-400' : 'text-red-400'
-      : 'text-red-400'
-
-  const Icon = positive && value >= 0 ? TrendingUp : positive && value < 0 ? TrendingDown : undefined
-
   return (
-    <div
-      className="flex flex-col gap-1 rounded-xl px-4 py-3"
-      style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
-    >
-      <span className="text-[10px] font-semibold text-xinuco-muted uppercase tracking-wider">{label}</span>
-      <span className={`text-xl font-bold tabular-nums flex items-center gap-1.5 ${colorClass}`}>
-        {Icon && <Icon size={16} />}
-        {formatCOP(value)}
+    <div className="flex items-start gap-3 py-2.5">
+      <span className="w-4 shrink-0 text-center text-sm text-xinuco-muted tabular-nums">{sign ?? ''}</span>
+      <div className="flex-1 min-w-0">
+        <p className={`text-sm ${strong ? 'font-semibold' : ''} text-xinuco-text`}>{label}</p>
+        {hint && <p className="text-[11px] text-xinuco-muted mt-0.5">{hint}</p>}
+      </div>
+      <span className={`text-sm tabular-nums whitespace-nowrap ${strong ? 'font-bold' : 'font-medium'} text-xinuco-text`}>
+        {sign === '−' && value > 0 ? '−' : ''}{formatCOP(value)}
       </span>
     </div>
   )
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// COMPONENTE PRINCIPAL — ExpenseManager
-// ════════════════════════════════════════════════════════════════════════════
-
-interface ExpenseManagerProps {
-  initialExpenses: Expense[]
-  initialPL:       ProfitLossResult | null
-  businessId:      string
-  slug:            string
-  initialDateFrom: string
-  initialDateTo:   string
-}
-
-export function ExpenseManager({
-  initialExpenses,
-  initialPL,
-  businessId,
-  initialDateFrom,
-  initialDateTo,
-}: ExpenseManagerProps) {
-  const [expenses,   setExpenses]   = useState<Expense[]>(initialExpenses)
-  const [pl,         setPL]         = useState<ProfitLossResult | null>(initialPL)
-  const [sheetOpen,  setSheetOpen]  = useState(false)
-  const [dateFrom,   setDateFrom]   = useState(initialDateFrom)
-  const [dateTo,     setDateTo]     = useState(initialDateTo)
-  const [monthLabel, setMonthLabel] = useState<string>(() => getMonthRange(0).label)
-  const [monthOffset, setMonthOffset] = useState(0)
-  const [isPendingPL, startPL]      = useTransition()
-
-  // Refrescar P&G cuando cambia el rango de fechas
-  const refreshPL = useCallback((from: string, to: string) => {
-    startPL(async () => {
-      try {
-        const result = await getProfitLoss(businessId, from, to)
-        setPL(result)
-      } catch {
-        // Silencioso — los datos existentes permanecen
-      }
-    })
-  }, [businessId])
-
-  function handleMonthChange(offset: number) {
-    const range = getMonthRange(offset)
-    setMonthOffset(offset)
-    setDateFrom(range.from)
-    setDateTo(range.to)
-    setMonthLabel(range.label)
-    refreshPL(range.from, range.to)
+function ProfitLossStatement({ pl, plError, monthLabel }: { pl: ProfitLossResult | null; plError?: string; monthLabel: string }) {
+  if (!pl) {
+    return (
+      <section
+        className="rounded-2xl p-5 flex items-start gap-3"
+        style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+      >
+        <AlertCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+        <div>
+          <h2 className="text-sm font-bold text-xinuco-text">Estado de resultados</h2>
+          <p className="text-xs text-xinuco-muted mt-1">
+            {plError ?? 'No se pudo calcular el estado de resultados.'}
+          </p>
+        </div>
+      </section>
+    )
   }
 
-  const handleExpenseCreated = useCallback((expense: Expense) => {
-    setExpenses(prev => [expense, ...prev])
-    setSheetOpen(false)
-    // Refrescar P&G con el rango actual
-    refreshPL(dateFrom, dateTo)
-  }, [dateFrom, dateTo, refreshPL])
-
-  const handleExpenseDeleted = useCallback((expenseId: string) => {
-    setExpenses(prev => prev.filter(e => e.id !== expenseId))
-    refreshPL(dateFrom, dateTo)
-  }, [dateFrom, dateTo, refreshPL])
-
-  // Filtrar gastos según el rango de fechas actual
-  const visibleExpenses = expenses.filter(e => {
-    return e.expense_date >= dateFrom && e.expense_date <= dateTo
-  })
+  const positive = pl.net_profit >= 0
+  const netColor = positive ? 'text-emerald-400' : 'text-red-400'
 
   return (
-    <>
-      <AdminPageHeader
-        title="Gastos"
-        subtitle="Registra gastos operativos y visualiza el estado de resultados del período."
-        hasData={true}
-        actionButton={
-          <button
-            type="button"
-            onClick={() => setSheetOpen(true)}
-            className="btn-primary flex items-center gap-2 animate-fade-in"
-          >
-            <Plus size={16} strokeWidth={2.5} />
-            <span className="hidden sm:inline">Nuevo Gasto</span>
-            <span className="sm:hidden">Nuevo</span>
-          </button>
-        }
-      />
+    <section
+      className="rounded-2xl p-5 sm:p-6"
+      style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+      aria-label="Estado de resultados"
+    >
+      <div className="flex items-baseline justify-between gap-3 mb-2">
+        <h2 className="text-sm font-bold text-xinuco-text">Estado de resultados</h2>
+        <span className="text-xs text-xinuco-muted">{monthLabel}</span>
+      </div>
 
-      {/* ── Selector de período ─────────────────────────────────────────── */}
-      <section aria-label="Selector de período" className="flex items-center gap-2 flex-wrap">
-        <button
-          type="button"
-          onClick={() => handleMonthChange(monthOffset - 1)}
-          className="btn-ghost text-xs flex items-center gap-1.5"
-        >
-          ← Mes anterior
-        </button>
-        <span
-          className="flex-1 text-center text-sm font-semibold px-4 py-2 rounded-xl"
-          style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
-        >
-          <CalendarDays size={13} className="inline mr-1.5 opacity-70" />
-          {monthLabel}
-        </span>
-        <button
-          type="button"
-          onClick={() => handleMonthChange(monthOffset + 1)}
-          disabled={monthOffset >= 0}
-          className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-30"
-        >
-          Mes siguiente →
-        </button>
-      </section>
-
-      {/* ── Resumen P&G ──────────────────────────────────────────────────── */}
-      {pl && (
-        <section
-          aria-label="Estado de Resultados"
-          className={`grid grid-cols-2 sm:grid-cols-4 gap-3 transition-opacity duration-300 ${isPendingPL ? 'opacity-50' : 'opacity-100'}`}
-        >
-          <PLMetricCard label="Ingresos" value={pl.revenue.total} neutral />
-          <PLMetricCard label="Gastos"   value={pl.expenses.total} neutral />
-          <PLMetricCard label="Utilidad Bruta" value={pl.gross_profit} positive />
-          <PLMetricCard label="Utilidad Neta"  value={pl.net_profit}   positive />
-        </section>
-      )}
-
-      {isPendingPL && !pl && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 animate-pulse">
-          {[...Array(4)].map((_, i) => (
-            <div
-              key={i}
-              className="h-[72px] rounded-xl"
-              style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* ── Detalle de gastos por categoría (desde P&G) ──────────────────── */}
-      {pl && pl.expenses.by_category.length > 0 && (
-        <section
-          aria-label="Gastos por categoría"
-          className="rounded-xl overflow-hidden animate-fade-in"
-          style={{ border: '1px solid var(--border-color)' }}
-        >
-          <div
-            className="px-5 py-3 text-xs font-semibold text-xinuco-muted uppercase tracking-wider"
-            style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', borderBottom: '1px solid var(--border-color)' }}
-          >
-            Gastos por categoría
-          </div>
-          <div className="divide-y" style={{ '--tw-divide-opacity': 1 } as React.CSSProperties}>
-            {pl.expenses.by_category.map(entry => (
-              <div
-                key={entry.category}
-                className="flex items-center justify-between px-5 py-3"
-                style={{ borderColor: 'var(--border-color)' }}
-              >
-                <CategoryBadge category={entry.category} />
-                <span className="text-sm font-semibold tabular-nums text-xinuco-text">
-                  {formatCOP(entry.total)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* ── Lista de gastos ───────────────────────────────────────────────── */}
-      <section aria-label="Lista de gastos" className="mt-2">
-        {visibleExpenses.length === 0 ? (
-          <AdminEmptyState
-            icon={Receipt}
-            title="Sin gastos en este período"
-            description="Registra los gastos operativos del negocio: arriendo, insumos, servicios públicos, nómina, etc."
-            actionLabel="Registrar Primer Gasto"
-            onAction={() => setSheetOpen(true)}
-          />
-        ) : (
-          <div
-            className="overflow-x-auto rounded-xl animate-fade-in"
-            style={{ border: '1px solid var(--border-color)' }}
-          >
-            <table className="w-full text-sm" aria-label="Tabla de gastos">
-              <thead>
-                <tr
-                  style={{
-                    borderBottom: '1px solid var(--border-color)',
-                    background:   'var(--surface-color, rgba(255,255,255,0.03))',
-                  }}
-                >
-                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-                    Descripción
-                  </th>
-                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-xinuco-muted uppercase tracking-wider hidden sm:table-cell">
-                    Categoría
-                  </th>
-                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-xinuco-muted uppercase tracking-wider hidden md:table-cell">
-                    Fecha
-                  </th>
-                  <th className="px-5 py-3.5 text-center text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-                    Monto
-                  </th>
-                  <th className="px-5 py-3.5 text-right text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-                    Acciones
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {visibleExpenses.map(expense => (
-                  <ExpenseRow
-                    key={expense.id}
-                    expense={expense}
-                    onDelete={handleExpenseDeleted}
-                  />
-                ))}
-              </tbody>
-
-              <tfoot>
-                <tr
-                  style={{
-                    borderTop: '1px solid var(--border-color)',
-                    background: 'var(--surface-color, rgba(255,255,255,0.02))',
-                  }}
-                >
-                  <td colSpan={2} className="px-5 py-3 text-xs text-xinuco-muted">
-                    {visibleExpenses.length} gasto{visibleExpenses.length !== 1 ? 's' : ''} en el período
-                  </td>
-                  <td colSpan={3} className="px-5 py-3 text-right text-xs font-semibold tabular-nums text-xinuco-text">
-                    {formatCOP(visibleExpenses.reduce((sum, e) => sum + e.amount, 0))}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* Sheet Panel */}
-      {sheetOpen && (
-        <ExpenseSheet
-          businessId={businessId}
-          defaultDate={dateFrom.slice(0, 10)}
-          onClose={() => setSheetOpen(false)}
-          onSuccess={handleExpenseCreated}
+      <div className="divide-y" style={{ borderColor: 'var(--border-color)' }}>
+        <StatementRow
+          label="Ingresos"
+          value={pl.revenue.total}
+          strong
+          hint={`servicios ${formatCOP(pl.revenue.services)} · productos ${formatCOP(pl.revenue.retail)} · ${pl.revenue.sales_count} ${pl.revenue.sales_count === 1 ? 'venta' : 'ventas'}`}
         />
-      )}
-    </>
+        <StatementRow sign="−" label="Costo de productos vendidos" value={pl.cost_of_goods} />
+        <StatementRow sign="=" label="Utilidad bruta" value={pl.gross_profit} strong />
+        <StatementRow sign="−" label="Comisiones del equipo" value={pl.commissions} />
+        <StatementRow sign="−" label="Gastos" value={pl.expenses.total} />
+      </div>
+
+      <div
+        className="mt-3 pt-4 flex items-end justify-between gap-3 border-t-2"
+        style={{ borderColor: 'var(--border-color)' }}
+      >
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">= Utilidad neta</p>
+          {pl.margin_pct !== null && (
+            <p className="text-xs text-xinuco-muted mt-1">Margen {formatPct(pl.margin_pct)}</p>
+          )}
+        </div>
+        <span className={`text-3xl sm:text-4xl font-bold tabular-nums ${netColor}`}>
+          {!positive ? '−' : ''}{formatCOP(Math.abs(pl.net_profit))}
+        </span>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-1 text-[11px] text-xinuco-muted">
+        <p>Las propinas ({formatCOP(pl.tips)}) no cuentan como ingreso: son del profesional.</p>
+        {pl.revenue.discounts > 0 && <p>Incluye {formatCOP(pl.revenue.discounts)} en descuentos.</p>}
+        <p>El costo de productos usa el costo registrado en Inventario.</p>
+      </div>
+    </section>
   )
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// FILA DE LA TABLA — Un gasto
-// ════════════════════════════════════════════════════════════════════════════
+// ── Gastos fijos pendientes ───────────────────────────────────────────────────
+
+function PendingRecurringBanner({
+  items,
+  busyKey,
+  onRegister,
+  onRegisterAll,
+}: {
+  items:         PendingRecurringExpense[]
+  busyKey:       string | null
+  onRegister:    (item: PendingRecurringExpense) => void
+  onRegisterAll: () => void
+}) {
+  const count = items.length
+  return (
+    <section
+      className="rounded-2xl p-4 sm:p-5"
+      style={{
+        background: 'color-mix(in srgb, var(--primary-color) 7%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--primary-color) 30%, transparent)',
+      }}
+    >
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2">
+          <Repeat size={16} style={{ color: 'var(--primary-color)' }} />
+          <h2 className="text-sm font-bold text-xinuco-text">
+            Tienes {count} {count === 1 ? 'gasto fijo pendiente' : 'gastos fijos pendientes'} este mes
+          </h2>
+        </div>
+        {count > 1 && (
+          <button
+            type="button"
+            onClick={onRegisterAll}
+            disabled={busyKey !== null}
+            className="btn-primary !py-2 !px-4 !text-xs self-start sm:self-auto"
+          >
+            {busyKey === 'all' && <Loader2 size={13} className="animate-spin" />}
+            Registrar todos
+          </button>
+        )}
+      </div>
+
+      <ul className="flex flex-col gap-2">
+        {items.map(item => {
+          const key = `${item.category}::${item.description}`
+          return (
+            <li
+              key={key}
+              className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+              style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-xinuco-text truncate">{item.description}</p>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                  <CategoryBadge category={item.category} />
+                  <span className="text-[11px] text-xinuco-muted">{formatShortDate(item.suggested_date)}</span>
+                </div>
+              </div>
+              <span className="text-sm font-bold tabular-nums text-xinuco-text">{formatCOP(item.amount)}</span>
+              <button
+                type="button"
+                onClick={() => onRegister(item)}
+                disabled={busyKey !== null}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-white/[0.05] disabled:opacity-50"
+                style={{ borderColor: 'var(--border-color)', color: 'var(--primary-color)' }}
+              >
+                {busyKey === key ? <Loader2 size={13} className="animate-spin" /> : 'Registrar'}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
+// ── Resumen por categoría ─────────────────────────────────────────────────────
+
+function CategorySummary({ totals, grandTotal }: { totals: { category: string; total: number }[]; grandTotal: number }) {
+  if (totals.length === 0 || grandTotal <= 0) return null
+  return (
+    <section
+      className="rounded-2xl p-5"
+      style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+    >
+      <h2 className="text-sm font-bold text-xinuco-text mb-4">Gastos por categoría</h2>
+      <ul className="flex flex-col gap-3">
+        {totals.map(({ category, total }) => {
+          const pct = (total / grandTotal) * 100
+          return (
+            <li key={category}>
+              <div className="flex items-center justify-between gap-3 text-xs mb-1.5">
+                <span className="text-xinuco-text font-medium">{categoryLabel(category)}</span>
+                <span className="text-xinuco-muted tabular-nums">
+                  <span className="text-xinuco-text font-semibold">{formatCOP(total)}</span> · {formatPct(pct)}
+                </span>
+              </div>
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: 'color-mix(in srgb, var(--border-color) 60%, transparent)' }}>
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{ width: `${Math.max(pct, 2)}%`, background: categoryBarColor(category) }}
+                />
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
+// ── Fila de gasto ─────────────────────────────────────────────────────────────
 
 function ExpenseRow({
   expense,
+  locked,
+  onEdit,
   onDelete,
 }: {
   expense:  Expense
-  onDelete: (id: string) => void
+  locked:   boolean
+  onEdit:   () => void
+  onDelete: () => void
 }) {
-  const [menuOpen,      setMenuOpen]      = useState(false)
-  const [isPendingDel,  startDelete]      = useTransition()
-  const [confirmDelete, setConfirmDelete] = useState(false)
-
-  function handleDelete() {
-    if (!confirmDelete) {
-      setConfirmDelete(true)
-      return
-    }
-    setMenuOpen(false)
-    startDelete(async () => {
-      const result = await deleteExpense(expense.id)
-      if (!result.error) onDelete(expense.id)
-    })
-  }
+  const lockedTip = 'Ya se cuadró en un cierre de caja'
+  const actionClass =
+    'p-2 rounded-lg text-xinuco-muted transition-colors hover:text-xinuco-text hover:bg-white/[0.05] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-xinuco-muted'
 
   return (
-    <tr
-      className="transition-all duration-200 hover:bg-white/[0.02]"
-      style={{
-        borderTop: '1px solid var(--border-color)',
-        opacity:   isPendingDel ? 0.4 : 1,
-      }}
+    <li
+      className="flex items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3.5 border-t first:border-t-0"
+      style={{ borderColor: 'var(--border-color)' }}
     >
-      {/* Descripción */}
-      <td className="px-5 py-4">
-        <div className="flex flex-col gap-1">
-          <span className="font-medium text-xinuco-text leading-tight text-sm">
-            {expense.description}
-          </span>
-          <span className="sm:hidden">
-            <CategoryBadge category={expense.category} />
-          </span>
+      <span className="w-[68px] sm:w-20 shrink-0 text-xs text-xinuco-muted capitalize tabular-nums">
+        {formatShortDate(expense.expense_date)}
+      </span>
+
+      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+        <span className="text-sm font-medium text-xinuco-text leading-tight break-words">{expense.description}</span>
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          <CategoryBadge category={expense.category} />
+          <PaymentMethodTag method={expense.payment_method} />
           {expense.is_recurring && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-xinuco-muted">
-              <ToggleRight size={10} className="text-emerald-400" />
-              Recurrente
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-400">
+              <Repeat size={10} />
+              Fijo
             </span>
           )}
         </div>
-      </td>
+      </div>
 
-      {/* Categoría — desktop */}
-      <td className="px-5 py-4 hidden sm:table-cell">
-        <CategoryBadge category={expense.category} />
-      </td>
+      <span className="text-sm font-bold tabular-nums whitespace-nowrap text-xinuco-text">
+        {formatCOP(expense.amount)}
+      </span>
 
-      {/* Fecha — desktop */}
-      <td className="px-5 py-4 hidden md:table-cell text-sm text-xinuco-muted tabular-nums">
-        {new Date(expense.expense_date + 'T12:00:00').toLocaleDateString('es-CO', {
-          day:   '2-digit',
-          month: 'short',
-          year:  'numeric',
-        })}
-      </td>
+      <div className="flex items-center shrink-0">
+        <button
+          type="button"
+          onClick={onEdit}
+          disabled={locked}
+          title={locked ? lockedTip : 'Editar'}
+          aria-label={`Editar ${expense.description}`}
+          className={actionClass}
+        >
+          {locked ? <Lock size={15} /> : <Pencil size={15} />}
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={locked}
+          title={locked ? lockedTip : 'Eliminar'}
+          aria-label={`Eliminar ${expense.description}`}
+          className={`${actionClass} ${locked ? '' : 'hover:!text-red-400'}`}
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+    </li>
+  )
+}
 
-      {/* Monto */}
-      <td className="px-5 py-4 text-center">
-        <span className="text-sm font-bold tabular-nums" style={{ color: 'var(--primary-color)' }}>
-          {formatCOP(expense.amount)}
-        </span>
-      </td>
+// ── Confirmación in-app ───────────────────────────────────────────────────────
 
-      {/* Acciones */}
-      <td className="px-5 py-4 text-right">
-        <div className="relative inline-block">
+function ConfirmDeleteDialog({
+  expense,
+  pending,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  expense:   Expense
+  pending:   boolean
+  error:     string | null
+  onCancel:  () => void
+  onConfirm: () => void
+}) {
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !pending) onCancel() }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onCancel, pending])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Eliminar gasto"
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl p-5 flex flex-col gap-4 animate-fade-in"
+        style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}
+      >
+        <div>
+          <h3 className="text-base font-bold text-xinuco-text">¿Eliminar este gasto?</h3>
+          <p className="text-sm text-xinuco-muted mt-1.5">
+            {expense.description} · {formatCOP(expense.amount)}. Esta acción no se puede deshacer.
+          </p>
+        </div>
+        {error && (
+          <p role="alert" className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+            {error}
+          </p>
+        )}
+        <div className="flex gap-3">
           <button
             type="button"
-            onClick={() => { setMenuOpen(!menuOpen); setConfirmDelete(false) }}
-            disabled={isPendingDel}
-            className="p-1.5 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors disabled:opacity-40"
-            aria-label={`Acciones para ${expense.description}`}
+            onClick={onCancel}
+            disabled={pending}
+            className="flex-1 py-2.5 rounded-xl text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
+            style={{ borderColor: 'var(--border-color)' }}
           >
-            {isPendingDel ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <ChevronDown size={16} />
-            )}
+            Cancelar
           </button>
-
-          {menuOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => { setMenuOpen(false); setConfirmDelete(false) }} />
-              <div
-                className="absolute right-0 top-full mt-1 w-48 rounded-xl shadow-2xl z-20 py-1.5 overflow-hidden animate-fade-in origin-top-right"
-                style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}
-              >
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-xs font-medium hover:bg-white/[0.04] transition-colors text-left"
-                  style={{ color: confirmDelete ? '#f87171' : 'var(--text-color)' }}
-                >
-                  <Trash2
-                    size={13}
-                    className={confirmDelete ? 'text-red-400' : 'text-red-400/60'}
-                  />
-                  {confirmDelete ? 'Confirmar eliminación' : 'Eliminar gasto'}
-                </button>
-              </div>
-            </>
-          )}
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={pending}
+            className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+          >
+            {pending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            Eliminar
+          </button>
         </div>
-      </td>
-    </tr>
+      </div>
+    </div>
   )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// SHEET PANEL — Registrar nuevo gasto
+// SHEET — Crear / editar gasto
 // ════════════════════════════════════════════════════════════════════════════
 
 function ExpenseSheet({
-  businessId,
-  defaultDate,
+  expense,
+  today,
+  hasActiveShift,
   onClose,
-  onSuccess,
+  onSaved,
 }: {
-  businessId:  string
-  defaultDate: string
-  onClose:     () => void
-  onSuccess:   (expense: Expense) => void
+  expense:        Expense | null   // null = nuevo
+  today:          string
+  hasActiveShift: boolean
+  onClose:        () => void
+  onSaved:        () => void
 }) {
+  const isEdit = expense !== null
   const backdropRef = useRef<HTMLDivElement>(null)
 
-  const [category,     setCategory]    = useState<string>('rent')
-  const [description,  setDescription] = useState('')
-  const [amountStr,    setAmountStr]   = useState('')
-  const [expenseDate,  setExpenseDate] = useState(defaultDate)
-  const [isRecurring,  setIsRecurring] = useState(false)
-  const [formError,    setFormError]   = useState<string | null>(null)
-  const [isPending,    startTransition] = useTransition()
+  const [category,    setCategory]    = useState<string>(expense?.category ?? 'rent')
+  const [description, setDescription] = useState(expense?.description ?? '')
+  const [amountDigits, setAmountDigits] = useState(expense ? String(expense.amount) : '')
+  const [expenseDate, setExpenseDate] = useState(expense?.expense_date ?? today)
+  const [method,      setMethod]      = useState<ExpensePaymentMethod>(expense?.payment_method ?? 'transfer')
+  const [isRecurring, setIsRecurring] = useState(expense?.is_recurring ?? false)
+  const [formError,   setFormError]   = useState<string | null>(null)
+  const [isPending,   startTransition] = useTransition()
+
+  const isCash = method === 'cash_register'
 
   // Cerrar con ESC
   useEffect(() => {
@@ -522,48 +502,53 @@ function ExpenseSheet({
     return () => { document.body.style.overflow = '' }
   }, [])
 
-  async function handleSubmit(e: React.FormEvent) {
+  function pickMethod(next: ExpensePaymentMethod) {
+    if (next === 'cash_register' && !hasActiveShift) return
+    setMethod(next)
+    // El efectivo de la caja es siempre del día
+    if (next === 'cash_register') setExpenseDate(today)
+  }
+
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setFormError(null)
 
-    const amount = parseInt(amountStr.replace(/\D/g, ''), 10)
+    const desc = description.trim()
+    const amount = Number(amountDigits)
 
-    if (!description.trim()) {
-      return setFormError('La descripción es requerida.')
+    if (desc.length < 2 || desc.length > 120) return setFormError('La descripción debe tener entre 2 y 120 caracteres.')
+    if (!Number.isInteger(amount) || amount < 1 || amount > MAX_AMOUNT) {
+      return setFormError('El monto debe estar entre $1 y $100.000.000.')
     }
-    if (!amount || amount <= 0) {
-      return setFormError('El monto debe ser mayor a $0 COP.')
-    }
-    if (!expenseDate) {
-      return setFormError('La fecha es requerida.')
-    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expenseDate)) return setFormError('La fecha es requerida.')
+    if (expenseDate > today) return setFormError('La fecha no puede ser futura.')
+    if (isCash && !hasActiveShift) return setFormError('No hay caja abierta. Abre la caja o elige otro medio de pago.')
+    if (isCash && expenseDate !== today) return setFormError('Un gasto pagado con efectivo de la caja debe ser de hoy.')
 
-    const data: ExpenseCreateData = {
+    const input: ExpenseInput = {
       category,
-      description: description.trim(),
+      description:    desc,
       amount,
-      expense_date: expenseDate,
-      is_recurring: isRecurring,
+      expense_date:   expenseDate,
+      is_recurring:   isRecurring,
+      payment_method: method,
     }
 
     startTransition(async () => {
       try {
-        const result = await createExpense(businessId, data)
-
+        const result = isEdit ? await updateExpense(expense.id, input) : await createExpense(input)
         if (result.error) {
           setFormError(result.error)
           return
         }
-
-        if (result.expense) {
-          onSuccess(result.expense)
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Error inesperado. Intenta de nuevo.'
-        setFormError(message)
+        onSaved()
+      } catch {
+        setFormError('Error inesperado. Intenta de nuevo.')
       }
     })
   }
+
+  const labelClass = 'text-xs font-semibold text-xinuco-muted uppercase tracking-wider'
 
   return (
     <div
@@ -572,24 +557,17 @@ function ExpenseSheet({
       style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
       onClick={(e) => { if (e.target === backdropRef.current) onClose() }}
     >
-      {/* Panel Sheet */}
       <div
-        className="h-full overflow-y-auto animate-slide-in-right w-[95vw] sm:w-[420px]"
-        style={{
-          background: 'var(--bg-color)',
-          borderLeft: '1px solid var(--border-color)',
-        }}
+        className="h-full overflow-y-auto animate-slide-in-right w-[95vw] sm:w-[440px]"
+        style={{ background: 'var(--bg-color)', borderLeft: '1px solid var(--border-color)' }}
       >
-        {/* Header */}
         <div
           className="sticky top-0 z-10 flex items-center justify-between px-6 py-5"
           style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-color)' }}
         >
           <div>
-            <h2 className="text-lg font-bold text-xinuco-text">Nuevo Gasto</h2>
-            <p className="text-xs text-xinuco-muted mt-0.5">
-              Registra un gasto operativo del negocio.
-            </p>
+            <h2 className="text-lg font-bold text-xinuco-text">{isEdit ? 'Editar gasto' : 'Nuevo gasto'}</h2>
+            <p className="text-xs text-xinuco-muted mt-0.5">Registra lo que sale del negocio.</p>
           </div>
           <button
             type="button"
@@ -601,121 +579,147 @@ function ExpenseSheet({
           </button>
         </div>
 
-        {/* Formulario */}
         <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-5">
-
-          {/* Categoría */}
-          <div className="flex flex-col gap-2">
-            <label htmlFor="exp-category" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-              Categoría *
-            </label>
-            <select
-              id="exp-category"
-              value={category}
-              onChange={e => setCategory(e.target.value)}
-              className="input-base"
-              required
-            >
-              {CATEGORY_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
-
           {/* Descripción */}
           <div className="flex flex-col gap-2">
-            <label htmlFor="exp-desc" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-              Descripción *
-            </label>
+            <label htmlFor="exp-desc" className={labelClass}>Descripción *</label>
             <input
               id="exp-desc"
               type="text"
               value={description}
               onChange={e => setDescription(e.target.value)}
-              placeholder="Ej: Pago arriendo local mes mayo"
-              required
+              placeholder="Ej: Arriendo del local"
               autoFocus
-              maxLength={200}
+              maxLength={120}
               className="input-base"
             />
+          </div>
+
+          {/* Categoría */}
+          <div className="flex flex-col gap-2">
+            <label htmlFor="exp-category" className={labelClass}>Categoría *</label>
+            <select
+              id="exp-category"
+              value={category}
+              onChange={e => setCategory(e.target.value)}
+              className="input-base"
+            >
+              {EXPENSE_CATEGORIES.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <p className="text-xs text-xinuco-muted">La compra de productos para vender se registra en Inventario.</p>
           </div>
 
           {/* Monto */}
           <div className="flex flex-col gap-2">
-            <label htmlFor="exp-amount" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-              Monto COP *
-            </label>
+            <label htmlFor="exp-amount" className={labelClass}>Monto (COP) *</label>
             <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-xinuco-muted pointer-events-none">
-                $
-              </span>
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-xinuco-muted pointer-events-none">$</span>
               <input
                 id="exp-amount"
-                type="number"
+                type="text"
                 inputMode="numeric"
-                min={1}
-                step={1000}
-                value={amountStr}
-                onChange={e => setAmountStr(e.target.value)}
-                placeholder="Ej: 1500000"
-                required
-                className="input-base pl-7"
+                autoComplete="off"
+                value={formatThousands(amountDigits)}
+                onChange={e => setAmountDigits(digitsOnly(e.target.value))}
+                placeholder="1.500.000"
+                className="input-base pl-7 tabular-nums"
               />
             </div>
-            <p className="text-xs text-xinuco-muted">
-              Entero COP sin decimales (ej: 1500000 = $1.500.000).
-            </p>
+          </div>
+
+          {/* ¿Cómo se pagó? */}
+          <div className="flex flex-col gap-2">
+            <span id="exp-method-label" className={labelClass}>¿Cómo se pagó? *</span>
+            <div role="radiogroup" aria-labelledby="exp-method-label" className="grid grid-cols-2 gap-2">
+              {PAYMENT_METHODS.map(pm => {
+                const Icon = PAYMENT_ICONS[pm.value]
+                const selected = method === pm.value
+                const disabled = pm.value === 'cash_register' && !hasActiveShift
+                return (
+                  <button
+                    key={pm.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={disabled}
+                    onClick={() => pickMethod(pm.value)}
+                    className="flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold border transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    style={selected ? {
+                      borderColor: 'var(--primary-color)',
+                      color: 'var(--primary-color)',
+                      background: 'color-mix(in srgb, var(--primary-color) 12%, transparent)',
+                    } : {
+                      borderColor: 'var(--border-color)',
+                      color: 'var(--text-color)',
+                    }}
+                  >
+                    <Icon size={14} />
+                    {pm.label}
+                  </button>
+                )
+              })}
+            </div>
+            {!hasActiveShift && (
+              <p className="text-xs text-xinuco-muted flex items-center gap-1.5">
+                <Info size={12} className="shrink-0" />
+                Abre la caja para usar esta opción
+              </p>
+            )}
+            {isCash && (
+              <p className="text-xs text-xinuco-muted flex items-center gap-1.5">
+                <Info size={12} className="shrink-0" />
+                Se resta del efectivo esperado al cerrar la caja.
+              </p>
+            )}
           </div>
 
           {/* Fecha */}
           <div className="flex flex-col gap-2">
-            <label htmlFor="exp-date" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-              Fecha *
-            </label>
+            <label htmlFor="exp-date" className={labelClass}>Fecha *</label>
             <input
               id="exp-date"
               type="date"
               value={expenseDate}
+              max={today}
+              disabled={isCash}
               onChange={e => setExpenseDate(e.target.value)}
-              required
-              className="input-base"
+              className="input-base disabled:opacity-60"
             />
+            {isCash && <p className="text-xs text-xinuco-muted">El efectivo de la caja siempre se registra con la fecha de hoy.</p>}
           </div>
 
-          {/* Separador */}
           <div style={{ borderTop: '1px solid var(--border-color)' }} />
 
-          {/* Toggle recurrente */}
-          <div className="flex items-center justify-between">
+          {/* Gasto fijo */}
+          <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-sm font-medium text-xinuco-text">Gasto recurrente</p>
-              <p className="text-xs text-xinuco-muted mt-0.5">Se repite mensualmente (solo referencia visual).</p>
+              <p className="text-sm font-medium text-xinuco-text">Gasto fijo mensual</p>
+              <p className="text-xs text-xinuco-muted mt-0.5">Cada mes te recordaremos registrarlo.</p>
             </div>
             <button
               type="button"
+              role="switch"
+              aria-checked={isRecurring}
               onClick={() => setIsRecurring(prev => !prev)}
-              className="transition-colors"
-              aria-label={isRecurring ? 'Desactivar recurrencia' : 'Activar recurrencia'}
+              className="transition-colors shrink-0"
+              aria-label="Gasto fijo mensual"
             >
               {isRecurring ? (
-                <ToggleRight size={32} className="text-emerald-400" />
+                <ToggleRight size={34} className="text-emerald-400" />
               ) : (
-                <ToggleLeft size={32} className="text-xinuco-muted" />
+                <ToggleLeft size={34} className="text-xinuco-muted" />
               )}
             </button>
           </div>
 
-          {/* Error */}
           {formError && (
-            <p
-              role="alert"
-              className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2.5 animate-fade-in"
-            >
+            <p role="alert" className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2.5 animate-fade-in">
               {formError}
             </p>
           )}
 
-          {/* Botones */}
           <div className="flex gap-3 pt-2">
             <button
               type="button"
@@ -725,26 +729,261 @@ function ExpenseSheet({
             >
               Cancelar
             </button>
-            <button
-              type="submit"
-              disabled={isPending}
-              className="flex-1 btn-primary !py-3 flex items-center justify-center gap-2"
-            >
+            <button type="submit" disabled={isPending} className="flex-1 btn-primary !py-3 flex items-center justify-center gap-2">
               {isPending ? (
                 <>
                   <Loader2 size={15} className="animate-spin" />
                   Guardando…
                 </>
               ) : (
-                <>
-                  <Plus size={15} />
-                  Guardar Gasto
-                </>
+                isEdit ? 'Guardar cambios' : 'Guardar gasto'
               )}
             </button>
           </div>
         </form>
       </div>
     </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// COMPONENTE PRINCIPAL — ExpenseManager
+// ════════════════════════════════════════════════════════════════════════════
+
+interface ExpenseManagerProps {
+  overview:        ExpensesOverview
+  slug:            string
+  today:           string
+  currentMonthKey: string
+  prevMonthKey:    string
+  nextMonthKey:    string | null
+}
+
+export function ExpenseManager({
+  overview,
+  slug,
+  today,
+  prevMonthKey,
+  nextMonthKey,
+}: ExpenseManagerProps) {
+  const router = useRouter()
+  const { month, expenses, pl, plError, pendingRecurring, activeShift } = overview
+
+  const [navPending, startNav] = useTransition()
+  const [sheet, setSheet] = useState<{ expense: Expense | null } | null>(null)
+  const [toDelete, setToDelete] = useState<Expense | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleting, startDelete] = useTransition()
+  const [filter, setFilter] = useState<string>('all')
+  const [recurringBusy, setRecurringBusy] = useState<string | null>(null)
+  const [pageError, setPageError] = useState<string | null>(null)
+
+  const basePath = `/${slug}/dashboard/expenses`
+  function goToMonth(key: string) {
+    setFilter('all')
+    startNav(() => router.push(`${basePath}?month=${key}`))
+  }
+
+  // Totales por categoría (del listado del mes)
+  const categoryTotals = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const e of expenses) map.set(e.category, (map.get(e.category) ?? 0) + e.amount)
+    return [...map.entries()]
+      .map(([category, total]) => ({ category, total }))
+      .sort((a, b) => b.total - a.total)
+  }, [expenses])
+  const grandTotal = categoryTotals.reduce((sum, c) => sum + c.total, 0)
+
+  const activeFilter = filter === 'all' || categoryTotals.some(c => c.category === filter) ? filter : 'all'
+  const visible = activeFilter === 'all' ? expenses : expenses.filter(e => e.category === activeFilter)
+
+  // Un gasto de caja de un turno que ya no es el activo ya se cuadró en un cierre
+  const isLocked = (e: Expense) => !!e.shift_id && e.shift_id !== activeShift?.id
+
+  function handleSaved() {
+    setSheet(null)
+    router.refresh()
+  }
+
+  function confirmDelete() {
+    if (!toDelete) return
+    const target = toDelete
+    setDeleteError(null)
+    startDelete(async () => {
+      const result = await deleteExpense(target.id)
+      if (result.error) {
+        setDeleteError(result.error)
+        return
+      }
+      setToDelete(null)
+      router.refresh()
+    })
+  }
+
+  async function registerItems(items: PendingRecurringExpense[], busyKey: string) {
+    setPageError(null)
+    setRecurringBusy(busyKey)
+    try {
+      const result = await registerRecurring(items.map(i => ({
+        category:       i.category,
+        description:    i.description,
+        amount:         i.amount,
+        expense_date:   i.suggested_date,
+        payment_method: i.payment_method,
+      })))
+      if (result.error) setPageError(result.error)
+      else router.refresh()
+    } catch {
+      setPageError('No se pudieron registrar los gastos. Intenta de nuevo.')
+    } finally {
+      setRecurringBusy(null)
+    }
+  }
+
+  return (
+    <>
+      <AdminPageHeader
+        title="Gastos"
+        subtitle="Registra lo que sale del negocio y mira cuánto te queda."
+        actionButton={
+          <button type="button" onClick={() => setSheet({ expense: null })} className="btn-primary !py-2.5">
+            <Plus size={16} />
+            Nuevo gasto
+          </button>
+        }
+      />
+
+      {/* Navegador de mes */}
+      <div
+        className="flex items-center justify-between rounded-xl px-2 py-1.5"
+        style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+      >
+        <button
+          type="button"
+          onClick={() => goToMonth(prevMonthKey)}
+          disabled={navPending}
+          className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors disabled:opacity-40"
+          aria-label="Mes anterior"
+        >
+          <ChevronLeft size={18} />
+        </button>
+        <span className="text-sm font-semibold text-xinuco-text flex items-center gap-2">
+          {month.label}
+          {navPending && <Loader2 size={13} className="animate-spin text-xinuco-muted" />}
+        </span>
+        <button
+          type="button"
+          onClick={() => nextMonthKey && goToMonth(nextMonthKey)}
+          disabled={navPending || !nextMonthKey}
+          className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          aria-label="Mes siguiente"
+        >
+          <ChevronRight size={18} />
+        </button>
+      </div>
+
+      <div className={`flex flex-col gap-6 transition-opacity ${navPending ? 'opacity-60' : ''}`}>
+        {pageError && (
+          <p
+            role="alert"
+            className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2.5 flex items-center justify-between gap-3"
+          >
+            {pageError}
+            <button type="button" onClick={() => setPageError(null)} aria-label="Cerrar aviso"><X size={14} /></button>
+          </p>
+        )}
+
+        <ProfitLossStatement pl={pl} plError={plError} monthLabel={month.label} />
+
+        {pendingRecurring.length > 0 && (
+          <PendingRecurringBanner
+            items={pendingRecurring}
+            busyKey={recurringBusy}
+            onRegister={item => registerItems([item], `${item.category}::${item.description}`)}
+            onRegisterAll={() => registerItems(pendingRecurring, 'all')}
+          />
+        )}
+
+        <CategorySummary totals={categoryTotals} grandTotal={grandTotal} />
+
+        {expenses.length === 0 ? (
+          <AdminEmptyState
+            icon={Receipt}
+            title={`Sin gastos en ${month.label}`}
+            description="Cuando registres arriendo, servicios u otros gastos del negocio, aparecerán aquí y se restarán de tu utilidad."
+            actionLabel="Nuevo gasto"
+            onAction={() => setSheet({ expense: null })}
+          />
+        ) : (
+          <section className="flex flex-col gap-3">
+            {/* Filtros por categoría */}
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar por categoría">
+              {[{ category: 'all', label: 'Todas', count: expenses.length },
+                ...categoryTotals.map(c => ({
+                  category: c.category,
+                  label: categoryLabel(c.category),
+                  count: expenses.filter(e => e.category === c.category).length,
+                }))].map(chip => {
+                const selected = activeFilter === chip.category
+                return (
+                  <button
+                    key={chip.category}
+                    type="button"
+                    onClick={() => setFilter(chip.category)}
+                    aria-pressed={selected}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors"
+                    style={selected ? {
+                      borderColor: 'var(--primary-color)',
+                      color: 'var(--primary-color)',
+                      background: 'color-mix(in srgb, var(--primary-color) 12%, transparent)',
+                    } : {
+                      borderColor: 'var(--border-color)',
+                      color: 'var(--text-color)',
+                    }}
+                  >
+                    {chip.label} <span className="opacity-60 font-medium">{chip.count}</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <ul
+              className="rounded-2xl overflow-hidden"
+              style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+            >
+              {visible.map(expense => (
+                <ExpenseRow
+                  key={expense.id}
+                  expense={expense}
+                  locked={isLocked(expense)}
+                  onEdit={() => setSheet({ expense })}
+                  onDelete={() => { setDeleteError(null); setToDelete(expense) }}
+                />
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+
+      {sheet && (
+        <ExpenseSheet
+          expense={sheet.expense}
+          today={today}
+          hasActiveShift={!!activeShift}
+          onClose={() => setSheet(null)}
+          onSaved={handleSaved}
+        />
+      )}
+
+      {toDelete && (
+        <ConfirmDeleteDialog
+          expense={toDelete}
+          pending={deleting}
+          error={deleteError}
+          onCancel={() => setToDelete(null)}
+          onConfirm={confirmDelete}
+        />
+      )}
+    </>
   )
 }

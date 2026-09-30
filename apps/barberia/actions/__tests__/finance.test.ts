@@ -54,9 +54,16 @@ describe('Finance Server Actions', () => {
         eq: jest.fn().mockResolvedValueOnce({ data: [{ amount: 50 }], error: null }) 
       })
 
+      // Mock gastos pagados con efectivo de la caja
+      mockSupabase.eq.mockReturnValueOnce({
+        eq: jest.fn().mockResolvedValueOnce({ data: [{ amount: 20 }, { amount: 5 }], error: null })
+      })
+
       const summary = await getShiftSummary('shift1')
       expect(summary.totalSales).toBe(300)
       expect(summary.totalCashCollected).toBe(50)
+      expect(summary.totalCashExpenses).toBe(25)
+      expect(mockSupabase.from).toHaveBeenCalledWith('expenses')
     })
   })
 
