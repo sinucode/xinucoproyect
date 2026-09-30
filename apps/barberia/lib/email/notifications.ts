@@ -3,11 +3,13 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@xinuco/types'
+import { formatCOP }                        from '@xinuco/utils'
 import { sendEmail }                       from './resend'
 import {
   appointmentConfirmationEmail,
   appointmentReminderEmail,
   appointmentCancellationEmail,
+  recurringExpenseReminderEmail,
   type EmailBrand,
 } from './templates'
 
@@ -72,7 +74,7 @@ async function loadBusinessBrand(
   supabase: XinucoSupabase,
   businessId: string,
   publicToken?: string | null,
-): Promise<{ business: { name: string } | null; brand: EmailBrand | undefined; cancelUrl: string | null }> {
+): Promise<{ business: { name: string; slug: string } | null; brand: EmailBrand | undefined; cancelUrl: string | null }> {
   const { data } = await (supabase as any)
     .rpc('get_public_business', { p_id: businessId })
     .maybeSingle() as {
@@ -86,7 +88,7 @@ async function loadBusinessBrand(
   if (!data) return { business: null, brand: undefined, cancelUrl: null }
 
   return {
-    business: { name: data.name },
+    business: { name: data.name, slug: data.slug },
     brand: {
       name:         data.name,
       logoUrl:      data.brand_config?.logoUrl ?? data.branding?.logo_url ?? null,
@@ -315,4 +317,94 @@ export async function sendCancellationNotice(params: {
     status:           result.success ? 'sent' : 'failed',
     errorMessage:     result.error,
   })
+}
+
+// ── 4. Aviso de gastos fijos que vencen mañana (a los administradores) ─────────
+
+/**
+ * Correos de los administradores del negocio (profiles.role = 'admin'), leídos de Auth.
+ * Requiere cliente service-role (auth.admin). Best-effort: devuelve [] si algo falla.
+ */
+export async function loadAdminEmails(supabase: XinucoSupabase, businessId: string): Promise<string[]> {
+  try {
+    const { data: admins } = await (supabase as any)
+      .from('profiles')
+      .select('id')
+      .eq('business_id', businessId)
+      .eq('role', 'admin') as { data: { id: string }[] | null }
+
+    const emails = new Set<string>()
+    for (const admin of admins ?? []) {
+      const { data } = await (supabase as any).auth.admin.getUserById(admin.id)
+      const email = data?.user?.email as string | undefined
+      if (email) emails.add(email)
+    }
+    return [...emails]
+  } catch {
+    return []
+  }
+}
+
+/** Formatea 'YYYY-MM-DD' como '30 de septiembre' para el asunto y el cuerpo. */
+function formatDueDate(dateKey: string): string {
+  return new Date(`${dateKey}T00:00:00Z`).toLocaleDateString('es-CO', {
+    day: 'numeric', month: 'long', timeZone: 'UTC',
+  })
+}
+
+/**
+ * Un correo por negocio a sus administradores: "Mañana vence: Arriendo · $1.500.000".
+ * Best-effort: nunca lanza. Sin RESEND_API_KEY solo deja el registro en consola.
+ */
+export async function sendRecurringExpenseReminder(params: {
+  supabase:   XinucoSupabase
+  businessId: string
+  /** Día en que vencen (mañana) 'YYYY-MM-DD'. */
+  dueDate:    string
+  items:      { description: string; categoryName: string; amount: number }[]
+}): Promise<{ recipients: number; sent: number }> {
+  const { supabase, businessId, dueDate, items } = params
+  if (items.length === 0) return { recipients: 0, sent: 0 }
+
+  try {
+    const emails = await loadAdminEmails(supabase, businessId)
+    if (emails.length === 0) return { recipients: 0, sent: 0 }
+
+    if (!process.env.RESEND_API_KEY) {
+      console.info(
+        `[recurring-expenses] RESEND_API_KEY no configurada: aviso omitido ` +
+        `(negocio=${businessId}, gastos=${items.length}, destinatarios=${emails.length})`,
+      )
+      return { recipients: emails.length, sent: 0 }
+    }
+
+    const { business, brand } = await loadBusinessBrand(supabase, businessId)
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || PUBLIC_SITE_URL).replace(/\/+$/, '')
+    const expensesUrl = business?.slug ? `${appUrl}/${business.slug}/dashboard/expenses` : appUrl
+
+    const html = recurringExpenseReminderEmail({
+      businessName: business?.name ?? 'Xinuco',
+      dueDate,
+      items,
+      expensesUrl,
+      brand,
+    })
+    const subject = items.length === 1
+      ? `Mañana vence: ${items[0].description} · ${formatCOP(items[0].amount)}`
+      : `Mañana vencen ${items.length} gastos fijos`
+
+    let sent = 0
+    for (const to of emails) {
+      const result = await sendEmail({ to, subject, html })
+      if (result.success) sent++
+    }
+    console.info(
+      `[recurring-expenses] Aviso ${formatDueDate(dueDate)}: negocio=${businessId} ` +
+      `gastos=${items.length} enviados=${sent}/${emails.length}`,
+    )
+    return { recipients: emails.length, sent }
+  } catch (err) {
+    console.error('[recurring-expenses] Error enviando el aviso:', err)
+    return { recipients: 0, sent: 0 }
+  }
 }

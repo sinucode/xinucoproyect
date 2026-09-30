@@ -21,6 +21,11 @@ import {
   Receipt,
   ToggleLeft,
   ToggleRight,
+  Tags,
+  Eye,
+  EyeOff,
+  Check,
+  Zap,
   type LucideIcon,
 } from 'lucide-react'
 import {
@@ -28,19 +33,25 @@ import {
   updateExpense,
   deleteExpense,
   registerRecurring,
+  createExpenseCategory,
+  updateExpenseCategory,
+  deleteExpenseCategory,
+  getExpenseCategoryUsage,
   type ExpensesOverview,
   type ExpenseInput,
 } from '@/actions/expenses'
-import type { Expense, ExpensePaymentMethod, ProfitLossResult } from '@xinuco/types'
+import type { Expense, ExpenseCategoryRow, ExpensePaymentMethod, ProfitLossResult } from '@xinuco/types'
 import { AdminPageHeader, AdminEmptyState } from '@xinuco/ui'
 import { formatCOP } from '@xinuco/utils'
 import {
-  EXPENSE_CATEGORIES,
+  CATEGORY_PALETTE,
+  MAX_CATEGORY_NAME,
   PAYMENT_METHODS,
-  categoryLabel,
+  categoryName,
   categoryBadgeClass,
   categoryBarColor,
   paymentMethodLabel,
+  visibleCategories,
   type PendingRecurringExpense,
 } from '@/lib/expense-utils'
 
@@ -80,12 +91,12 @@ function formatThousands(digits: string): string {
 
 // ── Sub-componentes de presentación ───────────────────────────────────────────
 
-function CategoryBadge({ category }: { category: string }) {
+function CategoryBadge({ category, categories }: { category: string; categories: ExpenseCategoryRow[] }) {
   return (
     <span
-      className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${categoryBadgeClass(category)}`}
+      className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${categoryBadgeClass(category, categories)}`}
     >
-      {categoryLabel(category)}
+      {categoryName(category, categories)}
     </span>
   )
 }
@@ -212,16 +223,21 @@ function ProfitLossStatement({ pl, plError, monthLabel }: { pl: ProfitLossResult
 
 function PendingRecurringBanner({
   items,
+  categories,
+  today,
   busyKey,
   onRegister,
-  onRegisterAll,
+  onRegisterDue,
 }: {
   items:         PendingRecurringExpense[]
+  categories:    ExpenseCategoryRow[]
+  today:         string
   busyKey:       string | null
   onRegister:    (item: PendingRecurringExpense) => void
-  onRegisterAll: () => void
+  onRegisterDue: () => void
 }) {
   const count = items.length
+  const dueCount = items.filter(i => i.due_date <= today).length
   return (
     <section
       className="rounded-2xl p-4 sm:p-5"
@@ -234,18 +250,27 @@ function PendingRecurringBanner({
         <div className="flex items-center gap-2">
           <Repeat size={16} style={{ color: 'var(--primary-color)' }} />
           <h2 className="text-sm font-bold text-xinuco-text">
-            Tienes {count} {count === 1 ? 'gasto fijo pendiente' : 'gastos fijos pendientes'} este mes
+            Gastos fijos de este mes
+            <span
+              className="ml-2 text-xs font-medium px-2 py-0.5 rounded-full"
+              style={{
+                background: 'color-mix(in srgb, var(--primary-color) 15%, transparent)',
+                color: 'var(--primary-color)',
+              }}
+            >
+              {count}
+            </span>
           </h2>
         </div>
-        {count > 1 && (
+        {dueCount > 1 && (
           <button
             type="button"
-            onClick={onRegisterAll}
+            onClick={onRegisterDue}
             disabled={busyKey !== null}
             className="btn-primary !py-2 !px-4 !text-xs self-start sm:self-auto"
           >
             {busyKey === 'all' && <Loader2 size={13} className="animate-spin" />}
-            Registrar todos
+            Registrar los vencidos
           </button>
         )}
       </div>
@@ -253,6 +278,7 @@ function PendingRecurringBanner({
       <ul className="flex flex-col gap-2">
         {items.map(item => {
           const key = `${item.category}::${item.description}`
+          const upcoming = item.due_date > today
           return (
             <li
               key={key}
@@ -262,8 +288,12 @@ function PendingRecurringBanner({
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-xinuco-text truncate">{item.description}</p>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
-                  <CategoryBadge category={item.category} />
-                  <span className="text-[11px] text-xinuco-muted">{formatShortDate(item.suggested_date)}</span>
+                  <CategoryBadge category={item.category} categories={categories} />
+                  <span className="text-[11px] text-xinuco-muted">
+                    {upcoming
+                      ? `Se registrará solo el ${formatShortDate(item.due_date)}`
+                      : `Vence ${item.due_date === today ? 'hoy' : formatShortDate(item.due_date)}`}
+                  </span>
                 </div>
               </div>
               <span className="text-sm font-bold tabular-nums text-xinuco-text">{formatCOP(item.amount)}</span>
@@ -271,10 +301,16 @@ function PendingRecurringBanner({
                 type="button"
                 onClick={() => onRegister(item)}
                 disabled={busyKey !== null}
-                className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-white/[0.05] disabled:opacity-50"
-                style={{ borderColor: 'var(--border-color)', color: 'var(--primary-color)' }}
+                className={
+                  upcoming
+                    ? 'text-[11px] font-medium px-2.5 py-1.5 rounded-lg border transition-colors hover:bg-white/[0.05] disabled:opacity-50 text-xinuco-muted hover:text-xinuco-text'
+                    : 'text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-white/[0.05] disabled:opacity-50'
+                }
+                style={upcoming
+                  ? { borderColor: 'var(--border-color)' }
+                  : { borderColor: 'var(--border-color)', color: 'var(--primary-color)' }}
               >
-                {busyKey === key ? <Loader2 size={13} className="animate-spin" /> : 'Registrar'}
+                {busyKey === key ? <Loader2 size={13} className="animate-spin" /> : upcoming ? 'Registrar ahora' : 'Registrar'}
               </button>
             </li>
           )
@@ -286,7 +322,15 @@ function PendingRecurringBanner({
 
 // ── Resumen por categoría ─────────────────────────────────────────────────────
 
-function CategorySummary({ totals, grandTotal }: { totals: { category: string; total: number }[]; grandTotal: number }) {
+function CategorySummary({
+  totals,
+  grandTotal,
+  categories,
+}: {
+  totals:     { category: string; total: number }[]
+  grandTotal: number
+  categories: ExpenseCategoryRow[]
+}) {
   if (totals.length === 0 || grandTotal <= 0) return null
   return (
     <section
@@ -300,7 +344,7 @@ function CategorySummary({ totals, grandTotal }: { totals: { category: string; t
           return (
             <li key={category}>
               <div className="flex items-center justify-between gap-3 text-xs mb-1.5">
-                <span className="text-xinuco-text font-medium">{categoryLabel(category)}</span>
+                <span className="text-xinuco-text font-medium">{categoryName(category, categories)}</span>
                 <span className="text-xinuco-muted tabular-nums">
                   <span className="text-xinuco-text font-semibold">{formatCOP(total)}</span> · {formatPct(pct)}
                 </span>
@@ -308,7 +352,7 @@ function CategorySummary({ totals, grandTotal }: { totals: { category: string; t
               <div className="h-2 rounded-full overflow-hidden" style={{ background: 'color-mix(in srgb, var(--border-color) 60%, transparent)' }}>
                 <div
                   className="h-full rounded-full transition-all duration-500"
-                  style={{ width: `${Math.max(pct, 2)}%`, background: categoryBarColor(category) }}
+                  style={{ width: `${Math.max(pct, 2)}%`, background: categoryBarColor(category, categories) }}
                 />
               </div>
             </li>
@@ -323,12 +367,14 @@ function CategorySummary({ totals, grandTotal }: { totals: { category: string; t
 
 function ExpenseRow({
   expense,
+  categories,
   locked,
   onEdit,
   onDelete,
 }: {
-  expense:  Expense
-  locked:   boolean
+  expense:    Expense
+  categories: ExpenseCategoryRow[]
+  locked:     boolean
   onEdit:   () => void
   onDelete: () => void
 }) {
@@ -348,12 +394,21 @@ function ExpenseRow({
       <div className="flex-1 min-w-0 flex flex-col gap-1.5">
         <span className="text-sm font-medium text-xinuco-text leading-tight break-words">{expense.description}</span>
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-          <CategoryBadge category={expense.category} />
+          <CategoryBadge category={expense.category} categories={categories} />
           <PaymentMethodTag method={expense.payment_method} />
           {expense.is_recurring && (
             <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-400">
               <Repeat size={10} />
               Fijo
+            </span>
+          )}
+          {expense.auto_registered && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-xinuco-muted"
+              title="Se registró solo el día que le tocaba"
+            >
+              <Zap size={10} />
+              Automático
             </span>
           )}
         </div>
@@ -462,23 +517,42 @@ function ConfirmDeleteDialog({
 // SHEET — Crear / editar gasto
 // ════════════════════════════════════════════════════════════════════════════
 
+const NEW_CATEGORY_OPTION = '__new__'
+
 function ExpenseSheet({
   expense,
+  categories,
   today,
   hasActiveShift,
   onClose,
   onSaved,
+  onCategoryCreated,
 }: {
-  expense:        Expense | null   // null = nuevo
-  today:          string
-  hasActiveShift: boolean
-  onClose:        () => void
-  onSaved:        () => void
+  expense:           Expense | null   // null = nuevo
+  categories:        ExpenseCategoryRow[]
+  today:             string
+  hasActiveShift:    boolean
+  onClose:           () => void
+  onSaved:           () => void
+  onCategoryCreated: () => void
 }) {
   const isEdit = expense !== null
   const backdropRef = useRef<HTMLDivElement>(null)
 
-  const [category,    setCategory]    = useState<string>(expense?.category ?? 'rent')
+  // Categorías del negocio + las creadas desde este formulario (antes de que la página se refresque)
+  const [createdCategories, setCreatedCategories] = useState<ExpenseCategoryRow[]>([])
+  const allCategories = useMemo(
+    () => [...categories, ...createdCategories.filter(c => !categories.some(k => k.slug === c.slug))],
+    [categories, createdCategories],
+  )
+  // Solo las visibles; una oculta se conserva únicamente si el gasto que se edita ya la tiene
+  const selectable = allCategories.filter(c => !c.is_hidden || c.slug === expense?.category)
+
+  const [category,    setCategory]    = useState<string>(expense?.category ?? selectable[0]?.slug ?? '')
+  const [creatingCategory, setCreatingCategory] = useState(false)
+  const [newCategoryName,  setNewCategoryName]  = useState('')
+  const [categoryBusy,     startCategory]       = useTransition()
+  const [categoryError,    setCategoryError]    = useState<string | null>(null)
   const [description, setDescription] = useState(expense?.description ?? '')
   const [amountDigits, setAmountDigits] = useState(expense ? String(expense.amount) : '')
   const [expenseDate, setExpenseDate] = useState(expense?.expense_date ?? today)
@@ -502,6 +576,39 @@ function ExpenseSheet({
     return () => { document.body.style.overflow = '' }
   }, [])
 
+  function pickCategory(value: string) {
+    setCategoryError(null)
+    if (value === NEW_CATEGORY_OPTION) {
+      setCreatingCategory(true)
+      return
+    }
+    setCreatingCategory(false)
+    setCategory(value)
+  }
+
+  function handleCreateCategory() {
+    const name = newCategoryName.trim()
+    if (name.length < 2) return setCategoryError('El nombre debe tener al menos 2 caracteres.')
+    setCategoryError(null)
+    startCategory(async () => {
+      try {
+        const result = await createExpenseCategory(name)
+        if (result.error || !result.category) {
+          setCategoryError(result.error ?? 'No se pudo crear la categoría.')
+          return
+        }
+        const created = result.category
+        setCreatedCategories(prev => [...prev, created])
+        setCategory(created.slug)
+        setCreatingCategory(false)
+        setNewCategoryName('')
+        onCategoryCreated()
+      } catch {
+        setCategoryError('Error inesperado. Intenta de nuevo.')
+      }
+    })
+  }
+
   function pickMethod(next: ExpensePaymentMethod) {
     if (next === 'cash_register' && !hasActiveShift) return
     setMethod(next)
@@ -516,6 +623,7 @@ function ExpenseSheet({
     const desc = description.trim()
     const amount = Number(amountDigits)
 
+    if (!category || creatingCategory) return setFormError('Elige una categoría válida.')
     if (desc.length < 2 || desc.length > 120) return setFormError('La descripción debe tener entre 2 y 120 caracteres.')
     if (!Number.isInteger(amount) || amount < 1 || amount > MAX_AMOUNT) {
       return setFormError('El monto debe estar entre $1 y $100.000.000.')
@@ -600,14 +708,41 @@ function ExpenseSheet({
             <label htmlFor="exp-category" className={labelClass}>Categoría *</label>
             <select
               id="exp-category"
-              value={category}
-              onChange={e => setCategory(e.target.value)}
+              value={creatingCategory ? NEW_CATEGORY_OPTION : category}
+              onChange={e => pickCategory(e.target.value)}
               className="input-base"
             >
-              {EXPENSE_CATEGORIES.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              {selectable.map(opt => (
+                <option key={opt.slug} value={opt.slug}>{opt.name}{opt.is_hidden ? ' (oculta)' : ''}</option>
               ))}
+              <option value={NEW_CATEGORY_OPTION}>+ Nueva categoría…</option>
             </select>
+            {creatingCategory && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={newCategoryName}
+                  onChange={e => setNewCategoryName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateCategory() } }}
+                  placeholder="Nombre de la categoría"
+                  aria-label="Nombre de la nueva categoría"
+                  maxLength={MAX_CATEGORY_NAME}
+                  autoFocus
+                  className="input-base flex-1 min-w-0"
+                />
+                <button
+                  type="button"
+                  onClick={handleCreateCategory}
+                  disabled={categoryBusy}
+                  className="btn-primary !py-2.5 !px-4 !text-xs shrink-0"
+                >
+                  {categoryBusy ? <Loader2 size={13} className="animate-spin" /> : 'Crear'}
+                </button>
+              </div>
+            )}
+            {categoryError && (
+              <p role="alert" className="text-xs text-red-400">{categoryError}</p>
+            )}
             <p className="text-xs text-xinuco-muted">La compra de productos para vender se registra en Inventario.</p>
           </div>
 
@@ -696,7 +831,11 @@ function ExpenseSheet({
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-medium text-xinuco-text">Gasto fijo mensual</p>
-              <p className="text-xs text-xinuco-muted mt-0.5">Cada mes te recordaremos registrarlo.</p>
+              <p className="text-xs text-xinuco-muted mt-0.5">
+                {isRecurring
+                  ? `Se registrará solo cada mes el día ${Number(expenseDate.slice(8, 10)) || 1} y te avisaremos un día antes por correo.`
+                  : 'Actívalo para gastos que se repiten cada mes.'}
+              </p>
             </div>
             <button
               type="button"
@@ -747,6 +886,353 @@ function ExpenseSheet({
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// SHEET — Categorías del negocio
+// ════════════════════════════════════════════════════════════════════════════
+
+function ColorPicker({
+  value,
+  onPick,
+  size = 22,
+}: {
+  value:  string | null
+  onPick: (key: string) => void
+  size?:  number
+}) {
+  return (
+    <div role="radiogroup" aria-label="Color" className="flex flex-wrap gap-2">
+      {CATEGORY_PALETTE.map(c => {
+        const selected = value === c.key
+        return (
+          <button
+            key={c.key}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={c.label}
+            title={c.label}
+            onClick={() => onPick(c.key)}
+            className="rounded-full flex items-center justify-center transition-transform hover:scale-110"
+            style={{
+              width: size,
+              height: size,
+              background: c.bar,
+              boxShadow: selected ? `0 0 0 2px var(--bg-color), 0 0 0 4px ${c.bar}` : undefined,
+            }}
+          >
+            {selected && <Check size={12} className="text-black/70" />}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function CategoryRowEditor({
+  category,
+  usage,
+  busy,
+  onRename,
+  onColor,
+  onToggleHidden,
+  onDelete,
+}: {
+  category:       ExpenseCategoryRow
+  usage:          number | null   // null = cargando
+  busy:           boolean
+  onRename:       (name: string) => Promise<boolean>
+  onColor:        (color: string) => void
+  onToggleHidden: () => void
+  onDelete:       () => void
+}) {
+  const [draft, setDraft] = useState(category.name)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  useEffect(() => { setDraft(category.name) }, [category.name])
+
+  function commitName() {
+    const next = draft.trim()
+    if (next === category.name) return
+    if (next.length < 2) { setDraft(category.name); return }
+    // Si el servidor lo rechaza (p. ej. nombre repetido), vuelve al nombre real
+    onRename(next).then(ok => { if (!ok) setDraft(category.name) })
+  }
+
+  const inUse = (usage ?? 0) > 0
+  const canDelete = usage !== null && !inUse
+  const iconBtn =
+    'p-2 rounded-lg text-xinuco-muted transition-colors hover:text-xinuco-text hover:bg-white/[0.05] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-xinuco-muted'
+
+  return (
+    <li
+      className="rounded-xl px-3 py-2.5 flex flex-col gap-2"
+      style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)', opacity: category.is_hidden ? 0.7 : 1 }}
+    >
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setPaletteOpen(o => !o)}
+          aria-label={`Cambiar color de ${category.name}`}
+          aria-expanded={paletteOpen}
+          className="shrink-0 w-5 h-5 rounded-full"
+          style={{ background: categoryBarColor(category.slug, [category]) }}
+        />
+        <input
+          type="text"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commitName}
+          onKeyDown={e => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+            if (e.key === 'Escape') { setDraft(category.name); e.currentTarget.blur() }
+          }}
+          maxLength={MAX_CATEGORY_NAME}
+          disabled={busy}
+          aria-label={`Nombre de la categoría ${category.name}`}
+          className="flex-1 min-w-0 bg-transparent text-sm font-medium text-xinuco-text rounded-md px-2 py-1 border border-transparent hover:border-[var(--border-color)] focus:border-[var(--primary-color)] focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={onToggleHidden}
+          disabled={busy}
+          title={category.is_hidden ? 'Mostrar en el formulario' : 'Ocultar del formulario'}
+          aria-label={category.is_hidden ? `Mostrar ${category.name}` : `Ocultar ${category.name}`}
+          aria-pressed={category.is_hidden}
+          className={iconBtn}
+        >
+          {category.is_hidden ? <EyeOff size={15} /> : <Eye size={15} />}
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={busy || !canDelete}
+          title={
+            usage === null ? 'Calculando…'
+            : inUse ? `Tiene ${usage} ${usage === 1 ? 'gasto' : 'gastos'}: ocúltala en lugar de borrarla`
+            : 'Eliminar'
+          }
+          aria-label={`Eliminar ${category.name}`}
+          className={`${iconBtn} ${canDelete ? 'hover:!text-red-400' : ''}`}
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2 pl-7 text-[11px] text-xinuco-muted">
+        {category.is_hidden && (
+          <span className="font-semibold uppercase tracking-wide text-amber-400">Oculta</span>
+        )}
+        <span>
+          {usage === null ? '…' : usage === 0 ? 'Sin gastos' : `${usage} ${usage === 1 ? 'gasto' : 'gastos'}`}
+        </span>
+      </div>
+
+      {paletteOpen && (
+        <div className="pl-7 pb-1">
+          <ColorPicker value={category.color} onPick={key => { setPaletteOpen(false); onColor(key) }} />
+        </div>
+      )}
+    </li>
+  )
+}
+
+function CategoriesSheet({
+  categories,
+  onClose,
+  onChanged,
+}: {
+  categories: ExpenseCategoryRow[]
+  onClose:    () => void
+  onChanged:  () => void
+}) {
+  const backdropRef = useRef<HTMLDivElement>(null)
+  const [list, setList] = useState<ExpenseCategoryRow[]>(categories)
+  const [usage, setUsage] = useState<Record<string, number> | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [dirty, setDirty] = useState(false)
+
+  const [newName, setNewName] = useState('')
+  const [newColor, setNewColor] = useState<string>(CATEGORY_PALETTE[categories.length % CATEGORY_PALETTE.length].key)
+  const [creating, startCreate] = useTransition()
+
+  function close() {
+    if (dirty) onChanged()
+    onClose()
+  }
+
+  // Cuántos gastos tiene cada categoría (habilita o no el borrado)
+  useEffect(() => {
+    let cancelled = false
+    getExpenseCategoryUsage()
+      .then(res => {
+        if (cancelled) return
+        if ('error' in res) setError(res.error)
+        else setUsage(res.usage)
+      })
+      .catch(() => { if (!cancelled) setError('No se pudo cargar el uso de las categorías.') })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  })
+
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [])
+
+  async function update(id: string, patch: { name?: string; color?: string; is_hidden?: boolean }): Promise<boolean> {
+    setError(null)
+    setBusyId(id)
+    try {
+      const res = await updateExpenseCategory(id, patch)
+      if (res.error || !res.category) {
+        setError(res.error ?? 'No se pudo guardar el cambio.')
+        return false
+      }
+      const updated = res.category
+      setList(prev => prev.map(c => (c.id === id ? updated : c)))
+      setDirty(true)
+      return true
+    } catch {
+      setError('Error inesperado. Intenta de nuevo.')
+      return false
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function remove(category: ExpenseCategoryRow) {
+    setError(null)
+    setBusyId(category.id)
+    try {
+      const res = await deleteExpenseCategory(category.id)
+      if (res.error) {
+        setError(res.error)
+        return
+      }
+      setList(prev => prev.filter(c => c.id !== category.id))
+      setDirty(true)
+    } catch {
+      setError('Error inesperado. Intenta de nuevo.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  function handleCreate(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    const name = newName.trim()
+    if (name.length < 2) return setError('El nombre debe tener al menos 2 caracteres.')
+    startCreate(async () => {
+      try {
+        const res = await createExpenseCategory(name, newColor)
+        if (res.error || !res.category) {
+          setError(res.error ?? 'No se pudo crear la categoría.')
+          return
+        }
+        const created = res.category
+        setList(prev => [...prev, created])
+        setUsage(prev => (prev ? { ...prev, [created.slug]: 0 } : prev))
+        setNewName('')
+        setNewColor(CATEGORY_PALETTE[(list.length + 1) % CATEGORY_PALETTE.length].key)
+        setDirty(true)
+      } catch {
+        setError('Error inesperado. Intenta de nuevo.')
+      }
+    })
+  }
+
+  return (
+    <div
+      ref={backdropRef}
+      className="fixed inset-0 z-50 flex justify-end"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === backdropRef.current) close() }}
+    >
+      <div
+        className="h-full overflow-y-auto animate-slide-in-right w-[95vw] sm:w-[440px]"
+        style={{ background: 'var(--bg-color)', borderLeft: '1px solid var(--border-color)' }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Categorías de gasto"
+      >
+        <div
+          className="sticky top-0 z-10 flex items-center justify-between px-6 py-5"
+          style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-color)' }}
+        >
+          <div>
+            <h2 className="text-lg font-bold text-xinuco-text">Categorías</h2>
+            <p className="text-xs text-xinuco-muted mt-0.5">Organiza tus gastos a tu manera.</p>
+          </div>
+          <button
+            type="button"
+            onClick={close}
+            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            aria-label="Cerrar panel"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-6 flex flex-col gap-5">
+          {error && (
+            <p role="alert" className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2.5 animate-fade-in">
+              {error}
+            </p>
+          )}
+
+          <ul className="flex flex-col gap-2">
+            {list.map(category => (
+              <CategoryRowEditor
+                key={category.id}
+                category={category}
+                usage={usage === null ? null : (usage[category.slug] ?? 0)}
+                busy={busyId === category.id}
+                onRename={name => update(category.id, { name })}
+                onColor={color => { void update(category.id, { color }) }}
+                onToggleHidden={() => { void update(category.id, { is_hidden: !category.is_hidden }) }}
+                onDelete={() => remove(category)}
+              />
+            ))}
+          </ul>
+          <p className="text-xs text-xinuco-muted -mt-2">
+            Las categorías con gastos no se pueden borrar: ocúltalas y dejarán de aparecer al crear gastos, sin perder tu historial.
+          </p>
+
+          <form
+            onSubmit={handleCreate}
+            className="rounded-xl p-4 flex flex-col gap-3"
+            style={{ border: '1px dashed var(--border-color)' }}
+          >
+            <label htmlFor="new-cat-name" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
+              + Nueva categoría
+            </label>
+            <input
+              id="new-cat-name"
+              type="text"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              placeholder="Ej: Café y bebidas"
+              maxLength={MAX_CATEGORY_NAME}
+              className="input-base"
+            />
+            <ColorPicker value={newColor} onPick={setNewColor} />
+            <button type="submit" disabled={creating} className="btn-primary !py-2.5 self-start flex items-center gap-2">
+              {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+              Agregar categoría
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // COMPONENTE PRINCIPAL — ExpenseManager
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -767,10 +1253,11 @@ export function ExpenseManager({
   nextMonthKey,
 }: ExpenseManagerProps) {
   const router = useRouter()
-  const { month, expenses, pl, plError, pendingRecurring, activeShift } = overview
+  const { month, expenses, pl, plError, pendingRecurring, activeShift, categories } = overview
 
   const [navPending, startNav] = useTransition()
   const [sheet, setSheet] = useState<{ expense: Expense | null } | null>(null)
+  const [categoriesOpen, setCategoriesOpen] = useState(false)
   const [toDelete, setToDelete] = useState<Expense | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleting, startDelete] = useTransition()
@@ -828,7 +1315,7 @@ export function ExpenseManager({
         category:       i.category,
         description:    i.description,
         amount:         i.amount,
-        expense_date:   i.suggested_date,
+        expense_date:   i.due_date,
         payment_method: i.payment_method,
       })))
       if (result.error) setPageError(result.error)
@@ -846,10 +1333,21 @@ export function ExpenseManager({
         title="Gastos"
         subtitle="Registra lo que sale del negocio y mira cuánto te queda."
         actionButton={
-          <button type="button" onClick={() => setSheet({ expense: null })} className="btn-primary !py-2.5">
-            <Plus size={16} />
-            Nuevo gasto
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCategoriesOpen(true)}
+              className="flex items-center gap-2 !py-2.5 px-4 rounded-lg text-sm font-medium text-xinuco-text border transition-colors hover:bg-white/[0.05]"
+              style={{ borderColor: 'var(--border-color)' }}
+            >
+              <Tags size={16} />
+              Categorías
+            </button>
+            <button type="button" onClick={() => setSheet({ expense: null })} className="btn-primary !py-2.5">
+              <Plus size={16} />
+              Nuevo gasto
+            </button>
+          </div>
         }
       />
 
@@ -898,13 +1396,15 @@ export function ExpenseManager({
         {pendingRecurring.length > 0 && (
           <PendingRecurringBanner
             items={pendingRecurring}
+            categories={categories}
+            today={today}
             busyKey={recurringBusy}
             onRegister={item => registerItems([item], `${item.category}::${item.description}`)}
-            onRegisterAll={() => registerItems(pendingRecurring, 'all')}
+            onRegisterDue={() => registerItems(pendingRecurring.filter(i => i.due_date <= today), 'all')}
           />
         )}
 
-        <CategorySummary totals={categoryTotals} grandTotal={grandTotal} />
+        <CategorySummary totals={categoryTotals} grandTotal={grandTotal} categories={categories} />
 
         {expenses.length === 0 ? (
           <AdminEmptyState
@@ -921,7 +1421,7 @@ export function ExpenseManager({
               {[{ category: 'all', label: 'Todas', count: expenses.length },
                 ...categoryTotals.map(c => ({
                   category: c.category,
-                  label: categoryLabel(c.category),
+                  label: categoryName(c.category, categories),
                   count: expenses.filter(e => e.category === c.category).length,
                 }))].map(chip => {
                 const selected = activeFilter === chip.category
@@ -955,6 +1455,7 @@ export function ExpenseManager({
                 <ExpenseRow
                   key={expense.id}
                   expense={expense}
+                  categories={categories}
                   locked={isLocked(expense)}
                   onEdit={() => setSheet({ expense })}
                   onDelete={() => { setDeleteError(null); setToDelete(expense) }}
@@ -968,10 +1469,20 @@ export function ExpenseManager({
       {sheet && (
         <ExpenseSheet
           expense={sheet.expense}
+          categories={categories}
           today={today}
           hasActiveShift={!!activeShift}
           onClose={() => setSheet(null)}
           onSaved={handleSaved}
+          onCategoryCreated={() => router.refresh()}
+        />
+      )}
+
+      {categoriesOpen && (
+        <CategoriesSheet
+          categories={categories}
+          onClose={() => setCategoriesOpen(false)}
+          onChanged={() => router.refresh()}
         />
       )}
 

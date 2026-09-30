@@ -14,6 +14,7 @@ import { createClient }          from '@supabase/supabase-js'
 import { sendBookingReminder }   from '@/lib/email/notifications'
 import type { Database }         from '@xinuco/types'
 import { businessTodayISODate, addDaysToDateKey } from '@/lib/agenda-time'
+import { runRecurringExpenses }  from '@/lib/recurring-expenses'
 
 // Forzar renderizado dinámico — esta ruta nunca debe ser cacheada por Next.js
 export const dynamic = 'force-dynamic'
@@ -109,6 +110,22 @@ export async function GET(request: Request) {
     `Enviadas=${sent} Omitidas=${skipped} Fallidas=${failed}`,
   )
 
+  // ── 6. Gastos fijos: registrar los de hoy y avisar los de mañana ──────────
+  // Va DESPUÉS de los recordatorios y aislado: si falla, las citas ya se procesaron.
+  let recurringExpenses: unknown
+  try {
+    const summary = await runRecurringExpenses(supabase, { todayKey: businessTodayISODate() })
+    recurringExpenses = summary
+    console.info(
+      `[cron/send-reminders] GastosFijos registrados=${summary.registered.length} ` +
+      `avisos=${summary.reminders.length} errores=${summary.errors.length}`,
+    )
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[cron/send-reminders] Error en gastos fijos:', msg)
+    recurringExpenses = { error: msg }
+  }
+
   return NextResponse.json({
     ok:          true,
     window:      { from, to },
@@ -117,5 +134,6 @@ export async function GET(request: Request) {
     skipped,
     failed,
     ...(errors.length > 0 && { errors }),
+    recurringExpenses,
   })
 }

@@ -362,6 +362,15 @@ export interface Database {
         }
         Update: Partial<Omit<Expense, 'id' | 'created_at' | 'updated_at'>>
       }
+      expense_categories: {
+        Row:    ExpenseCategoryRow
+        Insert: Omit<ExpenseCategoryRow, 'id' | 'created_at' | 'is_hidden' | 'sort_order' | 'color'> & {
+          is_hidden?:  boolean
+          sort_order?: number
+          color?:      string | null
+        }
+        Update: Partial<Omit<ExpenseCategoryRow, 'id' | 'business_id' | 'created_at'>>
+      }
       walk_ins: {
         Row:    WalkIn
         Insert: Omit<WalkIn, 'id' | 'created_at' | 'arrived_at'> & { arrived_at?: string }
@@ -744,6 +753,21 @@ export interface Expense {
   payment_method: ExpensePaymentMethod
   shift_id:       string | null   // turno de caja (solo si payment_method = 'cash_register')
   updated_at:     string
+  /** true si el cron diario lo registró solo (gasto fijo mensual). */
+  auto_registered?: boolean
+}
+
+// ---------- Tabla: expense_categories ----------
+/** Categoría de gasto de un negocio. `expenses.category` guarda el `slug`. */
+export interface ExpenseCategoryRow {
+  id:          string
+  business_id: string
+  slug:        string
+  name:        string
+  color:       string | null   // clave de la paleta (lib/expense-utils.ts), p. ej. 'blue'
+  is_hidden:   boolean
+  sort_order:  number
+  created_at:  string
 }
 
 // ---------- P&G Result (retorno de get_profit_loss RPC) ----------

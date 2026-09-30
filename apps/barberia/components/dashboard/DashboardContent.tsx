@@ -1,6 +1,8 @@
 import { createClient } from '@xinuco/supabase/server'
 import { redirect } from 'next/navigation'
 import { getActiveShiftDetails } from '@/actions/finance'
+import { getUpcomingFixedExpenses } from '@/actions/expenses'
+import { UpcomingFixedExpensesNotice } from '@/components/dashboard/expenses/UpcomingFixedExpensesNotice'
 import { CashShiftManager } from '@/components/finance/CashShiftManager'
 import { RetailSaleButton } from '@/components/finance/RetailSaleButton'
 import { NewAppointmentButton } from '@/components/dashboard/NewAppointmentButton'
@@ -40,6 +42,9 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
   if (isAdmin) {
     activeShiftDetails = await getActiveShiftDetails(businessId)
   }
+
+  // 3b. Gastos fijos que vencen hoy o mañana sin registrar (Solo para administradores)
+  const upcomingFixedExpenses = isAdmin ? await getUpcomingFixedExpenses() : []
 
   // 4. Citas de HOY filtradas por start_time (no created_at — una cita de hoy pudo
   //    haberse creado hace días).
@@ -104,6 +109,13 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
             businessId={businessId}
             hasInProgressAppointments={hasInProgressAppointments}
           />
+        </section>
+      )}
+
+      {/* Aviso: gastos fijos que vencen hoy o mañana (Solo para Administrador) */}
+      {isAdmin && upcomingFixedExpenses.length > 0 && (
+        <section aria-label="Gastos fijos próximos">
+          <UpcomingFixedExpensesNotice items={upcomingFixedExpenses} slug={slug} today={todayStr} />
         </section>
       )}
 

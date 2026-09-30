@@ -380,3 +380,49 @@ export function appointmentCancellationEmail(data: {
 
   return emailLayout(theme, content)
 }
+
+// ── 4. Aviso de gastos fijos que vencen mañana (para administradores) ────────
+
+/** '2026-09-30' → 'Miércoles, 30 de septiembre de 2026' (sin corrimientos de zona horaria). */
+function formatDateKeySpanish(dateKey: string): string {
+  const d = new Date(`${dateKey}T00:00:00Z`)
+  return `${DIAS[d.getUTCDay()]}, ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]} de ${d.getUTCFullYear()}`
+}
+
+export function recurringExpenseReminderEmail(data: {
+  businessName: string
+  /** Día en que vencen 'YYYY-MM-DD'. */
+  dueDate:      string
+  items:        { description: string; categoryName: string; amount: number }[]
+  /** Enlace a la página de Gastos del negocio (botón "Ver gastos"). */
+  expensesUrl:  string
+  brand?:       EmailBrand
+}): string {
+  const theme = buildTheme(data.brand, data.businessName)
+  const dateLabel = formatDateKeySpanish(data.dueDate)
+  const many = data.items.length > 1
+
+  const detailRows: { label: string; value: string; highlight?: boolean }[] = [
+    ...data.items.map((item) => ({
+      label: escapeHtml(item.description),
+      value: `${formatCOP(item.amount)} <span style="font-weight:400;color:${C.muted};font-size:12px;">· ${escapeHtml(item.categoryName)}</span>`,
+      highlight: true,
+    })),
+    { label: 'Fecha', value: escapeHtml(dateLabel) },
+  ]
+
+  const content = `
+    ${heading(
+      many ? 'Mañana vencen tus gastos fijos' : 'Mañana vence un gasto fijo',
+      `Hola, en <strong style="color:${theme.accentText};">${escapeHtml(theme.name)}</strong> ${
+        many ? 'estos gastos fijos vencen' : 'este gasto fijo vence'} mañana.`,
+    )}
+    ${appointmentDetailsBlock(detailRows, theme)}
+    ${noteBlock(
+      `Se registrará automáticamente en Gastos el ${escapeHtml(dateLabel)}. Si cambió el valor, edítalo después.`,
+      theme,
+    )}
+    ${buttonBlock('Ver gastos', escapeHtml(data.expensesUrl), theme)}`
+
+  return emailLayout(theme, content)
+}
