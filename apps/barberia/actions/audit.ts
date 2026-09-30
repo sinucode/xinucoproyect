@@ -123,6 +123,7 @@ export async function getAuditActors(): Promise<AuditActorOption[] | { error: st
     ...people,
     { value: 'name:Sistema', label: 'Sistema' },
     { value: 'name:Cliente (en línea)', label: 'Cliente (en línea)' },
+    { value: 'name:Soporte Xinuco', label: 'Soporte Xinuco' },
   ]
 }
 

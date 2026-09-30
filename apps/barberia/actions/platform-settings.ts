@@ -7,6 +7,7 @@
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { isValidRetention } from '@/lib/audit-retention'
+import { businessTodayISODate } from '@/lib/agenda-time'
 
 const NOT_SUPER_ADMIN = 'Acceso denegado. Se requieren privilegios de super_admin.'
 const SETTING_KEY = 'audit_retention_months'
@@ -87,4 +88,71 @@ export async function updateAuditRetention(
 
   revalidatePath('/adminbarberia/settings')
   return { success: true, months, updatedAt: new Date().toISOString(), updatedByName }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Borrado manual de auditoría (solo super_admin)
+// La BD (RPC count_/purge_audit_logs_before) vuelve a validar el rol y la fecha.
+// ════════════════════════════════════════════════════════════════════════════
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isValidBusinessFilter(businessId: string | null): boolean {
+  return businessId === null || (typeof businessId === 'string' && UUID_RE.test(businessId))
+}
+
+function purgeErrorMessage(message: unknown): string {
+  const text = String(message ?? '')
+  if (text.includes('forbidden')) return 'Acceso denegado.'
+  if (text.includes('invalid_date')) return 'Fecha no válida.'
+  return 'No se pudo completar la operación.'
+}
+
+/** Cuántos registros de auditoría anteriores a hoy (Colombia) hay; null = todas las barberías. */
+export async function countAuditLogsBefore(
+  businessId: string | null,
+): Promise<{ count: number } | { error: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user || user.app_metadata?.role !== 'super_admin') return { error: NOT_SUPER_ADMIN }
+
+  if (!isValidBusinessFilter(businessId)) return { error: 'Barbería no válida.' }
+
+  const { data, error } = await (supabase as any).rpc('count_audit_logs_before', {
+    p_before:      businessTodayISODate(),
+    p_business_id: businessId,
+  })
+
+  if (error) return { error: purgeErrorMessage(error.message) }
+  return { count: Number(data ?? 0) }
+}
+
+/** Borra los registros de auditoría anteriores a hoy (Colombia). Exige escribir BORRAR. */
+export async function purgeAuditLogsBeforeToday(
+  businessId: string | null,
+  confirmation: string,
+): Promise<{ success: true; deleted: number } | { success: false; error: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user || user.app_metadata?.role !== 'super_admin') {
+    return { success: false, error: NOT_SUPER_ADMIN }
+  }
+
+  if (!isValidBusinessFilter(businessId)) return { success: false, error: 'Barbería no válida.' }
+  if (typeof confirmation !== 'string' || confirmation.trim().toUpperCase() !== 'BORRAR') {
+    return { success: false, error: 'Escribe BORRAR para confirmar.' }
+  }
+
+  const { data, error } = await (supabase as any).rpc('purge_audit_logs_before', {
+    p_before:      businessTodayISODate(),
+    p_business_id: businessId,
+  })
+
+  if (error) return { success: false, error: purgeErrorMessage(error.message) }
+
+  const deleted = Number((data as { deleted?: number } | null)?.deleted ?? 0)
+
+  revalidatePath('/adminbarberia/settings')
+  revalidatePath('/[slug]/dashboard/audit', 'page')
+  return { success: true, deleted }
 }

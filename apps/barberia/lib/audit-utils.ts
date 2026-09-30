@@ -46,6 +46,7 @@ const PREFIX_CATEGORY: Record<string, AuditCategory> = {
   service:         'settings',
   business:        'settings',
   loyalty:         'customers',
+  audit:           'settings',
 }
 
 /** Categoría del registro: la guardada o, en registros antiguos, la derivada del prefijo de la acción. */
@@ -256,6 +257,7 @@ export function summarizeAlerts(rows: AuditAlertRow[]): AuditAlertItem[] {
     expenseDeleted: 0,
     priceChange: 0,
     commission: 0,
+    purged: 0,
   }
 
   for (const r of rows) {
@@ -267,6 +269,7 @@ export function summarizeAlerts(rows: AuditAlertRow[]): AuditAlertItem[] {
     else if (r.action === 'expense.deleted') acc.expenseDeleted++
     else if (r.action === 'service.price_changed' || r.action === 'product.price_changed') acc.priceChange++
     else if (r.action.startsWith('commission_rule.')) acc.commission++
+    else if (r.action === 'audit.purged') acc.purged++
   }
 
   const items: AuditAlertItem[] = []
@@ -312,6 +315,12 @@ export function summarizeAlerts(rows: AuditAlertRow[]): AuditAlertItem[] {
     items.push({
       key: 'commission', count: acc.commission, tone: 'warning',
       label: plural(acc.commission, 'cambio de comisiones', 'cambios de comisiones'),
+    })
+  }
+  if (acc.purged > 0) {
+    items.push({
+      key: 'audit_purged', count: acc.purged, tone: 'warning',
+      label: plural(acc.purged, 'borrado de auditoría', 'borrados de auditoría'),
     })
   }
   return items

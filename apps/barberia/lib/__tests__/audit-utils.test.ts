@@ -96,6 +96,7 @@ describe('auditCategoryOf', () => {
     expect(c('service.price_changed')).toBe('settings')
     expect(c('business.settings_changed')).toBe('settings')
     expect(c('loyalty.adjusted')).toBe('customers')
+    expect(c('audit.purged')).toBe('settings')
     expect(c('sale.voided', 'basura')).toBe('money')
   })
 
@@ -196,6 +197,16 @@ describe('summarizeAlerts', () => {
     ])
     expect(items.find(i => i.key === 'voided')).toMatchObject({ count: 2, amount: 70000, tone: 'warning' })
     expect(items.find(i => i.key === 'discount')?.tone).toBe('info')
+  })
+
+  it('cuenta los borrados de auditoría como alerta', () => {
+    expect(summarizeAlerts([{ action: 'audit.purged', amount: null, severity: 'warning' }])).toEqual([
+      { key: 'audit_purged', count: 1, tone: 'warning', label: '1 borrado de auditoría' },
+    ])
+    expect(summarizeAlerts([
+      { action: 'audit.purged', amount: null, severity: 'warning' },
+      { action: 'audit.purged', amount: null, severity: 'warning' },
+    ])[0].label).toBe('2 borrados de auditoría')
   })
 
   it('singular y plural', () => {

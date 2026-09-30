@@ -8,6 +8,8 @@ import {
 import { adminLoginUrl, BARBERIA_URL } from '@xinuco/utils'
 import { getAuditRetentionSetting } from '@/actions/platform-settings'
 import { AuditRetentionCard } from '@/components/admin/AuditRetentionCard'
+import { AuditPurgeCard } from '@/components/admin/AuditPurgeCard'
+import { businessTodayISODate } from '@/lib/agenda-time'
 
 export const metadata: Metadata = {
   title: 'Configuración — Xinuco Admin',
@@ -58,6 +60,14 @@ export default async function SettingsPage() {
     .eq('is_active', true)
 
   const retention = await getAuditRetentionSetting()
+
+  const { data: businessRows } = await supabase
+    .from('businesses')
+    .select('id, name')
+    .order('name', { ascending: true })
+  const purgeBusinesses = ((businessRows ?? []) as { id: string; name: string }[])
+    .map(b => ({ id: b.id, name: b.name }))
+  const todayISO = businessTodayISODate()
 
   const now  = new Date()
   const date = now.toLocaleDateString('es-CO', {
@@ -138,6 +148,9 @@ export default async function SettingsPage() {
           initialUpdatedByName={retention.updatedByName}
         />
       )}
+
+      {/* Auditoría: borrado manual (zona de peligro) */}
+      <AuditPurgeCard businesses={purgeBusinesses} todayISO={todayISO} />
 
       {/* Estado del servidor */}
       <div className="rounded-xl border border-xinuco-border overflow-hidden">
