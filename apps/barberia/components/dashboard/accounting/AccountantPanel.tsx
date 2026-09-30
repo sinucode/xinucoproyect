@@ -256,7 +256,7 @@ export function AccountantPanel({
           </p>
         ) : (
           <p className="text-xs text-xinuco-muted">
-            Período: <span className="capitalize">{rangeText}</span> ({plural(monthsCount, 'mes', 'meses')}).
+            Período: <span>{rangeText}</span> ({plural(monthsCount, 'mes', 'meses')}).
           </p>
         )}
       </div>
