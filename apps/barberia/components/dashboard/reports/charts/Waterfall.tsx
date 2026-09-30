@@ -13,6 +13,7 @@ function per100Label(step: WaterfallStep): string {
   if (step.kind === 'start') return 'Todo lo que entra'
   const p = step.per100
   if (p === null) return '—'
+  if (Math.abs(p) < 0.5) return 'menos de $1 de cada $100'
   const sign = p < 0 ? '−' : step.kind === 'gain' ? '+' : ''
   return `${sign}$${Math.round(Math.abs(p))} de cada $100`
 }

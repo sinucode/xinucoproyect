@@ -184,7 +184,7 @@ function ReportBody({ slug, report, categories }: { slug: string; report: Manage
             <p className="text-[11px] text-xinuco-muted mb-1">Utilidad mes a mes (últimos 12 meses)</p>
             <Sparkline
               ariaLabel="Utilidad de los últimos 12 meses"
-              points={report.monthly.map(m => ({
+              points={trimMonthly(report.monthly).map(m => ({
                 label: monthShort(m.month),
                 value: m.net,
                 tooltip: {

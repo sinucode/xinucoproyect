@@ -237,6 +237,7 @@ export function buildWaterfall(
 /** "$15 de cada $100" (el signo lo pone quien lo muestre). */
 export function per100Text(per100: number | null): string {
   if (per100 === null) return '—'
+  if (Math.abs(per100) < 0.5) return 'menos de $1 de cada $100'
   const v = Math.round(Math.abs(per100))
   return `$${v} de cada $100`
 }
