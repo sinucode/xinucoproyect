@@ -1,5 +1,7 @@
 'use client'
 
+import { createPortal } from 'react-dom'
+
 import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { usePathname } from 'next/navigation'
 import { X } from 'lucide-react'
@@ -71,7 +73,8 @@ function DesktopDialog({
     }
   }, [close])
 
-  return (
+  if (typeof document === 'undefined') return null
+  return createPortal((
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={close} aria-hidden="true" />
       <div
@@ -100,5 +103,5 @@ function DesktopDialog({
         <div className="overflow-y-auto overscroll-contain px-5 py-4">{children}</div>
       </div>
     </div>
-  )
+  ), document.body)
 }
