@@ -335,7 +335,7 @@ export function PointOfSale({ slug, catalog, compact = false, onSold }: PointOfS
   }
 
   // ── Venta ──────────────────────────────────────────────────────────────────
-  const gridCols = compact ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-4'
+  const gridCols = compact ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'
 
   return (
     <div

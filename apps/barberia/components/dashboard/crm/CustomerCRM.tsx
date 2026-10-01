@@ -222,7 +222,10 @@ export function CustomerCRM({
       )}
 
       {/* Lista de clientes */}
-      <section aria-label="Clientes" className="flex flex-col gap-2">
+      <section
+        aria-label="Clientes"
+        className={customers.length === 0 ? 'flex flex-col gap-2' : 'grid grid-cols-1 gap-2 xl:grid-cols-2'}
+      >
         {customers.length === 0 ? (
           <div
             className="flex flex-col items-center justify-center py-16 text-center rounded-xl"

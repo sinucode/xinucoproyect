@@ -234,7 +234,13 @@ export function InteractiveAgenda({
                   dateTime={appt.start_time ?? undefined}
                   className="text-xs font-bold text-xinuco-muted w-16 shrink-0 pt-4 text-right leading-none"
                 >
-                  {timeStr}
+                  {/* "09:00" arriba y "a. m." debajo, sin partirse a la mitad */}
+                  <span className="block whitespace-nowrap">{timeStr.split(/\s/)[0]}</span>
+                  {/\s/.test(timeStr) && (
+                    <span className="block whitespace-nowrap text-[10px] font-medium mt-1">
+                      {timeStr.slice(timeStr.search(/\s/) + 1)}
+                    </span>
+                  )}
                 </time>
 
                 {/* Línea de timeline */}
@@ -254,7 +260,7 @@ export function InteractiveAgenda({
 
                 {/* Card de la cita */}
                 <div
-                  className="card flex-1 min-w-0 flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-4 p-4 border border-zinc-900 bg-zinc-950/40 hover:bg-zinc-950/70 transition-colors"
+                  className={`card flex-1 min-w-0 flex flex-col ${wide ? '' : '2xl:flex-row 2xl:items-center'} justify-between gap-4 p-4 border border-zinc-900 bg-zinc-950/40 hover:bg-zinc-950/70 transition-colors`}
                   style={isActive ? { borderColor: 'color-mix(in srgb, var(--primary-color) 25%, transparent)' } : {}}
                 >
                   {/* Detalles principales */}
@@ -315,7 +321,7 @@ export function InteractiveAgenda({
                   </div>
 
                   {/* Acciones del Administrador en base al estado actual */}
-                  <div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center 2xl:justify-end shrink-0 pt-2 2xl:pt-0 border-t border-zinc-900/50 2xl:border-0">
+                  <div className={`grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center shrink-0 pt-2 border-t border-zinc-900/50 ${wide ? '' : '2xl:justify-end 2xl:pt-0 2xl:border-0'}`}>
                     {/* Badge de estado estático */}
                     <span
                       className={`badge col-span-2 md:col-span-1 justify-self-start shrink-0 text-xs font-bold uppercase tracking-wider ${cfg.textClass}`}
