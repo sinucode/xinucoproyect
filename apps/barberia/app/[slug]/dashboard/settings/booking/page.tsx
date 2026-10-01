@@ -35,7 +35,7 @@ export default async function BookingSettingsPage({
     >>()
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto px-4 sm:px-6 py-6">
+    <div className="flex flex-col gap-6 w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       <Link
         href={`/${slug}/dashboard/settings`}
         className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-xinuco-muted hover:text-xinuco-text transition-colors w-fit"

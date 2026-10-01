@@ -48,7 +48,7 @@ export default async function BrandingPage({
   }
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto px-4 sm:px-6 py-6">
+    <div className="flex flex-col gap-6 w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       {/* Header */}
       <div className="flex flex-col">
         <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-xinuco-text">

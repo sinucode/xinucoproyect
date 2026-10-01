@@ -85,7 +85,7 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
   )
 
   return (
-    <div className="flex flex-col gap-6 max-w-6xl mx-auto px-4 sm:px-6 py-6">
+    <div className="flex flex-col gap-6 max-w-[1600px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
       <WalkInQueue
         initialQueue={queue}
         initialHistory={history}

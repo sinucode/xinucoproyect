@@ -14,6 +14,8 @@ interface InteractiveAgendaProps {
   slug: string
   /** true si hay filtros activos (fecha/staff/estado) → el estado vacío lo refleja */
   hasFilters?: boolean
+  /** Ocupa todo el ancho: en PC muestra las citas en dos columnas */
+  wide?: boolean
 }
 
 interface StatusConfig {
@@ -83,6 +85,7 @@ export function InteractiveAgenda({
   businessId,
   slug,
   hasFilters = false,
+  wide = false,
 }: InteractiveAgendaProps) {
   const [appointments, setAppointments] = useState(initialAppointments)
   const [isPending, startTransition] = useTransition()
@@ -201,7 +204,7 @@ export function InteractiveAgenda({
         <h3 className="text-xs font-semibold uppercase tracking-widest text-xinuco-muted mt-2">
           {group.label}
         </h3>
-        <ul className="flex flex-col gap-2" aria-label={`Citas: ${group.label}`}>
+        <ul className={wide ? 'grid grid-cols-1 gap-2 xl:grid-cols-2' : 'flex flex-col gap-2'} aria-label={`Citas: ${group.label}`}>
           {group.items.map((appt) => {
             const customerName = appt.customers?.full_name || appt.customer_name || 'Cliente sin nombre'
             const customerPhone = appt.customers?.phone || appt.customer_phone

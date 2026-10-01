@@ -79,7 +79,7 @@ export default async function AccountingPage({
   const categories = (categoriesRes.data ?? []) as Pick<ExpenseCategoryRow, 'slug' | 'name' | 'color' | 'is_hidden'>[]
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6">
+    <div className="flex flex-col gap-6 max-w-[1600px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
       <AdminPageHeader
         title="Contabilidad"
         subtitle="Cuánto ganó el negocio y por dónde entró y salió la plata."

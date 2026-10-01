@@ -111,7 +111,7 @@ export default async function NotificationsSettingsPage({
   })
 
   return (
-    <div className="flex flex-col gap-10 w-full max-w-4xl mx-auto px-4 sm:px-6 py-6">
+    <div className="flex flex-col gap-10 w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       <div className="flex flex-col gap-6">
         <Link
           href={`/${slug}/dashboard/settings`}

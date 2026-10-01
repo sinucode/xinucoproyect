@@ -36,7 +36,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
 
   return (
     <div className="bg-xinuco-bg">
-      <main className="px-4 py-6 space-y-6 max-w-2xl mx-auto">
+      <main className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         <Suspense fallback={<DashboardSkeleton />}>
           <DashboardContent slug={slug} />
         </Suspense>

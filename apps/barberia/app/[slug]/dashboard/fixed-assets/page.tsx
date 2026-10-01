@@ -55,7 +55,7 @@ export default async function FixedAssetsPage({
   const loadError = activeResult.error ?? disposedResult.error ?? null
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6">
+    <div className="flex flex-col gap-6 max-w-[1600px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
       <Suspense fallback={<FixedAssetsSkeleton />}>
         <FeatureGate featureKey="fixed_assets" planName="Élite">
           <FixedAssetsManager

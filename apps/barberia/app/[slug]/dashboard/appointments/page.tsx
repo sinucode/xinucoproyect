@@ -233,7 +233,7 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
 
   return (
     <div className="bg-xinuco-bg min-h-screen">
-      <main className="px-4 py-6 space-y-6 max-w-2xl mx-auto">
+      <main className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         <section aria-label="Encabezado de Agenda">
           <div className="flex items-start justify-between gap-3">
             <h1 className="text-2xl font-bold text-xinuco-text">
@@ -247,7 +247,14 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
           <AgendaFilters todayKey={todayKey} staffOptions={staffOptions} showStaff={!isBarber} />
         </Suspense>
 
+        {/* En PC, con un barbero elegido: su día a la izquierda y las citas a la derecha */}
+        <div
+          className={timeline && timelineStaffId
+            ? 'grid grid-cols-1 gap-6 xl:grid-cols-2 xl:items-start'
+            : 'grid grid-cols-1 gap-6'}
+        >
         {timeline && timelineStaffId && (
+          <div className="min-w-0">
           <StaffDayTimeline
             slug={slug}
             isAdmin={isAdmin}
@@ -262,9 +269,10 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
             timeOff={timeline.timeOff}
             appointments={timeline.appointments}
           />
+          </div>
         )}
 
-        <section aria-label="Lista Completa de Citas">
+        <section aria-label="Lista Completa de Citas" className="min-w-0">
           <InteractiveAgenda
             key={agendaKey}
             appointments={appointments}
@@ -272,8 +280,10 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
             businessId={businessId}
             slug={slug}
             hasFilters={hasFilters}
+            wide={!(timeline && timelineStaffId)}
           />
         </section>
+        </div>
       </main>
     </div>
   )

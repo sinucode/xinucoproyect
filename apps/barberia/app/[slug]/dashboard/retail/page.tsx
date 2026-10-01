@@ -46,7 +46,7 @@ export default async function RetailPage({
   const [catalog, shiftSales] = await Promise.all([getPosCatalog(), getShiftSales()])
 
   return (
-    <div className="flex flex-col gap-6 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6">
+    <div className="flex flex-col gap-6 max-w-[1600px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
       <header>
         <h1 className="text-2xl font-bold text-xinuco-text">Venta de productos</h1>
         <p className="text-sm text-xinuco-muted mt-1">

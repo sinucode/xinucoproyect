@@ -74,7 +74,7 @@ export default async function LedgerPage({
   }
 
   const isAdmin = profile.role === 'admin' || profile.role === 'super_admin'
-  const wrapper = 'flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6'
+  const wrapper = 'flex flex-col gap-6 max-w-[1600px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-6'
 
   // ── Profesional (barbero / manicurista): solo su propia cuenta, en solo lectura ──
   if (!isAdmin) {

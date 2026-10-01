@@ -61,7 +61,7 @@ export default async function StaffPage({
   const features = (biz?.features_enabled ?? {}) as unknown as BusinessFeatures
   const commissionsEnabled = trialActive || features?.commissions === true
 
-  const wrapper = 'flex flex-col gap-6 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6'
+  const wrapper = 'flex flex-col gap-6 max-w-[1600px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-6'
 
   // ── Pestaña Comisiones ──────────────────────────────────────────────────────
   if (tab === 'comisiones') {

@@ -119,6 +119,14 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
         </h1>
       </section>
 
+      {/* En PC: dinero a la izquierda y agenda a la derecha; en celular/tablet, una sola columna */}
+      <div
+        className={isAdmin
+          ? 'grid grid-cols-1 gap-6 xl:grid-cols-2 2xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] xl:items-start'
+          : 'grid grid-cols-1 gap-6'}
+      >
+      {isAdmin && (
+      <div className="flex flex-col gap-6 min-w-0">
       {/* Gestión de Turno de Caja (Solo para Administrador) */}
       {isAdmin && (
         <section aria-label="Gestor de Turnos de Caja">
@@ -161,8 +169,11 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
         </section>
       )}
 
+      </div>
+      )}
+
       {/* Widget 2 — Agenda del día */}
-      <section aria-label="Agenda del día" className="space-y-4">
+      <section aria-label="Agenda del día" className="space-y-4 min-w-0">
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-semibold text-xinuco-text">
             Agenda del día
@@ -197,8 +208,10 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
           activeShiftId={activeShiftDetails?.shift.id || null}
           businessId={businessId}
           slug={slug}
+          wide={!isAdmin}
         />
       </section>
+      </div>
     </>
   )
 }

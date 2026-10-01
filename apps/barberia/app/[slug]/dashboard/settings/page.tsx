@@ -272,7 +272,7 @@ export default async function SettingsPage({
   ]
 
   return (
-    <div className="flex flex-col gap-8 w-full max-w-4xl mx-auto px-4 sm:px-6 py-6">
+    <div className="flex flex-col gap-8 w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
       {/* ── Header ── */}
       <div className="flex flex-col">
@@ -328,7 +328,7 @@ export default async function SettingsPage({
           <h2 className="text-xs font-semibold uppercase tracking-wider text-xinuco-muted mb-4">
             {group.title}
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             {group.cards.map(card => (
               <NavCard key={card.label} card={card} slug={slug} />
             ))}

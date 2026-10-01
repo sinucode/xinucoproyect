@@ -58,7 +58,7 @@ export default async function InventoryPage({
   const reservations  = reservationsResult.data ?? []
 
   return (
-    <div className="flex flex-col gap-6 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6">
+    <div className="flex flex-col gap-6 max-w-[1600px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
       <Suspense fallback={<InventorySkeleton />}>
         <FeatureGate featureKey="inventory" planName="Élite">
           <InventoryManager
