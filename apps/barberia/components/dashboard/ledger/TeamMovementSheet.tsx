@@ -11,9 +11,10 @@ import { X, Loader2, Info, AlertTriangle } from 'lucide-react'
 import type { StaffLedgerEntry, TeamPaymentMethod } from '@xinuco/types'
 import { formatCOP } from '@xinuco/utils'
 import { recordTeamMovement, type TeamMovementInput } from '@/actions/ledger'
-import { TEAM_METHOD_LABELS, TEAM_PAYMENT_METHODS, type TeamReceiptResult } from '@/lib/team-payments'
-import { METHOD_ICONS } from './AccountParts'
+import type { TeamReceiptResult } from '@/lib/team-payments'
 import { FundsWarning, useFundsCheck } from '@/components/finance/FundsWarning'
+import { AccountPicker } from '@/components/finance/AccountPicker'
+import { accountIdOrNull, paymentMethodForAccount, pickedAccount } from '@/lib/money-accounts'
 
 export type SheetKind = 'settle' | 'advance' | 'adjust'
 
@@ -68,7 +69,8 @@ export function TeamMovementSheet({
 
   const [adjustType, setAdjustType] = useState<'bonus' | 'deduction'>('bonus')
   const [amountDigits, setAmountDigits] = useState(kind === 'settle' && balance > 0 ? String(Math.min(balance, MAX_AMOUNT)) : '')
-  const [method, setMethod] = useState<TeamPaymentMethod>(hasActiveShift ? 'cash_register' : 'transfer')
+  // Medio de pago: arranca en la caja si hay turno abierto; si no, en el primer medio digital
+  const [accountChoice, setAccountChoice] = useState<string | null>(null)
   const [periodFrom, setPeriodFrom] = useState(suggestedPeriod.from)
   const [periodTo, setPeriodTo] = useState(suggestedPeriod.to)
   const [notes, setNotes] = useState(kind === 'settle' ? 'Liquidación' : '')
@@ -81,9 +83,19 @@ export function TeamMovementSheet({
 
   const needsMethod = kind === 'settle' || kind === 'advance'
   const amount = Number(amountDigits)
-  const isCash = needsMethod && method === 'cash_register'
   // Aviso de saldo del medio con el que se paga (liquidación y anticipo; el ajuste no mueve plata)
-  const funds = useFundsCheck({ method, amount, enabled: needsMethod })
+  const funds = useFundsCheck({ accountId: accountChoice, amount, enabled: needsMethod })
+  const account = pickedAccount(funds.accounts, accountChoice)
+  const isCash = needsMethod && !!account?.is_cash_drawer
+  const method: TeamPaymentMethod = account ? (paymentMethodForAccount(account, 'outflow') as TeamPaymentMethod) : 'other'
+
+  useEffect(() => {
+    if (!needsMethod || accountChoice !== null || !funds.loaded) return
+    const first = (hasActiveShift ? funds.accounts.find(a => a.is_cash_drawer) : null)
+      ?? funds.accounts.find(a => !a.is_cash_drawer)
+    if (first) setAccountChoice(first.id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [funds.loaded])
 
   // Cerrar con ESC
   useEffect(() => {
@@ -108,6 +120,7 @@ export function TeamMovementSheet({
     } else if (notes.trim().length > 200) {
       return 'La nota no puede superar 200 caracteres.'
     }
+    if (needsMethod && accountChoice === null) return 'Elige cómo se pagó.'
     if (isCash && !hasActiveShift) return 'No hay caja abierta. Abre la caja o elige otro medio de pago.'
     if (kind === 'settle') {
       if (!periodFrom || !periodTo) return 'Indica el período que se está liquidando.'
@@ -130,6 +143,7 @@ export function TeamMovementSheet({
       amount,
       notes: notes.trim(),
       payment_method: needsMethod ? method : null,
+      ...(needsMethod ? { account_id: accountIdOrNull(accountChoice) } : {}),
       ...(kind === 'settle' ? { period_from: periodFrom, period_to: periodTo } : {}),
       ...(allowOverpay ? { allowOverpay: true } : {}),
       ...(needsMethod ? { sendReceipt: !!receiptEmailMasked && sendReceipt } : {}),
@@ -273,36 +287,25 @@ export function TeamMovementSheet({
           {needsMethod && (
             <div className="flex flex-col gap-2">
               <span id="mv-method-label" className={labelClass}>¿Cómo se paga? *</span>
-              <div role="radiogroup" aria-labelledby="mv-method-label" className="grid grid-cols-1 gap-2">
-                {TEAM_PAYMENT_METHODS.map(m => {
-                  const Icon = METHOD_ICONS[m]
-                  const selected = method === m
-                  const disabled = m === 'cash_register' && !hasActiveShift
-                  return (
-                    <button
-                      key={m}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      disabled={disabled}
-                      onClick={() => { setMethod(m); setOverpay(null) }}
-                      className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold border transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      style={selected ? {
-                        borderColor: 'var(--primary-color)',
-                        color: 'var(--primary-color)',
-                        background: 'color-mix(in srgb, var(--primary-color) 12%, transparent)',
-                      } : { borderColor: 'var(--border-color)', color: 'var(--text-color)' }}
-                    >
-                      <Icon size={14} />
-                      {TEAM_METHOD_LABELS[m]}
-                    </button>
-                  )
-                })}
-              </div>
+              {!funds.loaded ? (
+                <p className="flex items-center gap-2 text-xs text-xinuco-muted">
+                  <Loader2 size={14} className="animate-spin" /> Cargando medios de pago…
+                </p>
+              ) : (
+                <AccountPicker
+                  accounts={funds.accounts}
+                  balances={funds.balances}
+                  value={accountChoice}
+                  onChange={id => { setAccountChoice(id); setOverpay(null) }}
+                  allowOther
+                  disabledIds={hasActiveShift ? [] : funds.accounts.filter(a => a.is_cash_drawer).map(a => a.id)}
+                  ariaLabel="¿Cómo se paga?"
+                />
+              )}
               {!hasActiveShift && (
                 <p className="text-xs text-xinuco-muted flex items-center gap-1.5">
                   <Info size={12} className="shrink-0" />
-                  Abre la caja para pagar con efectivo de la caja.
+                  Abre la caja para pagar con Efectivo.
                 </p>
               )}
               {isCash && (

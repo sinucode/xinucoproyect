@@ -8,6 +8,8 @@ import {
   legacyMethodToAccount,
   mapAccountError,
   methodKindLabel,
+  paymentMethodForAccount,
+  posMethodForAccount,
   movementEnds,
   movementShape,
   moveInOrder,
@@ -257,5 +259,51 @@ describe('movementEnds', () => {
   it('ajuste: subir entra, bajar sale', () => {
     expect(movementEnds({ ...base, kind: 'adjustment' })).toEqual({ from: null, to: 'n' })
     expect(movementEnds({ ...base, kind: 'adjustment', direction: 'down' })).toEqual({ from: 'n', to: null })
+  })
+})
+
+describe('paymentMethodForAccount', () => {
+  const drawer = { method_kind: 'cash' as const, is_cash_drawer: true }
+  const bank = { method_kind: 'transfer' as const, is_cash_drawer: false }
+  const card = { method_kind: 'card' as const, is_cash_drawer: false }
+  const mp = { method_kind: 'mercadopago' as const, is_cash_drawer: false }
+
+  it('cobro: la caja es efectivo y los demás su tipo', () => {
+    expect(paymentMethodForAccount(drawer, 'payment')).toBe('cash')
+    expect(paymentMethodForAccount(bank, 'payment')).toBe('transfer')
+    expect(paymentMethodForAccount(card, 'payment')).toBe('card')
+    expect(paymentMethodForAccount(mp, 'payment')).toBe('mercadopago')
+  })
+
+  it('gasto: la caja es cash_register, tarjeta es card y lo demás transferencia', () => {
+    expect(paymentMethodForAccount(drawer, 'expense')).toBe('cash_register')
+    expect(paymentMethodForAccount(card, 'expense')).toBe('card')
+    expect(paymentMethodForAccount(bank, 'expense')).toBe('transfer')
+    expect(paymentMethodForAccount(mp, 'expense')).toBe('transfer')
+  })
+
+  it('salida (equipo, compras, equipos): caja o transferencia', () => {
+    expect(paymentMethodForAccount(drawer, 'outflow')).toBe('cash_register')
+    expect(paymentMethodForAccount(card, 'outflow')).toBe('transfer')
+    expect(paymentMethodForAccount(bank, 'outflow')).toBe('transfer')
+  })
+
+  it('sin medio: "otro medio" para gastos y salidas', () => {
+    expect(paymentMethodForAccount(null, 'expense')).toBe('other')
+    expect(paymentMethodForAccount(null, 'outflow')).toBe('other')
+    expect(paymentMethodForAccount(null, 'payment')).toBe('cash')
+  })
+
+  it('el punto de venta trata Mercado Pago como transferencia', () => {
+    expect(posMethodForAccount(drawer)).toBe('cash')
+    expect(posMethodForAccount(card)).toBe('card')
+    expect(posMethodForAccount(bank)).toBe('transfer')
+    expect(posMethodForAccount(mp)).toBe('transfer')
+  })
+})
+
+describe('mapAccountError (cobro)', () => {
+  it('traduce account_method_mismatch', () => {
+    expect(mapAccountError('account_method_mismatch')).toMatch(/no corresponde/)
   })
 })

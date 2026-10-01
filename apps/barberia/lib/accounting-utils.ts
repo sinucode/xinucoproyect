@@ -25,7 +25,28 @@ export const SOURCE_LABEL: Record<MoneyMovementSource, string> = {
   team_payment:       'Pago al equipo',
   inventory_purchase: 'Compra de inventario',
   asset_purchase:     'Compra de equipo',
+  owner_contribution: 'Aporte del dueño',
+  owner_loan:         'Préstamo del dueño',
+  loan_repayment:     'Devolución de préstamo',
+  owner_withdrawal:   'Retiro del dueño',
+  transfer_in:        'Traslado entrada',
+  transfer_out:       'Traslado salida',
+  adjustment:         'Ajuste de saldo',
 }
+
+/** Etiqueta del medio de pago de un movimiento: el nombre del medio del negocio, o el método de siempre. */
+export const OTHER_MEDIUM_LABEL = 'Otro medio'
+
+export function movementMediumLabel(m: Pick<MoneyMovement, 'account' | 'method'>): string {
+  if (typeof m.account === 'string' && m.account.trim()) return m.account
+  // Dato antiguo (sin la columna): el método de siempre
+  if (m.account === undefined) return METHOD_LABEL[m.method] ?? m.method
+  return m.method === 'loyalty_points' ? METHOD_LABEL.loyalty_points : OTHER_MEDIUM_LABEL
+}
+
+/** Orígenes que no son ventas ni gastos: plata del dueño, traslados entre medios y ajustes. */
+const OWNER_IN: MoneyMovementSource[] = ['owner_contribution', 'owner_loan']
+const OWNER_OUT: MoneyMovementSource[] = ['loan_repayment', 'owner_withdrawal']
 
 // ── Resumen de movimientos ────────────────────────────────────────────────────
 
@@ -34,6 +55,14 @@ export interface MethodTotals {
   in:     number
   out:    number
   net:    number
+}
+
+export interface AccountTotals {
+  /** Nombre del medio mostrado ("Nequi", "Efectivo", "Otro medio"…). */
+  label: string
+  in:    number
+  out:   number
+  net:   number
 }
 
 export interface SourceTotal {
@@ -51,10 +80,20 @@ export interface MovementsSummary {
   /** Valor de lo pagado con puntos de fidelidad (no entró plata). */
   pointsUsed: number
   byMethod:   MethodTotals[]
+  /** Por medio del negocio (por nombre); el método de siempre si el dato no trae el nombre. */
+  byAccount:  AccountTotals[]
   bySource:   SourceTotal[]
+  /** Parte de moneyIn/moneyOut que NO es venta ni gasto: aportes/préstamos/retiros del dueño, traslados y ajustes. */
+  internal: {
+    ownerIn:       number   // aportes y préstamos del dueño
+    ownerOut:      number   // devoluciones de préstamo y retiros
+    transfers:     number   // traslados entre medios (cada traslado entra y sale por el mismo valor)
+    adjustmentsIn:  number
+    adjustmentsOut: number
+  }
 }
 
-type SummaryRow = Pick<MoneyMovement, 'kind' | 'source' | 'method' | 'amount' | 'tip'>
+type SummaryRow = Pick<MoneyMovement, 'kind' | 'source' | 'method' | 'amount' | 'tip'> & Partial<Pick<MoneyMovement, 'account'>>
 
 /**
  * Totales de una lista de movimientos. Lo pagado con puntos NO es plata: no suma a
@@ -66,7 +105,9 @@ export function summarizeMovements(rows: SummaryRow[]): MovementsSummary {
   let tips = 0
   let pointsUsed = 0
   const methods = new Map<MoneyMovementMethod, MethodTotals>()
+  const accounts = new Map<string, AccountTotals>()
   const sources = new Map<MoneyMovementSource, number>()
+  const internal = { ownerIn: 0, ownerOut: 0, transfers: 0, adjustmentsIn: 0, adjustmentsOut: 0 }
 
   for (const r of rows) {
     const amount = Number(r.amount) || 0
@@ -87,17 +128,57 @@ export function summarizeMovements(rows: SummaryRow[]): MovementsSummary {
     m.net = m.in - m.out
     methods.set(r.method, m)
 
+    const label = movementMediumLabel(r)
+    const a = accounts.get(label) ?? { label, in: 0, out: 0, net: 0 }
+    if (r.kind === 'in') a.in += amount
+    else a.out += amount
+    a.net = a.in - a.out
+    accounts.set(label, a)
+
+    if (OWNER_IN.includes(r.source)) internal.ownerIn += amount
+    else if (OWNER_OUT.includes(r.source)) internal.ownerOut += amount
+    else if (r.source === 'transfer_in') internal.transfers += amount
+    else if (r.source === 'adjustment') {
+      if (r.kind === 'in') internal.adjustmentsIn += amount
+      else internal.adjustmentsOut += amount
+    }
+
     sources.set(r.source, (sources.get(r.source) ?? 0) + amount)
   }
 
   const byMethod = [...methods.values()].sort(
     (a, b) => (b.in + b.out) - (a.in + a.out) || a.method.localeCompare(b.method),
   )
+  const byAccount = [...accounts.values()].sort(
+    (a, b) => (b.in + b.out) - (a.in + a.out) || a.label.localeCompare(b.label, 'es'),
+  )
   const bySource = [...sources.entries()]
     .map(([source, total]) => ({ source, total }))
     .sort((a, b) => b.total - a.total || a.source.localeCompare(b.source))
 
-  return { moneyIn, moneyOut, net: moneyIn - moneyOut, tips, pointsUsed, byMethod, bySource }
+  return { moneyIn, moneyOut, net: moneyIn - moneyOut, tips, pointsUsed, byMethod, byAccount, bySource, internal }
+}
+
+/**
+ * Nota bajo "Entró" / "Salió" cuando una parte no es venta ni gasto (plata del dueño, traslados, ajustes).
+ * Null si no hay nada de eso.
+ */
+export function internalMoneyNote(summary: Pick<MovementsSummary, 'internal'>, side: 'in' | 'out'): string | null {
+  const i = summary.internal
+  const parts: string[] = []
+  const money = (n: number) => `$${Math.round(n).toLocaleString('es-CO')}`
+  if (side === 'in') {
+    if (i.ownerIn > 0) parts.push(`aportes y préstamos del dueño ${money(i.ownerIn)}`)
+    if (i.transfers > 0) parts.push(`traslados ${money(i.transfers)}`)
+    if (i.adjustmentsIn > 0) parts.push(`ajustes de saldo ${money(i.adjustmentsIn)}`)
+  } else {
+    if (i.ownerOut > 0) parts.push(`retiros y devoluciones al dueño ${money(i.ownerOut)}`)
+    if (i.transfers > 0) parts.push(`traslados ${money(i.transfers)}`)
+    if (i.adjustmentsOut > 0) parts.push(`ajustes de saldo ${money(i.adjustmentsOut)}`)
+  }
+  if (parts.length === 0) return null
+  const joined = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}`
+  return `${side === 'in' ? 'Entró' : 'Salió'} incluye ${joined}.`
 }
 
 // ── Meses ─────────────────────────────────────────────────────────────────────
@@ -230,7 +311,7 @@ export function toCsv(rows: CsvCell[][]): string {
 }
 
 export const MOVEMENTS_CSV_HEADER = [
-  'Fecha', 'Hora', 'Tipo', 'Origen', 'Descripción', 'Categoría', 'Medio de pago', 'Monto', 'Propina',
+  'Fecha', 'Hora', 'Tipo', 'Origen', 'Descripción', 'Categoría', 'Medio de pago', 'Medio', 'Monto', 'Propina',
 ]
 
 export function movementsCsv(rows: MoneyMovement[]): string {
@@ -247,6 +328,7 @@ export function movementsCsv(rows: MoneyMovement[]): string {
       r.description,
       r.category,
       METHOD_LABEL[r.method] ?? r.method,
+      r.account ?? '',
       r.amount,
       r.tip || 0,
     ]),

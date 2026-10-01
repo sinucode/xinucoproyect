@@ -22,6 +22,14 @@ export interface MoneyAccount {
   opening_date:    string
 }
 
+/** Un medio activo tal como lo ve quien cobra o paga (sin saldos: eso es solo del administrador). */
+export interface CheckoutAccount {
+  id:             string
+  name:           string
+  method_kind:    MoneyAccountKind
+  is_cash_drawer: boolean
+}
+
 /** Un medio dentro de get_money_accounts_status(): saldo y resultado de hoy. */
 export interface MoneyAccountStatus {
   id:              string

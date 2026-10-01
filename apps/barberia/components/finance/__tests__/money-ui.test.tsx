@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import type { MoneyAccountStatus } from '@xinuco/types'
 import { MoveMoneySheet } from '../MoveMoneySheet'
 import { FundsWarning, useFundsCheck } from '../FundsWarning'
-import { getMoneyAccountsStatus, recordAccountMovement } from '@/actions/money-accounts'
+import { getMoneyAccountsStatus, listActiveAccountsForCheckout, recordAccountMovement } from '@/actions/money-accounts'
 
 jest.mock('next/navigation', () => ({
   usePathname: () => '/b/dashboard',
@@ -15,6 +15,7 @@ jest.mock('next/link', () => ({
 }))
 jest.mock('@/actions/money-accounts', () => ({
   getMoneyAccountsStatus: jest.fn(),
+  listActiveAccountsForCheckout: jest.fn(),
   recordAccountMovement: jest.fn(),
 }))
 
@@ -95,10 +96,11 @@ describe('MoveMoneySheet', () => {
 })
 
 describe('FundsWarning', () => {
-  function Harness({ method, amount }: { method: string; amount: number }) {
-    const funds = useFundsCheck({ method, amount })
+  function Harness({ accountId, amount }: { accountId: string | null; amount: number }) {
+    const funds = useFundsCheck({ accountId, amount })
     return (
       <div>
+        <ul>{funds.accounts.map(a => <li key={a.id}>{a.name}={funds.balances?.[a.id] ?? 'sin saldo'}</li>)}</ul>
         <FundsWarning check={funds} />
         <button disabled={funds.blocked}>Guardar</button>
       </div>
@@ -107,9 +109,16 @@ describe('FundsWarning', () => {
 
   const status = { data: { today: '2026-10-01', accounts: ACCOUNTS, owner_loans_pending: 0, open_shift_id: null } }
 
+  it('entrega los medios activos con su saldo para el selector', async () => {
+    ;(getMoneyAccountsStatus as jest.Mock).mockResolvedValue(status)
+    render(<Harness accountId={null} amount={0} />)
+    expect(await screen.findByText('Bancolombia=20000')).toBeInTheDocument()
+    expect(screen.queryByText(/Disponible en/)).toBeNull()
+  })
+
   it('muestra lo disponible y no bloquea si alcanza', async () => {
     ;(getMoneyAccountsStatus as jest.Mock).mockResolvedValue(status)
-    render(<Harness method="transfer" amount={15_000} />)
+    render(<Harness accountId="t" amount={15_000} />)
     expect(await screen.findByText(/Disponible en Bancolombia/)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByRole('button', { name: 'Guardar' })).not.toBeDisabled()
@@ -117,7 +126,7 @@ describe('FundsWarning', () => {
 
   it('avisa lo que falta, ofrece el aporte y exige confirmar', async () => {
     ;(getMoneyAccountsStatus as jest.Mock).mockResolvedValue(status)
-    render(<Harness method="transfer" amount={50_000} />)
+    render(<Harness accountId="t" amount={50_000} />)
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('No tienes suficiente en Bancolombia (faltan $30.000)')
     expect(screen.getByRole('link', { name: 'Registrar aporte o préstamo' }))
@@ -130,7 +139,7 @@ describe('FundsWarning', () => {
 
   it('"Otro medio" no muestra saldo ni bloquea', async () => {
     ;(getMoneyAccountsStatus as jest.Mock).mockResolvedValue(status)
-    render(<Harness method="other" amount={999_999_999} />)
+    render(<Harness accountId="other" amount={999_999_999} />)
     await act(async () => { await Promise.resolve() })
     expect(screen.queryByText(/Disponible en/)).toBeNull()
     expect(screen.getByRole('button', { name: 'Guardar' })).not.toBeDisabled()
@@ -138,8 +147,12 @@ describe('FundsWarning', () => {
 
   it('si los saldos no cargan (no es admin) no estorba', async () => {
     ;(getMoneyAccountsStatus as jest.Mock).mockResolvedValue({ error: 'Solo un administrador' })
-    render(<Harness method="cash_register" amount={500_000} />)
-    await act(async () => { await Promise.resolve() })
+    ;(listActiveAccountsForCheckout as jest.Mock).mockResolvedValue({
+      data: [{ id: 'c', name: 'Efectivo', method_kind: 'cash', is_cash_drawer: true }],
+    })
+    render(<Harness accountId="c" amount={500_000} />)
+    // Los medios se ofrecen igual, pero sin saldos
+    expect(await screen.findByText('Efectivo=sin saldo')).toBeInTheDocument()
     expect(screen.queryByText(/Disponible en/)).toBeNull()
     expect(screen.getByRole('button', { name: 'Guardar' })).not.toBeDisabled()
   })

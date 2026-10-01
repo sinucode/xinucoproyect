@@ -103,6 +103,47 @@ describe('Pagos al equipo — recordTeamMovement', () => {
     })
   })
 
+  describe('medio de pago (account_id)', () => {
+    const ACC = '11111111-1111-4111-8111-111111111111'
+    const account = (extra: Record<string, unknown> = {}) => ({
+      data: { id: ACC, name: 'Nequi', method_kind: 'transfer', is_cash_drawer: false, is_active: true, ...extra }, error: null,
+    })
+
+    it('un medio digital guarda transfer con su account_id', async () => {
+      const { calls } = setup('admin', { staff: [staffOk], money_accounts: [account()], staff_ledger: [{ data: { id: 'l1' }, error: null }] })
+      const r = await recordTeamMovement({ ...payment, allowOverpay: true, account_id: ACC })
+      expect(r.success).toBe(true)
+      expect(opsOf(calls, 'staff_ledger', 'insert')[0].args[0]).toMatchObject({ payment_method: 'transfer', account_id: ACC, shift_id: null })
+    })
+
+    it('la caja exige turno abierto y guarda cash_register con el turno', async () => {
+      const { calls } = setup('admin', {
+        staff: [staffOk],
+        money_accounts: [account({ method_kind: 'cash', is_cash_drawer: true })],
+        cash_register_shifts: [{ data: { id: 'sh1' }, error: null }],
+        staff_ledger: [{ data: { id: 'l1' }, error: null }],
+      })
+      await recordTeamMovement({ ...payment, allowOverpay: true, payment_method: 'transfer', account_id: ACC })
+      expect(opsOf(calls, 'staff_ledger', 'insert')[0].args[0]).toMatchObject({ payment_method: 'cash_register', account_id: ACC, shift_id: 'sh1' })
+    })
+
+    it('la caja sin turno → error', async () => {
+      setup('admin', {
+        staff: [staffOk],
+        money_accounts: [account({ method_kind: 'cash', is_cash_drawer: true })],
+        cash_register_shifts: [{ data: null, error: null }],
+      })
+      expect(await recordTeamMovement({ ...payment, account_id: ACC })).toEqual({ error: NO_SHIFT })
+    })
+
+    it('"Otro medio" (null) guarda other sin medio y un medio ajeno se rechaza', async () => {
+      const { calls } = setup('admin', { staff: [staffOk, staffOk], money_accounts: [{ data: null, error: null }], staff_ledger: [{ data: { id: 'l1' }, error: null }] })
+      await recordTeamMovement({ ...payment, allowOverpay: true, account_id: null })
+      expect(opsOf(calls, 'staff_ledger', 'insert')[0].args[0]).toMatchObject({ payment_method: 'other', account_id: null })
+      expect(await recordTeamMovement({ ...payment, account_id: ACC })).toEqual({ error: 'Elige un medio de pago activo.' })
+    })
+  })
+
   describe('validación', () => {
     it.each([
       ['monto cero', { amount: 0 }],

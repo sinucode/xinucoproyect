@@ -242,6 +242,7 @@ const ERROR_TABLE: [string, string][] = [
   ['invalid_life',          'La vida útil debe estar entre 1 mes y 50 años.'],
   ['invalid_method',        'El método de desgaste no es válido.'],
   ['invalid_payment_method', 'Elige cómo se pagó.'],
+  ['invalid_account',        'Elige un medio de pago activo.'],
   ['invalid_reason',        'Elige el motivo de la baja.'],
   ['reason_required',       'Cuéntanos qué pasó con el equipo.'],
   ['shift_not_open',        'No hay una caja abierta. Abre la caja o elige otro medio de pago.'],

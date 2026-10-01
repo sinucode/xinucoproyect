@@ -187,6 +187,86 @@ describe('Expenses Server Actions', () => {
     })
   })
 
+  describe('createExpense — medio de pago (account_id)', () => {
+    const ACC = '11111111-1111-4111-8111-111111111111'
+    const acc = (extra: Record<string, unknown> = {}) => ({
+      data: { id: ACC, name: 'Nequi', method_kind: 'transfer', is_cash_drawer: false, is_active: true, ...extra }, error: null,
+    })
+
+    it('guarda account_id y deriva el método del medio (tarjeta → card, otro digital → transfer)', async () => {
+      const { calls } = setup('admin', { money_accounts: [acc({ method_kind: 'card' })], expenses: [{ data: { id: 'e1' }, error: null }] })
+      const res = await createExpense({ ...validInput, payment_method: 'transfer', account_id: ACC })
+      expect(res.success).toBe(true)
+      expect(opOf(calls, 'expenses', 'insert').args[0]).toMatchObject({ account_id: ACC, payment_method: 'card', shift_id: null })
+      // el medio se busca dentro del negocio de la sesión
+      expect(opOf(calls, 'money_accounts', 'eq', 1).args).toEqual(['business_id', 'biz1'])
+    })
+
+    it('la caja exige turno abierto y guarda cash_register con el turno', async () => {
+      const { calls } = setup('admin', {
+        money_accounts: [acc({ method_kind: 'cash', is_cash_drawer: true })],
+        cash_register_shifts: [{ data: { id: 'sh1', opened_at: 'x' }, error: null }],
+        expenses: [{ data: { id: 'e1' }, error: null }],
+      })
+      // aunque el cliente diga "transferencia", manda el medio
+      await createExpense({ ...validInput, payment_method: 'transfer', account_id: ACC })
+      expect(opOf(calls, 'expenses', 'insert').args[0]).toMatchObject({ account_id: ACC, payment_method: 'cash_register', shift_id: 'sh1' })
+    })
+
+    it('la caja sin turno abierto → error', async () => {
+      setup('admin', {
+        money_accounts: [acc({ method_kind: 'cash', is_cash_drawer: true })],
+        cash_register_shifts: [{ data: null, error: null }],
+      })
+      expect(await createExpense({ ...validInput, account_id: ACC })).toEqual({ error: NO_SHIFT })
+    })
+
+    it('"Otro medio" (null) guarda other sin medio', async () => {
+      const { calls } = setup('admin', { expenses: [{ data: { id: 'e1' }, error: null }] })
+      await createExpense({ ...validInput, account_id: null })
+      expect(opOf(calls, 'expenses', 'insert').args[0]).toMatchObject({ account_id: null, payment_method: 'other' })
+    })
+
+    it('un medio inactivo, de otro negocio o mal formado se rechaza', async () => {
+      const profile = { data: { role: 'admin', business_id: 'biz1' }, error: null }
+      const { calls } = setup('admin', {
+        profiles: [profile, profile, profile],
+        money_accounts: [acc({ is_active: false }), { data: null, error: null }],
+      })
+      expect(await createExpense({ ...validInput, account_id: ACC })).toEqual({ error: 'Elige un medio de pago activo.' })
+      expect(await createExpense({ ...validInput, account_id: ACC })).toEqual({ error: 'Elige un medio de pago activo.' })
+      expect(await createExpense({ ...validInput, account_id: 'no-uuid' })).toEqual({ error: 'Elige un medio de pago activo.' })
+      expect(calls.some(c => c.table === 'expenses')).toBe(false)
+    })
+
+    it('sin account_id se comporta como antes (no manda la columna)', async () => {
+      const { calls } = setup('admin', { expenses: [{ data: { id: 'e1' }, error: null }] })
+      await createExpense(validInput)
+      expect('account_id' in opOf(calls, 'expenses', 'insert').args[0]).toBe(false)
+    })
+  })
+
+  describe('updateExpense — medio de pago', () => {
+    const ACC = '11111111-1111-4111-8111-111111111111'
+    const stored = { id: 'e1', business_id: 'biz1', category: 'rent', amount: 1500000, payment_method: 'card', account_id: ACC, expense_date: today, shift_id: null }
+
+    it('mismo medio no digital conserva el detalle guardado (tarjeta)', async () => {
+      const { calls } = setup('admin', {
+        expenses: [{ data: stored, error: null }, { data: { id: 'e1' }, error: null }],
+        money_accounts: [{ data: { id: ACC, name: 'Banco', method_kind: 'transfer', is_cash_drawer: false, is_active: false }, error: null }],
+      })
+      const res = await updateExpense('e1', { ...validInput, amount: 1500000, account_id: ACC })
+      expect(res.success).toBe(true)
+      expect(opOf(calls, 'expenses', 'update').args[0]).toMatchObject({ account_id: ACC, payment_method: 'card' })
+    })
+
+    it('cambiar a "Otro medio" suelta el medio', async () => {
+      const { calls } = setup('admin', { expenses: [{ data: stored, error: null }, { data: { id: 'e1' }, error: null }] })
+      await updateExpense('e1', { ...validInput, account_id: null })
+      expect(opOf(calls, 'expenses', 'update').args[0]).toMatchObject({ account_id: null, payment_method: 'other' })
+    })
+  })
+
   describe('updateExpense', () => {
     const existing = {
       id: 'e1', business_id: 'biz1', amount: 1500000, payment_method: 'cash_register',

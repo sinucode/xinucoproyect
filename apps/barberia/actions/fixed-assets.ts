@@ -40,6 +40,8 @@ export interface RegisterFixedAssetInput {
   useful_life_months:  number
   depreciation_method: DepreciationMethod
   payment_method:      AssetPaymentMethod
+  /** Medio de pago del negocio (money_accounts); la base decide caja/transferencia según el medio. */
+  account_id?:         string | null
   serial_number?:      string | null
   location?:           string | null
   description?:        string | null
@@ -47,7 +49,7 @@ export interface RegisterFixedAssetInput {
 
 /** Lo que se puede editar de un equipo en uso (nada de pago, caja ni baja). */
 export type UpdateFixedAssetInput = Partial<
-  Omit<RegisterFixedAssetInput, 'payment_method'>
+  Omit<RegisterFixedAssetInput, 'payment_method' | 'account_id'>
 >
 
 export interface DisposeFixedAssetInput {
@@ -55,6 +57,8 @@ export interface DisposeFixedAssetInput {
   reason:         DisposalReason
   price?:         number | null
   paymentMethod?: AssetPaymentMethod | null
+  /** Medio de pago del negocio al que entra lo vendido (solo si se vendió). */
+  accountId?:     string | null
   notes?:         string | null
 }
 
@@ -312,6 +316,8 @@ export async function registerFixedAsset(
     p_serial_number:      f.serial_number ?? undefined,
     p_location:           f.location ?? undefined,
     p_description:        f.description ?? undefined,
+    // Solo se envía si hay medio elegido: sin él la función se llama como antes
+    ...(input.account_id ? { p_account_id: input.account_id } : {}),
   })
 
   if (error) return { error: mapAssetError(error.message) }
@@ -410,6 +416,7 @@ export async function disposeFixedAsset(
     p_price:          price ?? undefined,
     p_payment_method: paymentMethod ?? undefined,
     p_notes:          notes || undefined,
+    ...(input.reason === 'sold' && input.accountId ? { p_account_id: input.accountId } : {}),
   })
 
   if (error) return { error: mapAssetError(error.message) }

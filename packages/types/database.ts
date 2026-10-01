@@ -767,6 +767,7 @@ export interface StaffLedgerEntry {
   sale_item_id?: string | null  // UUID → sale_items.id (una comisión por línea)
   payment_method?: TeamPaymentMethod | null  // solo en pagos y anticipos
   shift_id?:     string | null  // UUID → cash_register_shifts.id (si salió de la caja)
+  account_id?:   string | null  // medio de pago del negocio (money_accounts) con el que se pagó
   created_by?:   string | null  // UUID → auth.users.id (quién lo registró)
   period_from?:  string | null  // 'YYYY-MM-DD' — período liquidado (pagos)
   period_to?:    string | null  // 'YYYY-MM-DD'
@@ -804,6 +805,7 @@ export interface Expense {
   created_at:     string
   payment_method: ExpensePaymentMethod
   shift_id:       string | null   // turno de caja (solo si payment_method = 'cash_register')
+  account_id?:    string | null   // medio de pago del negocio (money_accounts); null = otro medio
   updated_at:     string
   /** true si el cron diario lo registró solo (gasto fijo mensual). */
   auto_registered?: boolean
@@ -1007,6 +1009,8 @@ export interface FixedAsset {
   updated_at:              string
   payment_method:          AssetPaymentMethod | null
   shift_id:                string | null
+  account_id?:             string | null
+  disposal_account_id?:    string | null
   // Baja
   disposed_at:             string | null     // DATE 'YYYY-MM-DD'
   disposal_reason:         DisposalReason | null
@@ -1049,6 +1053,9 @@ export type MoneyMovementKind   = 'in' | 'out'
 export type MoneyMovementSource =
   | 'sale' | 'asset_sale' | 'expense' | 'team_advance' | 'team_payment'
   | 'inventory_purchase' | 'asset_purchase'
+  // Movimientos del dueño, traslados y ajustes entre medios (no son ventas ni gastos)
+  | 'owner_contribution' | 'owner_loan' | 'loan_repayment' | 'owner_withdrawal'
+  | 'transfer_in' | 'transfer_out' | 'adjustment'
 export type MoneyMovementMethod =
   | 'cash' | 'card' | 'transfer' | 'mercadopago' | 'loyalty_points' | 'mixed' | 'other'
 
@@ -1061,6 +1068,8 @@ export interface MoneyMovement {
   description:   string
   category:      string | null   // NOMBRE de la categoría de gasto
   method:        MoneyMovementMethod
+  /** Nombre del medio del negocio (Nequi, Bancolombia…); null = fuera de las cuentas o puntos; ausente = dato antiguo. */
+  account?:      string | null
   amount:        number          // INTEGER COP, siempre positivo
   tip:           number          // propina incluida en el monto (solo ventas)
   reference_id:  string | null
@@ -1135,6 +1144,7 @@ export interface InventoryMovement {
   supplier?:       string | null
   payment_method?: 'cash_register' | 'transfer' | 'other' | null
   shift_id?:       string | null
+  account_id?:     string | null
 }
 
 export interface InventoryMovementResult {

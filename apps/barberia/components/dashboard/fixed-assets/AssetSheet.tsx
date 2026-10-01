@@ -1,7 +1,7 @@
 'use client'
 // components/dashboard/fixed-assets/AssetSheet.tsx — agregar / editar equipo
 
-import React, { useState, useTransition } from 'react'
+import React, { useEffect, useState, useTransition } from 'react'
 import { Package, Plus, Save, Info, ChevronDown } from 'lucide-react'
 import { registerFixedAsset, updateFixedAsset } from '@/actions/fixed-assets'
 import { businessTodayISODate } from '@/lib/agenda-time'
@@ -12,7 +12,6 @@ import {
   METHOD_HINTS,
   METHOD_LABELS,
   MIN_ASSET_DATE,
-  PAYMENT_ORDER,
   PURCHASE_PAYMENT_LABELS,
   SELECTABLE_CATEGORIES,
   categoryDefaultMonths,
@@ -33,6 +32,8 @@ import type {
 } from '@xinuco/types'
 import { SidePanel, PanelFooter, panelLabelCls as labelCls } from '../inventory/SidePanel'
 import { FundsWarning, useFundsCheck } from '@/components/finance/FundsWarning'
+import { AccountPicker } from '@/components/finance/AccountPicker'
+import { accountIdOrNull, paymentMethodForAccount, pickedAccount } from '@/lib/money-accounts'
 import { ChoiceButtons, ErrorBox, MoneyInput, formatCOP, inputCls, inputStyle, toInt } from './shared'
 
 interface AssetSheetProps {
@@ -57,7 +58,8 @@ export function AssetSheet({ editAsset, hasOpenShift, onClose, onDone }: AssetSh
   const [category, setCategory]     = useState<FixedAssetCategory>(initialCategory)
   const [date, setDate]             = useState(editAsset?.purchase_date ?? today)
   const [price, setPrice]           = useState(editAsset ? String(editAsset.purchase_price) : '')
-  const [payment, setPayment]       = useState<AssetPaymentMethod>('transfer')
+  // Medio de pago: arranca en el primer medio que no sea la caja (como antes arrancaba en "Transferencia")
+  const [accountChoice, setAccountChoice] = useState<string | null>(null)
   const [years, setYears]           = useState(String(Math.floor(initialLife / 12)))
   const [extraMonths, setExtraMonths] = useState(String(initialLife % 12))
   // Si la persona ya tocó la vida útil, cambiar de categoría no la pisa
@@ -89,7 +91,19 @@ export function AssetSheet({ editAsset, hasOpenShift, onClose, onDone }: AssetSh
   const suggested = categoryDefaultMonths(category)
 
   // Aviso de saldo del medio con el que se paga (solo al comprar; editar no mueve plata)
-  const funds = useFundsCheck({ method: payment, amount: priceOk ? priceN : 0, enabled: !isEdit })
+  const funds = useFundsCheck({ accountId: accountChoice, amount: priceOk ? priceN : 0, enabled: !isEdit })
+  const account = pickedAccount(funds.accounts, accountChoice)
+  const payment: AssetPaymentMethod = account ? (paymentMethodForAccount(account, 'outflow') as AssetPaymentMethod) : 'other'
+  useEffect(() => {
+    if (isEdit || accountChoice !== null || !funds.loaded) return
+    const first = funds.accounts.find(a => !a.is_cash_drawer)
+    if (first) setAccountChoice(first.id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [funds.loaded])
+  // Al editar se muestra el medio guardado (por su nombre si sigue activo)
+  const storedAccountName = editAsset?.account_id
+    ? funds.accounts.find(a => a.id === editAsset.account_id)?.name ?? null
+    : null
 
   // Vista previa inmediata del desgaste
   const preview = priceOk && salvageOk && lifeOk && dateOk
@@ -123,6 +137,7 @@ export function AssetSheet({ editAsset, hasOpenShift, onClose, onDone }: AssetSh
     if (!priceOk) { setError('Escribe cuánto costó el equipo (un valor mayor a 0).'); return }
     if (!lifeOk) { setError(mapAssetError('invalid_life')); return }
     if (!salvageOk) { setError(mapAssetError('invalid_salvage')); return }
+    if (!isEdit && accountChoice === null) { setError('Elige cómo se pagó el equipo.'); return }
     if (!isEdit && payment === 'cash_register' && !hasOpenShift) {
       setError(mapAssetError('shift_not_open'))
       return
@@ -154,6 +169,7 @@ export function AssetSheet({ editAsset, hasOpenShift, onClose, onDone }: AssetSh
           useful_life_months:  lifeN,
           depreciation_method: method,
           payment_method:      payment,
+          account_id:          accountIdOrNull(accountChoice),
           serial_number:       serial.trim() || null,
           location:            location.trim() || null,
           description:         description.trim() || null,
@@ -233,23 +249,29 @@ export function AssetSheet({ editAsset, hasOpenShift, onClose, onDone }: AssetSh
           <span className={labelCls}>¿Cómo se pagó?</span>
           {isEdit ? (
             <p className="text-sm text-zinc-300">
-              {editAsset?.payment_method ? PURCHASE_PAYMENT_LABELS[editAsset.payment_method] : 'Sin dato'}
+              {storedAccountName
+                ?? (editAsset?.payment_method ? PURCHASE_PAYMENT_LABELS[editAsset.payment_method] : 'Sin dato')}
               <span className="block text-[11px] text-zinc-500 mt-0.5">
                 Esto no se puede cambiar después de registrar el equipo.
               </span>
             </p>
           ) : (
             <>
-              <ChoiceButtons<AssetPaymentMethod>
-                ariaLabel="¿Cómo se pagó?"
-                columns={3}
-                value={payment}
-                onChange={setPayment}
-                options={PAYMENT_ORDER.map((p) => ({ value: p, label: PURCHASE_PAYMENT_LABELS[p] }))}
-                disabled={(p) => p === 'cash_register' && !hasOpenShift}
-              />
+              {!funds.loaded ? (
+                <p className={FIELD_HINT}>Cargando medios de pago…</p>
+              ) : (
+                <AccountPicker
+                  accounts={funds.accounts}
+                  balances={funds.balances}
+                  value={accountChoice}
+                  onChange={setAccountChoice}
+                  allowOther
+                  disabledIds={hasOpenShift ? [] : funds.accounts.filter(a => a.is_cash_drawer).map(a => a.id)}
+                  ariaLabel="¿Cómo se pagó?"
+                />
+              )}
               {!hasOpenShift && (
-                <p className={FIELD_HINT}>Abre la caja para poder pagar con su efectivo.</p>
+                <p className={FIELD_HINT}>Abre la caja para poder pagar con Efectivo.</p>
               )}
               <p className={FIELD_HINT}>
                 Si sale de la caja, se descuenta del cuadre del turno. No se registra en Gastos.

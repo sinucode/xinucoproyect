@@ -1,7 +1,7 @@
 'use client'
 // components/dashboard/fixed-assets/DisposeSheet.tsx — dar de baja un equipo
 
-import React, { useState, useTransition } from 'react'
+import React, { useEffect, useState, useTransition } from 'react'
 import { PackageX } from 'lucide-react'
 import { disposeFixedAsset } from '@/actions/fixed-assets'
 import { businessTodayISODate } from '@/lib/agenda-time'
@@ -9,8 +9,6 @@ import {
   DISPOSAL_REASONS,
   DISPOSAL_REASON_ORDER,
   MAX_ASSET_PRICE,
-  PAYMENT_ORDER,
-  SALE_PAYMENT_LABELS,
   disposalNeedsNote,
   disposalResult,
   estimateValue,
@@ -18,6 +16,9 @@ import {
 } from '@/lib/fixed-assets-utils'
 import type { AssetPaymentMethod, DisposalReason, FixedAsset } from '@xinuco/types'
 import { SidePanel, PanelFooter, panelLabelCls as labelCls } from '../inventory/SidePanel'
+import { AccountPicker } from '@/components/finance/AccountPicker'
+import { useCheckoutAccounts } from '@/components/finance/useCheckoutAccounts'
+import { accountIdOrNull, paymentMethodForAccount, pickedAccount } from '@/lib/money-accounts'
 import { ChoiceButtons, ErrorBox, MoneyInput, formatCOP, inputCls, inputStyle, toInt } from './shared'
 
 interface DisposeSheetProps {
@@ -40,7 +41,17 @@ export function DisposeSheet({ asset, hasOpenShift, onClose, onDone }: DisposeSh
   const [reason, setReason]   = useState<DisposalReason>('sold')
   const [date, setDate]       = useState(today)
   const [price, setPrice]     = useState('')
-  const [payment, setPayment] = useState<AssetPaymentMethod>('transfer')
+  // Medio al que entra lo vendido: arranca en el primer medio que no sea la caja
+  const { accounts, loaded: accountsLoaded } = useCheckoutAccounts()
+  const [accountChoice, setAccountChoice] = useState<string | null>(null)
+  const account = pickedAccount(accounts, accountChoice)
+  const payment: AssetPaymentMethod = account ? (paymentMethodForAccount(account, 'outflow') as AssetPaymentMethod) : 'other'
+  useEffect(() => {
+    if (accountChoice !== null || !accountsLoaded) return
+    const first = accounts.find(a => !a.is_cash_drawer)
+    if (first) setAccountChoice(first.id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountsLoaded])
   const [notes, setNotes]     = useState('')
   const [error, setError]     = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -60,6 +71,7 @@ export function DisposeSheet({ asset, hasOpenShift, onClose, onDone }: DisposeSh
     if (!dateOk) { setError(mapAssetError('invalid_date')); return }
     if (reason === 'sold') {
       if (!priceOk) { setError('Escribe en cuánto lo vendiste (puede ser $0).'); return }
+      if (accountChoice === null) { setError('Elige cómo lo recibiste.'); return }
       if (payment === 'cash_register' && !hasOpenShift) { setError(mapAssetError('shift_not_open')); return }
     }
     if (needsNote && !notes.trim()) { setError(mapAssetError('reason_required')); return }
@@ -70,6 +82,7 @@ export function DisposeSheet({ asset, hasOpenShift, onClose, onDone }: DisposeSh
         reason,
         price:         reason === 'sold' ? priceN : null,
         paymentMethod: reason === 'sold' ? payment : null,
+        accountId:     reason === 'sold' ? accountIdOrNull(accountChoice) : null,
         notes:         notes.trim() || null,
       })
       if (res.error) { setError(res.error); return }
@@ -124,16 +137,20 @@ export function DisposeSheet({ asset, hasOpenShift, onClose, onDone }: DisposeSh
 
             <div className="flex flex-col gap-2">
               <span className={labelCls}>¿Cómo lo recibiste?</span>
-              <ChoiceButtons<AssetPaymentMethod>
-                ariaLabel="¿Cómo lo recibiste?"
-                columns={3}
-                value={payment}
-                onChange={setPayment}
-                options={PAYMENT_ORDER.map((p) => ({ value: p, label: SALE_PAYMENT_LABELS[p] }))}
-                disabled={(p) => p === 'cash_register' && !hasOpenShift}
-              />
+              {!accountsLoaded ? (
+                <p className="text-[11px] text-zinc-500">Cargando medios de pago…</p>
+              ) : (
+                <AccountPicker
+                  accounts={accounts}
+                  value={accountChoice}
+                  onChange={setAccountChoice}
+                  allowOther
+                  disabledIds={hasOpenShift ? [] : accounts.filter(a => a.is_cash_drawer).map(a => a.id)}
+                  ariaLabel="¿Cómo lo recibiste?"
+                />
+              )}
               {!hasOpenShift && (
-                <p className="text-[11px] text-zinc-500">Abre la caja para recibir el dinero en su efectivo.</p>
+                <p className="text-[11px] text-zinc-500">Abre la caja para recibir el dinero en Efectivo.</p>
               )}
               {payment === 'cash_register' && hasOpenShift && (
                 <p className="text-[11px] text-zinc-500">Se suma al efectivo esperado del turno abierto.</p>

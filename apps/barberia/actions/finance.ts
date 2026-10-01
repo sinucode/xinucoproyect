@@ -1,11 +1,14 @@
 'use server'
 
+import { ACCOUNT_UUID_RE } from '@/lib/account-resolve'
+
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { PaymentMethod, CashRegisterShift, Sale, SaleItem, Payment } from '@xinuco/types'
 import { loyaltyErrorMessage, stampRewardCop, type CustomerLoyalty } from '@/lib/loyalty-utils'
 import { businessTodayISODate, apptDateKey, dayLabel, formatApptTime } from '@/lib/agenda-time'
 import { parseReservations, type InventoryReservation } from '@/lib/inventory-reservations'
+import { mapAccountError } from '@/lib/money-accounts'
 
 /**
  * getActiveShift — Obtiene el turno de caja abierto actualmente para un negocio.
@@ -246,6 +249,12 @@ export interface CheckoutAppointmentParams {
   businessId: string
   shiftId: string
   paymentMethod: PaymentMethod
+  /**
+   * Medio de pago del negocio (money_accounts) con el que se cobra. La base valida que sea un medio
+   * activo del negocio y que cuadre con paymentMethod (la caja ↔ efectivo). Sin medio, la base
+   * asigna el de siempre.
+   */
+  accountId?: string | null
   receivedAmount: number
   tipAmount: number
   discountAmount: number
@@ -388,6 +397,7 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
     businessId,
     shiftId,
     paymentMethod,
+    accountId,
     tipAmount,
     discountAmount,
     items,
@@ -499,6 +509,9 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
 
   // Una sola llamada — atomicidad garantizada por PostgreSQL.
   // Se usa la variante _secure: verifica que la cita y la caja sean del negocio del usuario.
+  if (accountId != null && !ACCOUNT_UUID_RE.test(accountId)) {
+    return { error: 'invalid_account', message: mapAccountError('invalid_account') }
+  }
   const { data, error } = await supabase.rpc('checkout_appointment_secure', {
     p_appointment_id:  appointmentId,
     p_business_id:     businessId,
@@ -507,6 +520,8 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
     p_tip_amount:      tipAmount,
     p_discount_amount: discountAmount + (loyaltyRedemption?.discountCop ?? 0),
     p_items:           rpcItems,
+    // Solo se envía si hay medio elegido: sin él la función se llama como antes
+    ...(accountId ? { p_account_id: accountId } : {}),
   })
 
   if (error) {
@@ -516,6 +531,9 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
     }
     if (error.message?.includes('appointment_not_found')) {
       return { error: 'appointment_not_found', message: 'No se encontró la cita.' }
+    }
+    if (error.message?.includes('invalid_account') || error.message?.includes('account_method_mismatch')) {
+      return { error: 'invalid_account', message: mapAccountError(error.message) }
     }
     return { error: 'db_error', message: error.message }
   }

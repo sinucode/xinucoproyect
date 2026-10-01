@@ -1,6 +1,8 @@
 import type { MoneyMovement, ProfitLossResult, StaffProduction } from '@xinuco/types'
 import {
   METHOD_LABEL,
+  internalMoneyNote,
+  movementMediumLabel,
   SOURCE_LABEL,
   summarizeMovements,
   monthRange,
@@ -45,6 +47,26 @@ describe('etiquetas', () => {
     expect(METHOD_LABEL.loyalty_points).toBe('Puntos')
     expect(SOURCE_LABEL.team_payment).toBe('Pago al equipo')
     expect(SOURCE_LABEL.asset_purchase).toBe('Compra de equipo')
+  })
+
+  it('etiquetas de los movimientos del dueño, traslados y ajustes', () => {
+    expect(SOURCE_LABEL.owner_contribution).toBe('Aporte del dueño')
+    expect(SOURCE_LABEL.owner_loan).toBe('Préstamo del dueño')
+    expect(SOURCE_LABEL.loan_repayment).toBe('Devolución de préstamo')
+    expect(SOURCE_LABEL.owner_withdrawal).toBe('Retiro del dueño')
+    expect(SOURCE_LABEL.transfer_in).toBe('Traslado entrada')
+    expect(SOURCE_LABEL.transfer_out).toBe('Traslado salida')
+    expect(SOURCE_LABEL.adjustment).toBe('Ajuste de saldo')
+  })
+})
+
+describe('movementMediumLabel', () => {
+  it('usa el nombre del medio; sin la columna cae al método; sin medio es "Otro medio" o "Puntos"', () => {
+    expect(movementMediumLabel({ account: 'Nequi', method: 'transfer' })).toBe('Nequi')
+    expect(movementMediumLabel({ method: 'card' })).toBe('Tarjeta')
+    expect(movementMediumLabel({ account: null, method: 'other' })).toBe('Otro medio')
+    expect(movementMediumLabel({ account: null, method: 'transfer' })).toBe('Otro medio')
+    expect(movementMediumLabel({ account: null, method: 'loyalty_points' })).toBe('Puntos')
   })
 })
 
@@ -91,9 +113,52 @@ describe('summarizeMovements', () => {
     ])
   })
 
+  it('agrupa por medio del negocio (por nombre) con respaldo al método y "Otro medio"', () => {
+    const s = summarizeMovements([
+      mv({ account: 'Nequi', method: 'transfer', amount: 10000 }),
+      mv({ account: 'Nequi', method: 'transfer', amount: 5000 }),
+      mv({ kind: 'out', source: 'expense', account: 'Nequi', method: 'transfer', amount: 3000 }),
+      mv({ account: 'Efectivo', method: 'cash', amount: 40000 }),
+      mv({ kind: 'out', source: 'expense', account: null, method: 'other', amount: 7000 }),
+      mv({ method: 'card', amount: 2000 }),
+    ])
+    expect(s.byAccount).toEqual([
+      { label: 'Efectivo', in: 40000, out: 0, net: 40000 },
+      { label: 'Nequi', in: 15000, out: 3000, net: 12000 },
+      { label: 'Otro medio', in: 0, out: 7000, net: -7000 },
+      { label: 'Tarjeta', in: 2000, out: 0, net: 2000 },
+    ])
+  })
+
+  it('los movimientos del dueño, traslados y ajustes se siguen sumando y se desglosan aparte', () => {
+    const s = summarizeMovements([
+      mv({ amount: 100000 }),
+      mv({ source: 'owner_contribution', account: 'Efectivo', amount: 50000 }),
+      mv({ source: 'owner_loan', account: 'Nequi', method: 'transfer', amount: 30000 }),
+      mv({ kind: 'out', source: 'owner_withdrawal', amount: 20000 }),
+      mv({ kind: 'out', source: 'loan_repayment', amount: 10000 }),
+      mv({ source: 'transfer_in', account: 'Nequi', method: 'transfer', amount: 25000 }),
+      mv({ kind: 'out', source: 'transfer_out', account: 'Efectivo', amount: 25000 }),
+      mv({ source: 'adjustment', amount: 1000 }),
+      mv({ kind: 'out', source: 'adjustment', amount: 4000 }),
+    ])
+    expect(s.moneyIn).toBe(206000)
+    expect(s.moneyOut).toBe(59000)
+    expect(s.internal).toEqual({ ownerIn: 80000, ownerOut: 30000, transfers: 25000, adjustmentsIn: 1000, adjustmentsOut: 4000 })
+    expect(internalMoneyNote(s, 'in')).toBe('Entró incluye aportes y préstamos del dueño $80.000, traslados $25.000 y ajustes de saldo $1.000.')
+    expect(internalMoneyNote(s, 'out')).toBe('Salió incluye retiros y devoluciones al dueño $30.000, traslados $25.000 y ajustes de saldo $4.000.')
+  })
+
+  it('sin movimientos internos no hay nota', () => {
+    const s = summarizeMovements([mv({ amount: 1000 })])
+    expect(internalMoneyNote(s, 'in')).toBeNull()
+    expect(internalMoneyNote(s, 'out')).toBeNull()
+  })
+
   it('lista vacía', () => {
     expect(summarizeMovements([])).toEqual({
-      moneyIn: 0, moneyOut: 0, net: 0, tips: 0, pointsUsed: 0, byMethod: [], bySource: [],
+      moneyIn: 0, moneyOut: 0, net: 0, tips: 0, pointsUsed: 0, byMethod: [], byAccount: [], bySource: [],
+      internal: { ownerIn: 0, ownerOut: 0, transfers: 0, adjustmentsIn: 0, adjustmentsOut: 0 },
     })
   })
 })
@@ -170,13 +235,13 @@ describe('movementsCsv', () => {
   it('encabezado y filas', () => {
     const csv = movementsCsv([
       mv({ amount: 50000, tip: 5000, method: 'mercadopago' }),
-      mv({ kind: 'out', source: 'expense', occurred_time: null, description: 'Arriendo; local', category: 'Arriendo', amount: 1200000 }),
+      mv({ kind: 'out', source: 'expense', occurred_time: null, description: 'Arriendo; local', category: 'Arriendo', account: 'Caja principal', amount: 1200000 }),
     ])
     const lines = csv.replace('﻿', '').split('\r\n')
-    expect(lines[0]).toBe('Fecha;Hora;Tipo;Origen;Descripción;Categoría;Medio de pago;Monto;Propina')
+    expect(lines[0]).toBe('Fecha;Hora;Tipo;Origen;Descripción;Categoría;Medio de pago;Medio;Monto;Propina')
     // Mismo día: el que solo tiene fecha va primero
-    expect(lines[1]).toBe('2026-09-10;;Salida;Gasto;"Arriendo; local";Arriendo;Efectivo;1200000;0')
-    expect(lines[2]).toBe('2026-09-10;10:30;Entrada;Venta;Venta · Juan;;Mercado Pago;50000;5000')
+    expect(lines[1]).toBe('2026-09-10;;Salida;Gasto;"Arriendo; local";Arriendo;Efectivo;Caja principal;1200000;0')
+    expect(lines[2]).toBe('2026-09-10;10:30;Entrada;Venta;Venta · Juan;;Mercado Pago;;50000;5000')
   })
 })
 

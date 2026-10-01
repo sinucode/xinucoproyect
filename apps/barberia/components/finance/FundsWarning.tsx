@@ -5,22 +5,30 @@
 // ("Registrar de todas formas") que habilita el botón de guardar.
 //
 // Uso en un formulario de pago:
-//   const funds = useFundsCheck({ method, amount, enabled: !isEdit })
+//   const funds = useFundsCheck({ accountId, amount, enabled: !isEdit })
+//   <AccountPicker accounts={funds.accounts} balances={funds.balances} value={accountId} ... />
 //   <FundsWarning check={funds} />
 //   <button disabled={isPending || funds.blocked}>Guardar</button>
 //
-// Solo el administrador puede leer los saldos: para otros roles el estado no carga y el aviso no aparece.
+// El hook también entrega los medios activos (con saldos si es administrador) para el selector.
+// `enabled` solo apaga el aviso (p. ej. al editar): los medios se cargan siempre.
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { AlertTriangle } from 'lucide-react'
-import type { MoneyAccountStatus, MoneyAccountsStatus } from '@xinuco/types'
-import { getMoneyAccountsStatus } from '@/actions/money-accounts'
-import { formatMoney, fundsShortfall, insufficientFunds, legacyMethodToAccount } from '@/lib/money-accounts'
+import type { CheckoutAccount, MoneyAccountStatus, MoneyAccountsStatus } from '@xinuco/types'
+import { getMoneyAccountsStatus, listActiveAccountsForCheckout } from '@/actions/money-accounts'
+import { formatMoney, fundsShortfall, insufficientFunds } from '@/lib/money-accounts'
 
 export interface FundsCheck {
-  /** Medio al que se cargará el pago; null = "Otro medio" (fuera de las cuentas) o aún cargando. */
+  /** Medios activos para el selector (vacío mientras cargan). */
+  accounts:     CheckoutAccount[]
+  /** Saldo por medio; solo existe si se pudo leer el estado (administrador). */
+  balances?:    Record<string, number>
+  /** true cuando ya se cargó la lista de medios. */
+  loaded:       boolean
+  /** Medio al que se cargará el pago; null = "Otro medio" (fuera de las cuentas), sin elegir o aún cargando. */
   account:      MoneyAccountStatus | null
   insufficient: boolean
   shortfall:    number
@@ -31,35 +39,53 @@ export interface FundsCheck {
 }
 
 export function useFundsCheck({
-  method, amount, enabled = true,
+  accountId, amount, enabled = true,
 }: {
-  /** Método de pago "de siempre" del formulario (cash_register, transfer, card, other…). */
-  method:   string | null | undefined
-  amount:   number
-  enabled?: boolean
+  /** Id del medio elegido (null / "other" = fuera de las cuentas: no hay aviso). */
+  accountId: string | null | undefined
+  amount:    number
+  enabled?:  boolean
 }): FundsCheck {
   const [status, setStatus] = useState<MoneyAccountsStatus | null>(null)
+  const [fallback, setFallback] = useState<CheckoutAccount[] | null>(null)
+  const [loaded, setLoaded] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
 
-  // Los saldos se leen cada vez que se abre el formulario
+  // Los medios y sus saldos se leen cada vez que se abre el formulario
   useEffect(() => {
-    if (!enabled) return
     let alive = true
-    getMoneyAccountsStatus()
-      .then(r => { if (alive) setStatus(r.data ?? null) })
-      .catch(() => { if (alive) setStatus(null) })
+    ;(async () => {
+      let st: MoneyAccountsStatus | null = null
+      try { st = (await getMoneyAccountsStatus()).data ?? null } catch { st = null }
+      if (!alive) return
+      if (st) {
+        setStatus(st)
+      } else {
+        // Sin permiso de ver saldos o con error: se ofrecen los medios sin saldo
+        try { setFallback((await listActiveAccountsForCheckout()).data ?? null) } catch { setFallback(null) }
+      }
+      if (alive) setLoaded(true)
+    })()
     return () => { alive = false }
-  }, [enabled])
+  }, [])
 
-  const account = enabled && status ? legacyMethodToAccount(method, status.accounts) : null
+  const accounts: CheckoutAccount[] = status
+    ? status.accounts.map(a => ({ id: a.id, name: a.name, method_kind: a.method_kind, is_cash_drawer: a.is_cash_drawer }))
+    : fallback ?? []
+  const balances = status ? Object.fromEntries(status.accounts.map(a => [a.id, a.balance])) : undefined
+
+  const account = enabled && status && accountId ? status.accounts.find(a => a.id === accountId) ?? null : null
   const insufficient = !!account && insufficientFunds(account.balance, amount)
   const shortfall = account ? fundsShortfall(account.balance, amount) : 0
 
   // Si ya alcanza (o cambia de medio), la confirmación anterior ya no vale
-  const accountId = account?.id ?? null
-  useEffect(() => { setConfirmed(false) }, [accountId, insufficient])
+  const currentId = account?.id ?? null
+  useEffect(() => { setConfirmed(false) }, [currentId, insufficient])
 
   return {
+    accounts,
+    balances,
+    loaded,
     account,
     insufficient,
     shortfall,

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import { Plus, Minus, Trash, CreditCard, Banknote, Landmark, X, Loader2, DollarSign, Percent, QrCode, Gift } from 'lucide-react'
+import { Plus, Minus, Trash, X, Loader2, DollarSign, Percent, Gift } from 'lucide-react'
 import { checkoutAppointment, getAppointmentProducts, type CheckoutItemInput } from '@/actions/finance'
 import { getInventoryItems, getInventoryReservations } from '@/actions/inventory'
 import { getCustomerLoyalty } from '@/actions/loyalty'
@@ -18,6 +18,9 @@ import { reservedByItem, type InventoryReservation } from '@/lib/inventory-reser
 import type { PaymentMethod, InventoryItem } from '@xinuco/types'
 import { MPPaymentPanel } from '@/components/pos/MPPaymentPanel'
 import { CashReceivedInput } from '@/components/pos/CashReceivedInput'
+import { AccountPicker } from '@/components/finance/AccountPicker'
+import { useCheckoutAccounts } from '@/components/finance/useCheckoutAccounts'
+import { accountIdOrNull, paymentMethodForAccount } from '@/lib/money-accounts'
 
 interface CheckoutModalProps {
   appointment: {
@@ -77,9 +80,15 @@ export function CheckoutModal({
   const [tipAmount, setTipAmount] = useState<number | ''>('')
   const [discountAmount, setDiscountAmount] = useState<number | ''>('')
 
-  // Método de pago
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null)
-  
+  // Medio de pago: uno de los medios activos del negocio (Efectivo = la caja)
+  const { accounts, loaded: accountsLoaded } = useCheckoutAccounts()
+  const [accountId, setAccountId] = useState<string | null>(null)
+  const selectedAccount = accounts.find((a) => a.id === accountId) ?? null
+  // Método "de siempre" que recibe el RPC: efectivo para la caja, el tipo del medio para los demás
+  const paymentMethod = selectedAccount
+    ? (paymentMethodForAccount(selectedAccount, 'payment') as PaymentMethod)
+    : null
+
   // Recibido y vuelto (para efectivo)
   const [receivedAmount, setReceivedAmount] = useState<number | ''>('')
 
@@ -326,6 +335,7 @@ export function CheckoutModal({
         businessId,
         shiftId: activeShiftId,
         paymentMethod,
+        accountId: accountIdOrNull(accountId),
         receivedAmount: paymentMethod === 'cash' ? finalReceived : totalAmount,
         tipAmount: finalTip,
         discountAmount: finalDiscount,
@@ -735,58 +745,26 @@ export function CheckoutModal({
           {/* Método de Pago */}
           <div>
             <h3 className="text-xs font-bold uppercase tracking-wider text-xinuco-muted mb-2">
-              Método de Pago
+              Medio de Pago
             </h3>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => { setPaymentMethod('cash'); setValidationError(null) }}
-                className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all gap-1.5
-                  ${paymentMethod === 'cash'
-                    ? 'border-[var(--primary-color)] bg-[var(--primary-color)]/[0.08] text-[var(--primary-color)]'
-                    : 'border-zinc-900 bg-zinc-900/30 text-zinc-400 hover:text-zinc-200 hover:border-zinc-800'
-                  }`}
-              >
-                <Banknote size={20} />
-                <span className="text-xs font-semibold">Efectivo</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => { setPaymentMethod('card'); setValidationError(null); setReceivedAmount('') }}
-                className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all gap-1.5
-                  ${paymentMethod === 'card'
-                    ? 'border-[var(--primary-color)] bg-[var(--primary-color)]/[0.08] text-[var(--primary-color)]'
-                    : 'border-zinc-900 bg-zinc-900/30 text-zinc-400 hover:text-zinc-200 hover:border-zinc-800'
-                  }`}
-              >
-                <CreditCard size={20} />
-                <span className="text-xs font-semibold">Tarjeta</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => { setPaymentMethod('transfer'); setValidationError(null); setReceivedAmount('') }}
-                className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all gap-1.5
-                  ${paymentMethod === 'transfer'
-                    ? 'border-[var(--primary-color)] bg-[var(--primary-color)]/[0.08] text-[var(--primary-color)]'
-                    : 'border-zinc-900 bg-zinc-900/30 text-zinc-400 hover:text-zinc-200 hover:border-zinc-800'
-                  }`}
-              >
-                <Landmark size={20} />
-                <span className="text-xs font-semibold">Transf.</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => { setPaymentMethod('mercadopago'); setValidationError(null); setReceivedAmount(''); setUseLoyalty(false) }}
-                className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all gap-1.5
-                  ${paymentMethod === 'mercadopago'
-                    ? 'border-[var(--primary-color)] bg-[var(--primary-color)]/[0.08] text-[var(--primary-color)]'
-                    : 'border-zinc-900 bg-zinc-900/30 text-zinc-400 hover:text-zinc-200 hover:border-zinc-800'
-                  }`}
-              >
-                <QrCode size={20} />
-                <span className="text-xs font-semibold">MercadoPago</span>
-              </button>
-            </div>
+            {!accountsLoaded ? (
+              <p className="flex items-center gap-2 text-xs text-xinuco-muted">
+                <Loader2 size={14} className="animate-spin" /> Cargando medios de pago…
+              </p>
+            ) : (
+              <AccountPicker
+                accounts={accounts}
+                value={accountId}
+                disabled={isPending}
+                onChange={(id) => {
+                  const next = accounts.find((a) => a.id === id)
+                  setAccountId(id)
+                  setValidationError(null)
+                  setReceivedAmount('')
+                  if (next?.method_kind === 'mercadopago') setUseLoyalty(false)
+                }}
+              />
+            )}
           </div>
 
           {/* Panel MercadoPago — QR + fee preview + polling */}
@@ -811,6 +789,7 @@ export function CheckoutModal({
                       businessId,
                       shiftId:       activeShiftId,
                       paymentMethod: 'mercadopago',
+                      accountId:     accountIdOrNull(accountId),
                       receivedAmount: totalAmount,
                       tipAmount:     finalTip,
                       discountAmount: finalDiscount,
@@ -818,13 +797,13 @@ export function CheckoutModal({
                     })
                     if (result.error) {
                       setValidationError(result.message || 'Error al finalizar el cobro.')
-                      setPaymentMethod(null)
+                      setAccountId(null)
                     } else {
                       onSuccess()
                     }
                   })
                 }}
-                onCancel={() => setPaymentMethod(null)}
+                onCancel={() => setAccountId(null)}
               />
             </div>
           )}

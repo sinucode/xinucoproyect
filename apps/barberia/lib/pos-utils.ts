@@ -172,6 +172,8 @@ const SALE_ERRORS: [string, string][] = [
   ['loyalty_requires_customer',  'Para usar puntos elige primero al cliente.'],
   ['loyalty_not_available',      'La lealtad por puntos no está activa en este negocio.'],
   ['loyalty_below_minimum',      'El cliente no alcanza el mínimo de puntos para canjear.'],
+  ['invalid_account',            'Elige un medio de pago activo.'],
+  ['account_method_mismatch',    'Ese medio de pago no corresponde con la forma de pago elegida. Elígelo de nuevo.'],
   ['forbidden',                  'Solo un administrador puede hacer esto.'],
 ]
 
@@ -218,6 +220,8 @@ export interface ReceiptData {
   loyaltyDiscount: number
   total:           number
   method:          PosPaymentMethod
+  /** Nombre del medio de pago del negocio (Nequi, Bancolombia…); sin él se usa el método. */
+  accountName?:    string | null
   received:        number | null
   change:          number
   customerName:    string | null
@@ -236,7 +240,7 @@ export function receiptText(r: ReceiptData, businessName?: string | null): strin
   if (r.discount > 0 || r.loyaltyDiscount > 0) out.push(`Subtotal: ${formatMoney(r.subtotal)}`)
   if (r.discount > 0) out.push(`Descuento: -${formatMoney(r.discount)}`)
   if (r.loyaltyDiscount > 0) out.push(`Descuento por puntos: -${formatMoney(r.loyaltyDiscount)}`)
-  out.push(`Total: ${formatMoney(r.total)} (${POS_METHOD_LABELS[r.method]})`)
+  out.push(`Total: ${formatMoney(r.total)} (${r.accountName || POS_METHOD_LABELS[r.method]})`)
   out.push('¡Gracias por tu compra!')
   return out.join('\n')
 }

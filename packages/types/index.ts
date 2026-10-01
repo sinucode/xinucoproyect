@@ -80,6 +80,7 @@ export type {
   MoneyAccountKind,
   MoneyAccountCustomKind,
   MoneyAccount,
+  CheckoutAccount,
   MoneyAccountStatus,
   MoneyAccountsStatus,
   AccountMovementKind,

@@ -198,6 +198,40 @@ describe('Finance Server Actions', () => {
       expect(mockSupabase.from).not.toHaveBeenCalledWith('appointments')
     })
 
+    it('envía p_account_id con el medio elegido y no lo envía si no hay medio', async () => {
+      const params = {
+        appointmentId: 'apt1', businessId: 'b1', shiftId: 'sh1',
+        paymentMethod: 'transfer' as const, receivedAmount: 100, tipAmount: 0, discountAmount: 0,
+        items: [{ description: 'Haircut', quantity: 1, unitPrice: 100, itemType: 'service' as const }],
+      }
+      mockSupabase.rpc.mockResolvedValue({ data: { success: true, sale_id: 'sale1' }, error: null })
+
+      await checkoutAppointment({ ...params, accountId: '11111111-2222-4333-8444-555555555555' })
+      expect(mockSupabase.rpc).toHaveBeenLastCalledWith('checkout_appointment_secure', expect.objectContaining({
+        p_payment_method: 'transfer', p_account_id: '11111111-2222-4333-8444-555555555555',
+      }))
+
+      await checkoutAppointment({ ...params, accountId: null })
+      const last = mockSupabase.rpc.mock.calls[mockSupabase.rpc.mock.calls.length - 1]
+      expect('p_account_id' in last[1]).toBe(false)
+    })
+
+    it('traduce invalid_account y account_method_mismatch', async () => {
+      const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      const params = {
+        appointmentId: 'apt1', businessId: 'b1', shiftId: 'sh1', accountId: '11111111-2222-4333-8444-555555555555',
+        paymentMethod: 'cash' as const, receivedAmount: 100, tipAmount: 0, discountAmount: 0,
+        items: [{ description: 'Haircut', quantity: 1, unitPrice: 100, itemType: 'service' as const }],
+      }
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'account_method_mismatch' } })
+      const r = await checkoutAppointment(params)
+      expect(r.error).toBe('invalid_account')
+      expect(r.message).toMatch(/no corresponde/)
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'invalid_account' } })
+      expect((await checkoutAppointment(params)).message).toMatch(/medio de pago activo/)
+      errSpy.mockRestore()
+    })
+
     it('translates shift_not_open and appointment_not_found from the secure RPC', async () => {
       const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
       const params = {

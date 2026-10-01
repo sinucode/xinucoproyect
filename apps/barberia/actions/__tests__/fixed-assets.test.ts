@@ -109,6 +109,14 @@ describe('registerFixedAsset', () => {
     expect(revalidatePath).toHaveBeenCalledWith('/[slug]/dashboard/accounting', 'page')
   })
 
+  it('envía p_account_id solo si hay medio elegido', async () => {
+    const { supabase } = setup('admin')
+    await registerFixedAsset({ ...validInput, payment_method: 'transfer', account_id: 'acc-1' })
+    expect(supabase.rpc).toHaveBeenLastCalledWith('register_fixed_asset', expect.objectContaining({ p_payment_method: 'transfer', p_account_id: 'acc-1' }))
+    await registerFixedAsset(validInput)
+    expect('p_account_id' in (supabase.rpc.mock.calls[1][1] as object)).toBe(false)
+  })
+
   it('valida antes de llamar al RPC', async () => {
     const { supabase } = setup('admin')
     expect((await registerFixedAsset({ ...validInput, name: '  ' })).error).toBe('Escribe el nombre del equipo.')
@@ -168,6 +176,14 @@ describe('disposeFixedAsset', () => {
     expect(supabase.rpc).toHaveBeenCalledWith('dispose_fixed_asset', {
       p_asset_id: 'a1', p_date: '2026-02-01', p_reason: 'sold', p_price: 500_000, p_payment_method: 'cash_register', p_notes: undefined,
     })
+  })
+
+  it('venta con medio: manda p_account_id; si no fue venta, no', async () => {
+    const { supabase } = setup('admin', {}, { data: { book_value: 10, price: 5, result: -5 }, error: null })
+    await disposeFixedAsset('a1', { date: '2026-02-01', reason: 'sold', price: 5, paymentMethod: 'transfer', accountId: 'acc-1' })
+    expect(supabase.rpc).toHaveBeenLastCalledWith('dispose_fixed_asset', expect.objectContaining({ p_payment_method: 'transfer', p_account_id: 'acc-1' }))
+    await disposeFixedAsset('a1', { date: '2026-02-01', reason: 'damaged', notes: 'x', accountId: 'acc-1' })
+    expect('p_account_id' in (supabase.rpc.mock.calls[1][1] as object)).toBe(false)
   })
 
   it('no manda precio si no fue venta', async () => {

@@ -1,6 +1,7 @@
 import {
   getMoneyAccountsStatus,
   listMoneyAccounts,
+  listActiveAccountsForCheckout,
   saveMoneyAccount,
   reorderMoneyAccounts,
   recordAccountMovement,
@@ -158,5 +159,29 @@ describe('recordAccountMovement', () => {
     setup('admin', {}, { data: null, error: { message: 'exceeds_loan' } })
     expect((await recordAccountMovement({ kind: 'loan_repayment', amount: 10, from: 'a' })).error).toContain('debe al dueño')
     spy.mockRestore()
+  })
+})
+
+describe('listActiveAccountsForCheckout', () => {
+  it('la puede usar un barbero y devuelve los medios activos sin saldos', async () => {
+    const { calls } = setup('barber', {
+      money_accounts: [{ data: [
+        { id: 'c', name: 'Efectivo', method_kind: 'cash', is_cash_drawer: true },
+        { id: 't', name: 'Nequi', method_kind: 'transfer', is_cash_drawer: false },
+      ], error: null }],
+    })
+    const res = await listActiveAccountsForCheckout()
+    expect(res.data).toEqual([
+      { id: 'c', name: 'Efectivo', method_kind: 'cash', is_cash_drawer: true },
+      { id: 't', name: 'Nequi', method_kind: 'transfer', is_cash_drawer: false },
+    ])
+    const q = calls.find(c => c.table === 'money_accounts')!
+    expect(q.ops).toContainEqual({ op: 'eq', args: ['business_id', 'biz1'] })
+    expect(q.ops).toContainEqual({ op: 'eq', args: ['is_active', true] })
+  })
+
+  it('sin sesión devuelve un error', async () => {
+    setup(null)
+    expect((await listActiveAccountsForCheckout()).error).toBeDefined()
   })
 })

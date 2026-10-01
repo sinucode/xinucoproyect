@@ -9,6 +9,7 @@ import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type {
   AccountMovementKind,
+  CheckoutAccount,
   MoneyAccount,
   MoneyAccountKind,
   MoneyAccountsStatus,
@@ -125,6 +126,50 @@ export async function listMoneyAccounts(): Promise<{ data?: MoneyAccount[]; erro
       sort_order:      num(r.sort_order),
       opening_balance: num(r.opening_balance),
       opening_date:    String(r.opening_date ?? ''),
+    })),
+  }
+}
+
+// ── Medios activos para cobrar y pagar (cualquier miembro del negocio, sin saldos) ──
+
+/**
+ * Los medios activos del negocio, en el orden que eligió el administrador. Los puede leer cualquier
+ * miembro (el cobro lo hacen también los barberos): el negocio sale del perfil de la sesión y los
+ * saldos NO se incluyen (esos son solo del administrador).
+ */
+export async function listActiveAccountsForCheckout(): Promise<{ data?: CheckoutAccount[]; error?: string }> {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: LOAD_FAILED }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('business_id')
+    .eq('id', user.id)
+    .single()
+  const businessId = (profile as { business_id?: string | null } | null)?.business_id
+  if (!businessId) return { error: LOAD_FAILED }
+
+  const { data, error } = await supabase
+    .from('money_accounts')
+    .select('id, name, method_kind, is_cash_drawer')
+    .eq('business_id', businessId)
+    .eq('is_active', true)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+
+  if (error || !Array.isArray(data)) {
+    if (error) console.error('Error listing active accounts for checkout:', error)
+    return { error: LOAD_FAILED }
+  }
+
+  return {
+    data: (data as Record<string, unknown>[]).map(r => ({
+      id:             String(r.id),
+      name:           String(r.name ?? ''),
+      method_kind:    String(r.method_kind) as MoneyAccountKind,
+      is_cash_drawer: r.is_cash_drawer === true,
     })),
   }
 }

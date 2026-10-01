@@ -24,6 +24,8 @@ import {
   type TeamReceiptResult,
 } from '@/lib/team-payments'
 import { maskEmail } from '@/lib/team-utils'
+import { paymentMethodForAccount } from '@/lib/money-accounts'
+import { resolveAccount } from '@/lib/account-resolve'
 import { createServiceClient, resolveStaffEmail, sendTeamPaymentReceipt } from '@/lib/email/notifications'
 
 // ── Tipos públicos ────────────────────────────────────────────────────────────
@@ -103,6 +105,12 @@ export interface TeamMovementInput {
   notes?:  string
   /** Obligatorio en anticipo/pago; se ignora en bono/descuento. */
   payment_method?: TeamPaymentMethod | null
+  /**
+   * Anticipo/pago: medio de pago del negocio (money_accounts). Con un id, el servidor deriva el método
+   * del medio (caja → 'cash_register', otro → 'transfer'); null = "Otro medio" ('other'); sin el campo,
+   * se respeta payment_method y la base asigna el medio por defecto (como antes).
+   */
+  account_id?: string | null
   /** Período liquidado (solo pagos), 'YYYY-MM-DD'. */
   period_from?: string | null
   period_to?:   string | null
@@ -503,9 +511,19 @@ export async function recordTeamMovement(input: TeamMovementInput): Promise<Team
 
   // El medio de pago solo aplica a plata que sale: anticipos y pagos
   let method: TeamPaymentMethod | null = null
+  let accountId: string | null | undefined
   if (type === 'advance' || type === 'payment') {
+    if (input.account_id === null) accountId = null
     if (!isTeamPaymentMethod(input.payment_method)) return { error: 'Elige cómo se pagó.' }
     method = input.payment_method
+    if (input.account_id === null) {
+      method = 'other'
+    } else if (input.account_id !== undefined) {
+      const resolved = await resolveAccount(supabase, businessId, input.account_id)
+      if ('error' in resolved) return resolved
+      accountId = resolved.account.id
+      method = paymentMethodForAccount(resolved.account, 'outflow') as TeamPaymentMethod
+    }
   }
 
   // El período liquidado solo aplica a pagos
@@ -574,6 +592,7 @@ export async function recordTeamMovement(input: TeamMovementInput): Promise<Team
       notes,
       reference_id:   null,
       payment_method: method,
+      ...(accountId === undefined ? {} : { account_id: accountId }),
       shift_id:       shiftId,
       created_by:     userId,
       period_from:    periodFrom,

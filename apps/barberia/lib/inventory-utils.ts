@@ -101,6 +101,7 @@ export function stockErrorMessage(raw: string | null | undefined): string {
     ['item_inactive',         'El producto está desactivado.'],
     ['forbidden',             'Solo un administrador puede gestionar el inventario.'],
     ['invalid_kind',          'Tipo de movimiento no válido.'],
+    ['invalid_account',       'Elige un medio de pago activo.'],
   ]
   for (const [code, text] of table) {
     if (msg.includes(code)) return text

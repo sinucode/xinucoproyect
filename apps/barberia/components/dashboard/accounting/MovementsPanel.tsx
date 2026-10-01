@@ -1,10 +1,24 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Package, Receipt, ShoppingBag, Users, Wallet, Wrench, type LucideIcon } from 'lucide-react'
-import type { MoneyMovement, MoneyMovementMethod, MoneyMovementSource } from '@xinuco/types'
+import {
+  ArrowLeftRight,
+  ArrowUpFromLine,
+  HandCoins,
+  Landmark,
+  Package,
+  Receipt,
+  ShoppingBag,
+  SlidersHorizontal,
+  Undo2,
+  Users,
+  Wallet,
+  Wrench,
+  type LucideIcon,
+} from 'lucide-react'
+import type { MoneyMovement, MoneyMovementSource } from '@xinuco/types'
 import { formatCOP } from '@xinuco/utils'
-import { METHOD_LABEL, SOURCE_LABEL, summarizeMovements } from '@/lib/accounting-utils'
+import { SOURCE_LABEL, internalMoneyNote, movementMediumLabel, summarizeMovements } from '@/lib/accounting-utils'
 import { auditDayLabel } from '@/lib/audit-utils'
 
 const SOURCE_ICON: Record<MoneyMovementSource, LucideIcon> = {
@@ -15,6 +29,13 @@ const SOURCE_ICON: Record<MoneyMovementSource, LucideIcon> = {
   team_payment:       Users,
   inventory_purchase: Package,
   asset_purchase:     Wrench,
+  owner_contribution: HandCoins,
+  owner_loan:         Landmark,
+  loan_repayment:     Undo2,
+  owner_withdrawal:   ArrowUpFromLine,
+  transfer_in:        ArrowLeftRight,
+  transfer_out:       ArrowLeftRight,
+  adjustment:         SlidersHorizontal,
 }
 
 type KindFilter = 'all' | 'in' | 'out'
@@ -52,7 +73,7 @@ function MovementRow({ m }: { m: MoneyMovement }) {
   const amountColor = isPoints ? 'text-xinuco-muted' : isIn ? 'text-emerald-400' : 'text-red-400'
   const details = [
     m.category,
-    METHOD_LABEL[m.method] ?? m.method,
+    movementMediumLabel(m),
     m.occurred_time,
   ].filter(Boolean).join(' · ')
 
@@ -85,27 +106,32 @@ function MovementRow({ m }: { m: MoneyMovement }) {
 
 export function MovementsPanel({ rows, today }: { rows: MoneyMovement[]; today: string }) {
   const [kind, setKind] = useState<KindFilter>('all')
-  const [method, setMethod] = useState<'all' | MoneyMovementMethod>('all')
+  const [medium, setMedium] = useState<string>('all')
   const [limit, setLimit] = useState(PAGE_SIZE)
 
   const summary = useMemo(() => summarizeMovements(rows), [rows])
+  // Aportes, préstamos, retiros, traslados y ajustes cuentan en Entró/Salió: se avisa cuánto es de cada cosa
+  const internalNotes = useMemo(
+    () => [internalMoneyNote(summary, 'in'), internalMoneyNote(summary, 'out')].filter((n): n is string => !!n),
+    [summary],
+  )
 
   // Medios presentes en el mes (incluye "Puntos" si hubo ventas pagadas con puntos)
-  const methodOptions = useMemo(() => {
-    const set = new Set<MoneyMovementMethod>(rows.map(r => r.method))
-    return [...set].sort((a, b) => (METHOD_LABEL[a] ?? a).localeCompare(METHOD_LABEL[b] ?? b, 'es'))
+  const mediumOptions = useMemo(() => {
+    const set = new Set<string>(rows.map(movementMediumLabel))
+    return [...set].sort((a, b) => a.localeCompare(b, 'es'))
   }, [rows])
 
   const filtered = useMemo(() => {
     const list = rows.filter(r =>
-      (kind === 'all' || r.kind === kind) && (method === 'all' || r.method === method),
+      (kind === 'all' || r.kind === kind) && (medium === 'all' || movementMediumLabel(r) === medium),
     )
     // Más reciente primero: día y luego hora (sin hora, al final del día)
     return list.sort((a, b) =>
       b.occurred_on.localeCompare(a.occurred_on) ||
       (b.occurred_time ?? '').localeCompare(a.occurred_time ?? ''),
     )
-  }, [rows, kind, method])
+  }, [rows, kind, medium])
 
   const visible = filtered.slice(0, limit)
 
@@ -142,8 +168,9 @@ export function MovementsPanel({ rows, today }: { rows: MoneyMovement[]; today: 
         />
       </div>
 
-      {(summary.tips > 0 || summary.pointsUsed > 0) && (
+      {(summary.tips > 0 || summary.pointsUsed > 0 || internalNotes.length > 0) && (
         <div className="flex flex-col gap-1 text-[11px] text-xinuco-muted -mt-2">
+          {internalNotes.map(note => <p key={note}>{note}</p>)}
           {summary.tips > 0 && <p>Incluye {formatCOP(summary.tips)} de propinas (son de los profesionales).</p>}
           {summary.pointsUsed > 0 && (
             <p>Pagado con puntos: {formatCOP(summary.pointsUsed)} (no es plata que entró).</p>
@@ -152,15 +179,15 @@ export function MovementsPanel({ rows, today }: { rows: MoneyMovement[]; today: 
       )}
 
       {/* Por medio de pago */}
-      {summary.byMethod.length > 0 && (
+      {summary.byAccount.length > 0 && (
         <section className="rounded-2xl p-4 sm:p-5" style={cardStyle} aria-label="Por medio de pago">
           <h2 className="text-sm font-bold text-xinuco-text">Por medio de pago</h2>
           <p className="text-[11px] text-xinuco-muted mt-0.5">Úsalo para cuadrar con el banco y la caja.</p>
           <ul className="mt-2 divide-y" style={{ borderColor: 'var(--border-color)' }}>
-            {summary.byMethod.map(m => (
-              <li key={m.method} className="flex items-center justify-between gap-3 py-2.5">
+            {summary.byAccount.map(m => (
+              <li key={m.label} className="flex items-center justify-between gap-3 py-2.5">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-xinuco-text">{METHOD_LABEL[m.method] ?? m.method}</p>
+                  <p className="text-sm font-medium text-xinuco-text">{m.label}</p>
                   <p className="text-[11px] text-xinuco-muted mt-0.5 break-words">
                     Entró {formatCOP(m.in)} · Salió {formatCOP(m.out)}
                   </p>
@@ -196,14 +223,14 @@ export function MovementsPanel({ rows, today }: { rows: MoneyMovement[]; today: 
           })}
         </div>
         <select
-          value={method}
-          onChange={e => { setMethod(e.target.value as 'all' | MoneyMovementMethod); setLimit(PAGE_SIZE) }}
+          value={medium}
+          onChange={e => { setMedium(e.target.value); setLimit(PAGE_SIZE) }}
           aria-label="Medio de pago"
           className="input-base sm:w-56 sm:ml-auto"
         >
           <option value="all">Todos los medios de pago</option>
-          {methodOptions.map(m => (
-            <option key={m} value={m}>{METHOD_LABEL[m] ?? m}</option>
+          {mediumOptions.map(m => (
+            <option key={m} value={m}>{m}</option>
           ))}
         </select>
       </div>

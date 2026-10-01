@@ -209,6 +209,22 @@ describe('retail (Punto de Venta)', () => {
       expect(r.change).toBe(0)
     })
 
+    it('envía p_account_id con el medio elegido', async () => {
+      const ACCOUNT = '33333333-3333-4333-8333-333333333333'
+      const { rpc } = setup('admin', { ...openShift() }, okSaleRpc)
+      await createPosSale({ ...baseSale, paymentMethod: 'transfer', accountId: ACCOUNT })
+      expect(rpc.mock.calls[0][1]).toMatchObject({ p_payment_method: 'transfer', p_account_id: ACCOUNT })
+    })
+
+    it('sin medio no manda p_account_id y un medio mal formado se rechaza', async () => {
+      const { rpc } = setup('admin', { ...openShift() }, okSaleRpc)
+      await createPosSale(baseSale)
+      expect('p_account_id' in rpc.mock.calls[0][1]).toBe(false)
+      rpc.mockClear()
+      expect(await createPosSale({ ...baseSale, accountId: 'no-uuid' })).toEqual({ error: 'Elige un medio de pago activo.' })
+      expect(rpc).not.toHaveBeenCalled()
+    })
+
     const invalid: [string, Record<string, unknown>][] = [
       ['método de pago inválido', { paymentMethod: 'mercadopago' }],
       ['carrito vacío', { items: [] }],

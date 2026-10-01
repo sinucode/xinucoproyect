@@ -49,6 +49,8 @@ export interface PurchaseInput {
   unitCost:       number
   supplier?:      string | null
   paymentMethod:  PurchasePayment
+  /** Medio de pago del negocio (money_accounts); la base decide caja/transferencia según el medio. */
+  accountId?:     string | null
 }
 
 export interface CountInput {
@@ -401,6 +403,7 @@ async function callStockRpc(
     unitCost?:      number | null
     supplier?:      string | null
     paymentMethod?: PurchasePayment | null
+    accountId?:     string | null
     notes?:         string | null
   },
 ): Promise<StockMovementResult> {
@@ -412,6 +415,8 @@ async function callStockRpc(
     p_supplier:       args.supplier ?? null,
     p_payment_method: args.paymentMethod ?? null,
     p_notes:          args.notes ?? null,
+    // Solo se envía si hay medio elegido: sin él la función se llama como antes
+    ...(args.accountId ? { p_account_id: args.accountId } : {}),
   })
 
   if (error) return { error: stockErrorMessage(error.message) }
@@ -446,6 +451,7 @@ export async function recordPurchase(input: PurchaseInput): Promise<StockMovemen
     unitCost:      input.unitCost,
     supplier:      supplier || null,
     paymentMethod: input.paymentMethod,
+    accountId:     input.accountId || null,
   })
 }
 

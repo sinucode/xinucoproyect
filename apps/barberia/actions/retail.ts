@@ -34,6 +34,8 @@ export interface CreatePosSaleInput {
   customerId?:     string | null
   sellerStaffId?:  string | null
   paymentMethod:   PosPaymentMethod
+  /** Medio de pago del negocio (money_accounts); la base valida que cuadre con paymentMethod. */
+  accountId?:      string | null
   /** Descuento manual (COP entero). */
   discount:        number
   items:           { itemId: string; quantity: number }[]
@@ -229,6 +231,8 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
   if (!Number.isInteger(loyaltyUnits) || loyaltyUnits < 0) {
     return { error: 'La cantidad de puntos no es válida.' }
   }
+  const accountId = input.accountId || null
+  if (accountId && !UUID_RE.test(accountId)) return { error: posSaleErrorMessage('invalid_account') }
   const customerId = input.customerId || null
   const sellerId = input.sellerStaffId || null
   if ((customerId && !UUID_RE.test(customerId)) || (sellerId && !UUID_RE.test(sellerId))) {
@@ -248,6 +252,8 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
     p_discount:        discount,
     p_items:           input.items.map((it) => ({ item_id: it.itemId, quantity: it.quantity })),
     p_loyalty_units:   loyaltyUnits,
+    // Solo se envía si hay medio elegido: sin él la función se llama como antes
+    ...(accountId ? { p_account_id: accountId } : {}),
   })
 
   if (error) {

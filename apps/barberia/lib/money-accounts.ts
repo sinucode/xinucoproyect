@@ -202,6 +202,69 @@ export function legacyMethodToAccount<T extends AccountRef>(
   return others.find(a => a.method_kind === method) ?? others[0] ?? null
 }
 
+// ── Medio elegido → método de siempre (espejo de _account_method / las funciones de la base) ───
+
+/** Dónde se usa el medio: un cobro (ventas), un gasto o una salida (equipo, compras, equipos). */
+export type AccountPaymentContext = 'payment' | 'expense' | 'outflow'
+
+type AccountKindRef = Pick<MoneyAccountStatus, 'method_kind' | 'is_cash_drawer'>
+
+/**
+ * payment_method "de siempre" que corresponde al medio elegido:
+ *  - cobro:   la caja → 'cash'; otro medio → su tipo (transfer / card / mercadopago)
+ *  - gasto:   la caja → 'cash_register'; tarjeta → 'card'; otro medio → 'transfer'
+ *  - salida:  la caja → 'cash_register'; otro medio → 'transfer'
+ *  - sin medio ("Otro medio", fuera de las cuentas): cobro 'cash'; gasto/salida 'other'
+ */
+export function paymentMethodForAccount(
+  account: AccountKindRef | null | undefined,
+  context: AccountPaymentContext,
+): string {
+  if (!account) return context === 'payment' ? 'cash' : 'other'
+  if (account.is_cash_drawer) return context === 'payment' ? 'cash' : 'cash_register'
+  if (context === 'payment') return account.method_kind === 'cash' ? 'transfer' : account.method_kind
+  if (context === 'expense' && account.method_kind === 'card') return 'card'
+  return 'transfer'
+}
+
+/** El Punto de Venta solo acepta efectivo, tarjeta o transferencia: Mercado Pago cuenta como transferencia. */
+export function posMethodForAccount(account: AccountKindRef): 'cash' | 'card' | 'transfer' {
+  const m = paymentMethodForAccount(account, 'payment')
+  return m === 'cash' || m === 'card' ? m : 'transfer'
+}
+
+// ── Elección en los formularios ───────────────────────────────────────────────
+
+/** Valor del selector para "Otro medio (fuera de tus cuentas)": se guarda como account_id null. */
+export const OTHER_ACCOUNT_ID = 'other'
+export const OTHER_ACCOUNT_LABEL = 'Otro medio (fuera de tus cuentas)'
+
+/**
+ * Efectivo "de respaldo" cuando no se pudieron cargar los medios del negocio: el cobro sigue
+ * funcionando como antes (efectivo, sin medio) y la base asigna la caja sola.
+ */
+export const LEGACY_CASH_ID = 'legacy-cash'
+
+/** account_id a enviar: null si eligió "Otro medio", el efectivo de respaldo o no eligió nada. */
+export function accountIdOrNull(value: string | null | undefined): string | null {
+  return value && value !== OTHER_ACCOUNT_ID && value !== LEGACY_CASH_ID ? value : null
+}
+
+/** Valor inicial del selector al editar: el medio guardado, o "Otro medio" si no tenía. */
+export function storedAccountValue(accountId: string | null | undefined): string {
+  return accountId ? accountId : OTHER_ACCOUNT_ID
+}
+
+/** Medio elegido dentro de la lista (null = "Otro medio", nada elegido o un medio que ya no está activo). */
+export function pickedAccount<T extends { id: string }>(accounts: T[], value: string | null | undefined): T | null {
+  return value ? accounts.find(a => a.id === value) ?? null : null
+}
+
+/** Primer medio ofrecido por defecto: la caja si existe; si no, el primero de la lista. */
+export function defaultAccountId(accounts: Pick<MoneyAccountStatus, 'id' | 'is_cash_drawer'>[]): string | null {
+  return (accounts.find(a => a.is_cash_drawer) ?? accounts[0])?.id ?? null
+}
+
 // ── Saldo suficiente ──────────────────────────────────────────────────────────
 
 /** ¿El monto supera lo disponible? Un monto vacío o ≤ 0 nunca falta. */
@@ -268,6 +331,7 @@ const ERROR_TABLE: [string, string][] = [
   ['reason_required',  'Cuéntanos el motivo del ajuste.'],
   ['invalid_accounts', 'Revisa los medios elegidos: el de origen y el de destino deben ser distintos.'],
   ['invalid_account',  'Elige un medio de pago activo.'],
+  ['account_method_mismatch', 'Ese medio de pago no corresponde con la forma de pago elegida. Elígelo de nuevo.'],
 ]
 
 /** Traduce un código de error de la base (o un mensaje que lo contenga) a un texto en español. */

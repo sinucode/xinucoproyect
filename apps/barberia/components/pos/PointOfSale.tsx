@@ -4,11 +4,8 @@ import { useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  Banknote,
   CheckCircle2,
-  CreditCard,
   Gift,
-  Landmark,
   Loader2,
   Lock,
   MessageCircle,
@@ -35,6 +32,9 @@ import {
   type PosProduct,
   type ReceiptData,
 } from '@/lib/pos-utils'
+import { AccountPicker } from '@/components/finance/AccountPicker'
+import { useCheckoutAccounts } from '@/components/finance/useCheckoutAccounts'
+import { accountIdOrNull, posMethodForAccount } from '@/lib/money-accounts'
 import { CashReceivedInput } from './CashReceivedInput'
 import { PosCustomerPicker, type PosSelectedCustomer } from './PosCustomerPicker'
 
@@ -45,12 +45,6 @@ interface PointOfSaleProps {
   compact?: boolean
   /** Se llama después de cada venta (p. ej. para recargar el catálogo dentro del modal). */
   onSold?:  () => void
-}
-
-const METHOD_ICONS: Record<PosPaymentMethod, typeof Banknote> = {
-  cash:     Banknote,
-  card:     CreditCard,
-  transfer: Landmark,
 }
 
 const sectionLabel = 'text-xs font-bold uppercase tracking-wider text-xinuco-muted mb-2'
@@ -70,7 +64,12 @@ export function PointOfSale({ slug, catalog, compact = false, onSold }: PointOfS
   const [pointsInput, setPointsInput] = useState<number | ''>('')
   const [sellerId, setSellerId] = useState('')
   const [discountInput, setDiscountInput] = useState<number | ''>('')
-  const [method, setMethod] = useState<PosPaymentMethod>('cash')
+  // Medio de pago del negocio; sin elegir se usa Efectivo (la caja)
+  const { accounts, loaded: accountsLoaded } = useCheckoutAccounts()
+  const [accountId, setAccountId] = useState<string | null>(null)
+  const account = accounts.find((a) => a.id === accountId) ?? accounts.find((a) => a.is_cash_drawer) ?? null
+  // El POS solo acepta efectivo, tarjeta o transferencia (Mercado Pago cuenta como transferencia)
+  const method: PosPaymentMethod = account ? posMethodForAccount(account) : 'cash'
   const [received, setReceived] = useState<number | ''>('')
 
   const [error, setError] = useState<string | null>(null)
@@ -119,7 +118,7 @@ export function PointOfSale({ slug, catalog, compact = false, onSold }: PointOfS
 
   const receivedNum = Number(received) || 0
   const cashShort = method === 'cash' && total > 0 && receivedNum > 0 && receivedNum < total
-  const canCharge = !!catalog.shiftId && lines.length > 0 && !isPending && !cashShort
+  const canCharge = !!catalog.shiftId && lines.length > 0 && !isPending && !cashShort && accountsLoaded
 
   // ── Catálogo filtrado ──────────────────────────────────────────────────────
   const categories = useMemo(
@@ -178,7 +177,7 @@ export function PointOfSale({ slug, catalog, compact = false, onSold }: PointOfS
     setPointsInput('')
     setSellerId('')
     setDiscountInput('')
-    setMethod('cash')
+    setAccountId(null)
     setReceived('')
     setError(null)
   }
@@ -198,6 +197,7 @@ export function PointOfSale({ slug, catalog, compact = false, onSold }: PointOfS
         customerId:     customer?.id ?? null,
         sellerStaffId:  sellerId || null,
         paymentMethod:  method,
+        accountId:      accountIdOrNull(account?.id),
         discount:       discountNum,
         items:          lines.map((l) => ({ itemId: l.product.id, quantity: l.quantity })),
         loyaltyUnits,
@@ -219,6 +219,7 @@ export function PointOfSale({ slug, catalog, compact = false, onSold }: PointOfS
         loyaltyDiscount: res.loyaltyDiscount ?? totals.loyaltyDiscount,
         total:           res.total ?? total,
         method,
+        accountName:     account && !account.is_cash_drawer ? account.name : null,
         received:        method === 'cash' && receivedNum > 0 ? receivedNum : null,
         change:          res.change ?? 0,
         customerName:    snapshotCustomer?.full_name ?? null,
@@ -298,7 +299,7 @@ export function PointOfSale({ slug, catalog, compact = false, onSold }: PointOfS
             <dt>Total</dt><dd>{formatMoney(receipt.total)}</dd>
           </div>
           <div className="flex justify-between text-xinuco-muted">
-            <dt>Método</dt><dd>{POS_METHOD_LABELS[receipt.method]}</dd>
+            <dt>Medio de pago</dt><dd>{receipt.accountName || POS_METHOD_LABELS[receipt.method]}</dd>
           </div>
           {receipt.method === 'cash' && receipt.received !== null && (
             <>
@@ -610,30 +611,19 @@ export function PointOfSale({ slug, catalog, compact = false, onSold }: PointOfS
         </dl>
 
         <div>
-          <h3 className={sectionLabel}>Método de pago</h3>
-          <div className="grid grid-cols-3 gap-2">
-            {(Object.keys(POS_METHOD_LABELS) as PosPaymentMethod[]).map((m) => {
-              const Icon = METHOD_ICONS[m]
-              const active = method === m
-              return (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => { setMethod(m); setError(null) }}
-                  disabled={isPending}
-                  aria-pressed={active}
-                  className={`flex flex-col items-center justify-center p-2.5 rounded-xl border gap-1 text-xs font-semibold transition-all ${
-                    active
-                      ? 'border-[var(--primary-color)] bg-[var(--primary-color)]/[0.08] text-[var(--primary-color)]'
-                      : 'border-zinc-900 bg-zinc-900/30 text-zinc-400 hover:text-zinc-200 hover:border-zinc-800'
-                  }`}
-                >
-                  <Icon size={18} />
-                  {POS_METHOD_LABELS[m]}
-                </button>
-              )
-            })}
-          </div>
+          <h3 className={sectionLabel}>Medio de pago</h3>
+          {!accountsLoaded ? (
+            <p className="flex items-center gap-2 text-xs text-xinuco-muted">
+              <Loader2 size={14} className="animate-spin" /> Cargando medios de pago…
+            </p>
+          ) : (
+            <AccountPicker
+              accounts={accounts}
+              value={account?.id ?? null}
+              disabled={isPending}
+              onChange={(id) => { setAccountId(id); setError(null) }}
+            />
+          )}
         </div>
 
         {method === 'cash' && total > 0 && (

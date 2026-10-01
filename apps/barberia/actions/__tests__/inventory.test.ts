@@ -219,6 +219,23 @@ describe('Inventory Server Actions', () => {
       expect(revalidatePath).toHaveBeenCalledWith('/[slug]/dashboard', 'layout')
     })
 
+    it('envía p_account_id con el medio elegido', async () => {
+      const { supabase } = setup('admin')
+      await recordPurchase({ ...validPurchase, accountId: 'acc-1' })
+      expect(supabase.rpc).toHaveBeenCalledWith('record_stock_movement', expect.objectContaining({
+        p_kind: 'purchase', p_payment_method: 'transfer', p_account_id: 'acc-1',
+      }))
+    })
+
+    it('sin medio no manda p_account_id y traduce invalid_account', async () => {
+      const { supabase } = setup('admin')
+      await recordPurchase(validPurchase)
+      expect('p_account_id' in (supabase.rpc.mock.calls[0][1] as object)).toBe(false)
+      const second = setup('admin')
+      second.supabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'invalid_account' } })
+      expect((await recordPurchase({ ...validPurchase, accountId: 'acc-x' })).error).toBe('Elige un medio de pago activo.')
+    })
+
     it.each([
       ['cantidad 0', { quantity: 0 }],
       ['cantidad decimal', { quantity: 1.5 }],

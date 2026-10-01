@@ -1,21 +1,20 @@
 'use client'
 // components/dashboard/inventory/StockSheets.tsx — compra, conteo físico y merma
 
-import React, { useState, useTransition } from 'react'
+import React, { useEffect, useState, useTransition } from 'react'
 import { ArrowDownToLine, ClipboardCheck, Trash2, Info } from 'lucide-react'
 import { recordPurchase, recordCount, recordWaste } from '@/actions/inventory'
 import {
   MAX_STOCK_QTY,
-  PAYMENT_LABELS,
-  PURCHASE_PAYMENTS,
   WASTE_REASONS,
   signedQty,
   wasteNote,
   weightedAverageCost,
-  type PurchasePayment,
 } from '@/lib/inventory-utils'
 import type { InventoryItem } from '@xinuco/types'
 import { FundsWarning, useFundsCheck } from '@/components/finance/FundsWarning'
+import { AccountPicker } from '@/components/finance/AccountPicker'
+import { accountIdOrNull, paymentMethodForAccount, pickedAccount } from '@/lib/money-accounts'
 import {
   SidePanel,
   PanelFooter,
@@ -54,7 +53,8 @@ export function PurchaseSheet({
   const [qty, setQty]           = useState('')
   const [cost, setCost]         = useState(item.unit_cost !== null ? String(item.unit_cost) : '')
   const [supplier, setSupplier] = useState('')
-  const [payment, setPayment]   = useState<PurchasePayment>('transfer')
+  // Medio de pago: arranca en el primer medio que no sea la caja (como antes arrancaba en "Transferencia")
+  const [accountChoice, setAccountChoice] = useState<string | null>(null)
   const [error, setError]       = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
@@ -65,7 +65,15 @@ export function PurchaseSheet({
 
   const total = qtyOk && costOk ? quantity * unitCost : null
   // Aviso de saldo del medio con el que se paga la compra
-  const funds = useFundsCheck({ method: payment, amount: total ?? 0 })
+  const funds = useFundsCheck({ accountId: accountChoice, amount: total ?? 0 })
+  const account = pickedAccount(funds.accounts, accountChoice)
+  const payment = account ? (paymentMethodForAccount(account, 'outflow') as 'cash_register' | 'transfer') : 'other'
+  useEffect(() => {
+    if (accountChoice !== null || !funds.loaded) return
+    const first = funds.accounts.find(a => !a.is_cash_drawer)
+    if (first) setAccountChoice(first.id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [funds.loaded])
   const newAvg = qtyOk && costOk
     ? weightedAverageCost(item.current_stock, item.unit_cost, quantity, unitCost)
     : null
@@ -74,6 +82,7 @@ export function PurchaseSheet({
     setError(null)
     if (!qtyOk) { setError('La cantidad debe ser un entero mayor a 0.'); return }
     if (!costOk) { setError('Indica el costo unitario (COP).'); return }
+    if (accountChoice === null) { setError('Elige cómo se pagó la compra.'); return }
     if (payment === 'cash_register' && !hasOpenShift) {
       setError('No hay caja abierta. Abre la caja o elige otro medio de pago.')
       return
@@ -86,6 +95,7 @@ export function PurchaseSheet({
         unitCost,
         supplier:      supplier.trim() || null,
         paymentMethod: payment,
+        accountId:     accountIdOrNull(accountChoice),
       })
       if (result.error) {
         setError(result.error)
@@ -176,33 +186,22 @@ export function PurchaseSheet({
 
         <div className="flex flex-col gap-2">
           <span className={labelCls}>¿Cómo se pagó?</span>
-          <div className="flex flex-col gap-2">
-            {PURCHASE_PAYMENTS.map((p) => {
-              const disabled = p === 'cash_register' && !hasOpenShift
-              const active   = payment === p
-              return (
-                <label
-                  key={p}
-                  className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition-colors ${
-                    disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                  }`}
-                  style={{
-                    borderColor:     active ? 'var(--primary-color)' : 'var(--border-color)',
-                    backgroundColor: active ? 'color-mix(in srgb, var(--primary-color) 8%, transparent)' : 'transparent',
-                  }}
-                >
-                  <input
-                    type="radio" name="payment" value={p}
-                    checked={active} disabled={disabled}
-                    onChange={() => setPayment(p)}
-                    className="accent-[var(--primary-color)]"
-                  />
-                  <span className="flex-1 text-zinc-200">{PAYMENT_LABELS[p]}</span>
-                  {disabled && <span className="text-[11px] text-zinc-500">Abre la caja para usarla</span>}
-                </label>
-              )
-            })}
-          </div>
+          {!funds.loaded ? (
+            <p className="text-xs text-zinc-500">Cargando medios de pago…</p>
+          ) : (
+            <AccountPicker
+              accounts={funds.accounts}
+              balances={funds.balances}
+              value={accountChoice}
+              onChange={setAccountChoice}
+              allowOther
+              disabledIds={hasOpenShift ? [] : funds.accounts.filter(a => a.is_cash_drawer).map(a => a.id)}
+              ariaLabel="¿Cómo se pagó?"
+            />
+          )}
+          {!hasOpenShift && (
+            <p className="text-[11px] text-zinc-500">Abre la caja para pagar con Efectivo.</p>
+          )}
           {payment === 'cash_register' && (
             <p className="text-[11px] text-zinc-500">
               Se resta del efectivo esperado del turno abierto.

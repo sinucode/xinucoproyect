@@ -20,6 +20,8 @@ import {
 } from '@/lib/expense-utils'
 import { EXPENSE_HISTORY_DAYS, fetchExpenseHistory } from '@/lib/expense-history'
 import { fetchProfitLoss } from '@/lib/profit-loss'
+import { paymentMethodForAccount } from '@/lib/money-accounts'
+import { resolveAccount } from '@/lib/account-resolve'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,12 @@ export interface ExpenseInput {
   expense_date:   string   // 'YYYY-MM-DD' (fecha local del negocio)
   is_recurring:   boolean
   payment_method: ExpensePaymentMethod
+  /**
+   * Medio de pago del negocio (money_accounts). Con un id, el servidor deriva el payment_method del
+   * medio; null = "Otro medio" (fuera de las cuentas, payment_method 'other'); sin el campo, se
+   * respeta payment_method y la base asigna el medio por defecto (como antes).
+   */
+  account_id?:    string | null
 }
 
 export interface RecurringExpenseItem {
@@ -158,8 +166,42 @@ function validateInput(
       expense_date:   input.expense_date,
       is_recurring:   input.is_recurring === true,
       payment_method: input.payment_method,
+      ...(input.account_id === undefined ? {} : { account_id: input.account_id }),
     },
   }
+}
+
+/**
+ * Aplica el medio elegido: con un id, valida que sea del negocio (y activo) y deriva de él el método
+ * de pago; con null, es "Otro medio". Sin account_id no cambia nada (flujo de siempre).
+ * `existing`: el medio y método que ya tenía el gasto que se edita (se conservan si no cambió el medio).
+ */
+async function applyAccount(
+  supabase: Supabase,
+  businessId: string,
+  value: ExpenseInput,
+  existing?: { account_id: string | null; payment_method: ExpensePaymentMethod },
+): Promise<{ value: ExpenseInput } | { error: string }> {
+  if (value.account_id === undefined) return { value }
+  if (value.account_id === null) {
+    // Sigue sin medio: se conserva el método guardado (un gasto viejo sin medio no cambia en silencio)
+    if (existing && existing.account_id === null) return { value: { ...value, payment_method: existing.payment_method } }
+    return { value: { ...value, payment_method: 'other' } }
+  }
+
+  const resolved = await resolveAccount(supabase, businessId, value.account_id, existing?.account_id)
+  if ('error' in resolved) return resolved
+  const { account } = resolved
+
+  let method = paymentMethodForAccount(account, 'expense') as ExpensePaymentMethod
+  // Mismo medio que ya tenía (no caja): se conserva el detalle guardado (p. ej. "Tarjeta")
+  if (
+    existing && existing.account_id === account.id && !account.is_cash_drawer &&
+    existing.payment_method !== 'cash_register' && existing.payment_method !== 'other'
+  ) {
+    method = existing.payment_method
+  }
+  return { value: { ...value, payment_method: method } }
 }
 
 // ── Categorías del negocio ────────────────────────────────────────────────────
@@ -357,10 +399,12 @@ export async function createExpense(input: ExpenseInput): Promise<ActionResult &
   const today = businessTodayISODate()
   const checked = validateInput(input, today)
   if ('error' in checked) return checked
-  const { value } = checked
-
-  const categoryError = checkCategory(await ensureExpenseCategories(supabase, businessId), value.category)
+  const categoryError = checkCategory(await ensureExpenseCategories(supabase, businessId), checked.value.category)
   if (categoryError) return { error: categoryError }
+
+  const withAccount = await applyAccount(supabase, businessId, checked.value)
+  if ('error' in withAccount) return withAccount
+  const { value } = withAccount
 
   const shift = await resolveShiftId(supabase, businessId, value, today)
   if ('error' in shift) return shift
@@ -375,6 +419,7 @@ export async function createExpense(input: ExpenseInput): Promise<ActionResult &
       expense_date:   value.expense_date,
       is_recurring:   value.is_recurring,
       payment_method: value.payment_method,
+      ...(value.account_id === undefined ? {} : { account_id: value.account_id }),
       shift_id:       shift.shiftId,
       created_by:     userId,
     })
@@ -402,7 +447,6 @@ export async function updateExpense(
   const today = businessTodayISODate()
   const checked = validateInput(input, today)
   if ('error' in checked) return checked
-  const { value } = checked
 
   const { data: existingRow, error: findError } = await supabase
     .from('expenses')
@@ -413,6 +457,13 @@ export async function updateExpense(
   if (findError) return { error: findError.message }
   const existing = existingRow as Expense | null
   if (!existing) return { error: 'Gasto no encontrado.' }
+
+  const withAccount = await applyAccount(supabase, businessId, checked.value, {
+    account_id:     existing.account_id ?? null,
+    payment_method: existing.payment_method,
+  })
+  if ('error' in withAccount) return withAccount
+  const { value } = withAccount
 
   const categoryError = checkCategory(
     await ensureExpenseCategories(supabase, businessId),
@@ -456,6 +507,10 @@ export async function updateExpense(
       expense_date:   value.expense_date,
       is_recurring:   value.is_recurring,
       payment_method: value.payment_method,
+      // Sin medio elegido pero con otro método: se suelta el medio para que la base asigne el de siempre
+      ...(value.account_id !== undefined
+        ? { account_id: value.account_id }
+        : value.payment_method !== existing.payment_method ? { account_id: null } : {}),
       shift_id:       shiftId,
     })
     .eq('id', expenseId)

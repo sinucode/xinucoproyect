@@ -44,11 +44,18 @@ import {
 import type { Expense, ExpenseCategoryRow, ExpensePaymentMethod, ProfitLossResult } from '@xinuco/types'
 import { AdminPageHeader, AdminEmptyState } from '@xinuco/ui'
 import { FundsWarning, useFundsCheck } from '@/components/finance/FundsWarning'
+import { AccountPicker } from '@/components/finance/AccountPicker'
+import {
+  OTHER_ACCOUNT_ID,
+  accountIdOrNull,
+  paymentMethodForAccount,
+  pickedAccount,
+  storedAccountValue,
+} from '@/lib/money-accounts'
 import { formatCOP } from '@xinuco/utils'
 import {
   CATEGORY_PALETTE,
   MAX_CATEGORY_NAME,
-  PAYMENT_METHODS,
   categoryName,
   categoryBadgeClass,
   categoryBarColor,
@@ -514,14 +521,31 @@ function ExpenseSheet({
   const [description, setDescription] = useState(expense?.description ?? '')
   const [amountDigits, setAmountDigits] = useState(expense ? String(expense.amount) : '')
   const [expenseDate, setExpenseDate] = useState(expense?.expense_date ?? today)
-  const [method,      setMethod]      = useState<ExpensePaymentMethod>(expense?.payment_method ?? 'transfer')
+  // Medio de pago: al editar, el guardado ("other" si no tenía); al crear arranca en el primer medio que no sea la caja
+  const [accountChoice, setAccountChoice] = useState<string | null>(expense ? storedAccountValue(expense.account_id) : null)
   const [isRecurring, setIsRecurring] = useState(expense?.is_recurring ?? false)
   const [formError,   setFormError]   = useState<string | null>(null)
   const [isPending,   startTransition] = useTransition()
 
-  const isCash = method === 'cash_register'
   // Aviso de saldo: solo al crear (un gasto que se edita ya descontó su plata)
-  const funds = useFundsCheck({ method, amount: Number(amountDigits), enabled: !isEdit })
+  const funds = useFundsCheck({ accountId: accountChoice, amount: Number(amountDigits), enabled: !isEdit })
+  const accountValue = accountChoice
+  const account = pickedAccount(funds.accounts, accountValue)
+  const isCash = !!account?.is_cash_drawer
+  // Medio guardado que ya no está activo: se conserva tal cual (con su método de pago de siempre)
+  const keepsStored = isEdit && !account && accountValue !== null && accountValue !== OTHER_ACCOUNT_ID
+  const method: ExpensePaymentMethod = account
+    ? (paymentMethodForAccount(account, 'expense') as ExpensePaymentMethod)
+    : accountValue === OTHER_ACCOUNT_ID || accountValue === null
+      ? 'other'
+      : expense?.payment_method ?? 'other'
+  // Al crear, arranca con el primer medio que no sea la caja (como antes arrancaba en "Transferencia")
+  useEffect(() => {
+    if (isEdit || accountChoice !== null || !funds.loaded) return
+    const first = funds.accounts.find(a => !a.is_cash_drawer)
+    if (first) setAccountChoice(first.id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [funds.loaded])
 
   // Cerrar con ESC
   useEffect(() => {
@@ -569,11 +593,12 @@ function ExpenseSheet({
     })
   }
 
-  function pickMethod(next: ExpensePaymentMethod) {
-    if (next === 'cash_register' && !hasActiveShift) return
-    setMethod(next)
+  function pickAccount(next: string) {
+    const picked = pickedAccount(funds.accounts, next)
+    if (picked?.is_cash_drawer && !hasActiveShift) return
+    setAccountChoice(next)
     // El efectivo de la caja es siempre del día
-    if (next === 'cash_register') setExpenseDate(today)
+    if (picked?.is_cash_drawer) setExpenseDate(today)
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -588,6 +613,7 @@ function ExpenseSheet({
     if (!Number.isInteger(amount) || amount < 1 || amount > MAX_AMOUNT) {
       return setFormError('El monto debe estar entre $1 y $100.000.000.')
     }
+    if (accountValue === null) return setFormError('Elige cómo se pagó el gasto.')
     if (!/^\d{4}-\d{2}-\d{2}$/.test(expenseDate)) return setFormError('La fecha es requerida.')
     if (expenseDate > today) return setFormError('La fecha no puede ser futura.')
     if (isCash && !hasActiveShift) return setFormError('No hay caja abierta. Abre la caja o elige otro medio de pago.')
@@ -600,6 +626,7 @@ function ExpenseSheet({
       expense_date:   expenseDate,
       is_recurring:   isRecurring,
       payment_method: method,
+      account_id:     accountIdOrNull(accountValue),
     }
 
     startTransition(async () => {
@@ -727,39 +754,31 @@ function ExpenseSheet({
           {/* ¿Cómo se pagó? */}
           <div className="flex flex-col gap-2">
             <span id="exp-method-label" className={labelClass}>¿Cómo se pagó? *</span>
-            <div role="radiogroup" aria-labelledby="exp-method-label" className="grid grid-cols-2 gap-2">
-              {PAYMENT_METHODS.map(pm => {
-                const Icon = PAYMENT_ICONS[pm.value]
-                const selected = method === pm.value
-                const disabled = pm.value === 'cash_register' && !hasActiveShift
-                return (
-                  <button
-                    key={pm.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    disabled={disabled}
-                    onClick={() => pickMethod(pm.value)}
-                    className="flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold border transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    style={selected ? {
-                      borderColor: 'var(--primary-color)',
-                      color: 'var(--primary-color)',
-                      background: 'color-mix(in srgb, var(--primary-color) 12%, transparent)',
-                    } : {
-                      borderColor: 'var(--border-color)',
-                      color: 'var(--text-color)',
-                    }}
-                  >
-                    <Icon size={14} />
-                    {pm.label}
-                  </button>
-                )
-              })}
-            </div>
+            {!funds.loaded ? (
+              <p className="flex items-center gap-2 text-xs text-xinuco-muted">
+                <Loader2 size={14} className="animate-spin" /> Cargando medios de pago…
+              </p>
+            ) : (
+              <AccountPicker
+                accounts={funds.accounts}
+                balances={funds.balances}
+                value={accountValue}
+                onChange={pickAccount}
+                allowOther
+                disabledIds={hasActiveShift ? [] : funds.accounts.filter(a => a.is_cash_drawer).map(a => a.id)}
+                ariaLabel="¿Cómo se pagó?"
+              />
+            )}
+            {keepsStored && (
+              <p className="text-xs text-xinuco-muted flex items-center gap-1.5">
+                <Info size={12} className="shrink-0" />
+                Este gasto se pagó con un medio que ya no está activo; se conserva. Elige otro para cambiarlo.
+              </p>
+            )}
             {!hasActiveShift && (
               <p className="text-xs text-xinuco-muted flex items-center gap-1.5">
                 <Info size={12} className="shrink-0" />
-                Abre la caja para usar esta opción
+                Abre la caja para pagar con Efectivo
               </p>
             )}
             {isCash && (
