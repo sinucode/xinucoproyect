@@ -53,7 +53,7 @@ export function AccountPicker({
   ]
 
   return (
-    <div role="radiogroup" aria-label={ariaLabel} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+    <div role="radiogroup" aria-label={ariaLabel} className="grid grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-2">
       {options.map(o => {
         const active = value === o.id
         return (
@@ -72,7 +72,7 @@ export function AccountPicker({
               }`}
           >
             <o.Icon size={20} aria-hidden="true" />
-            <span className="w-full break-words text-xs font-semibold leading-tight">{o.name}</span>
+            <span className="w-full text-xs font-semibold leading-tight [overflow-wrap:normal]">{o.name}</span>
             {o.balance !== undefined && (
               <span className={`text-[11px] tabular-nums ${o.balance < 0 ? 'text-red-400' : 'text-xinuco-muted'}`}>
                 {formatMoney(o.balance)}
