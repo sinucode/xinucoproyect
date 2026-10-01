@@ -2,6 +2,11 @@
 
 import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+
+/** Dentro del contenedor del negocio (hereda colores y tipografía de la marca); si no, el body. */
+function portalTarget(): Element {
+  return document.querySelector('[data-tenant-theme]') ?? document.body
+}
 import { usePathname } from 'next/navigation'
 import { X } from 'lucide-react'
 
@@ -110,5 +115,5 @@ export function BottomSheet({ open, onClose, title, children }: BottomSheetProps
         </div>
       </div>
     </div>
-  ), document.body)
+  ), portalTarget())
 }

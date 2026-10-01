@@ -112,6 +112,7 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
 
   return (
     <div
+      data-tenant-theme=""
       className={`${font.className} ${font.variable} min-h-screen antialiased flex flex-col`}
       style={cssVars}
     >

@@ -2,6 +2,11 @@
 
 import { createPortal } from 'react-dom'
 
+/** Dentro del contenedor del negocio (hereda colores y tipografía de la marca); si no, el body. */
+function portalTarget(): Element {
+  return document.querySelector('[data-tenant-theme]') ?? document.body
+}
+
 import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { usePathname } from 'next/navigation'
 import { X } from 'lucide-react'
@@ -103,5 +108,5 @@ function DesktopDialog({
         <div className="overflow-y-auto overscroll-contain px-5 py-4">{children}</div>
       </div>
     </div>
-  ), document.body)
+  ), portalTarget())
 }
