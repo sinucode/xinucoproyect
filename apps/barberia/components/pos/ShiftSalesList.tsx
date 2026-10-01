@@ -111,7 +111,7 @@ export function ShiftSalesList({ sales }: ShiftSalesListProps) {
                     {sale.items.map((i) => `${i.quantity} × ${i.description}`).join(', ') || 'Sin líneas'}
                   </p>
                   <p className="text-xs text-xinuco-muted mt-0.5">
-                    {sale.paymentMethod ? POS_METHOD_LABELS[sale.paymentMethod] : 'Sin pago'}
+                    {sale.paymentAccountName ?? (sale.paymentMethod ? POS_METHOD_LABELS[sale.paymentMethod] : 'Sin pago')}
                     {sale.sellerName ? ` · Vendió ${sale.sellerName}` : ''}
                   </p>
                   {voided && sale.voidReason && (

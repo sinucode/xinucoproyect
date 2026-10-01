@@ -56,6 +56,8 @@ export interface ShiftSale {
   sellerName:    string | null
   items:         { description: string; quantity: number }[]
   paymentMethod: PosPaymentMethod | null
+  /** Nombre del medio de pago del negocio ("Nequi"), si el pago lo tiene. */
+  paymentAccountName: string | null
   total:         number
   status:        'paid' | 'voided'
   voidReason:    string | null

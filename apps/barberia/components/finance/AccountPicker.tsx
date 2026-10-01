@@ -62,6 +62,7 @@ export function AccountPicker({
             type="button"
             role="radio"
             aria-checked={active}
+            aria-label={o.balance !== undefined ? `${o.name}, saldo ${formatMoney(o.balance)}` : o.name}
             disabled={disabled || !!disabledIds?.includes(o.id)}
             onClick={() => onChange(o.id)}
             className={`flex min-h-11 flex-col items-center justify-center gap-1 rounded-xl border p-3 text-center transition-all disabled:cursor-not-allowed disabled:opacity-50

@@ -67,12 +67,30 @@ export async function getShiftSummary(shiftId: string) {
 }
 
 export interface ShiftMethodTotal {
-  method: string
+  /** account_id del medio de pago del negocio; sin medio: el método del pago ('cash', 'loyalty_points'…). */
+  key: string
+  /** Nombre del medio de pago del negocio ("Nequi", "Efectivo") o la etiqueta del método. */
+  label: string
+  /** Es la caja física (el efectivo esperado se compara con este renglón). */
+  isCash: boolean
+  /** Pagado con puntos de lealtad: no es plata. */
+  isPoints: boolean
   amount: number
 }
 
+const SHIFT_METHOD_LABEL: Record<string, string> = {
+  cash:           'Efectivo',
+  card:           'Tarjeta',
+  transfer:       'Transferencia',
+  mercadopago:    'Mercado Pago',
+  loyalty_points: 'Puntos',
+  mixed:          'Mixto',
+  other:          'Otro',
+}
+
 /**
- * getShiftPaymentsByMethod — Lo cobrado en el turno por medio de pago (sin ventas anuladas).
+ * getShiftPaymentsByMethod — Lo cobrado en el turno por medio de pago del negocio (sin ventas
+ * anuladas). Agrupa por cuenta (p. ej. "Nequi"); los pagos sin cuenta caen en su método.
  * Nunca tumba el dashboard: ante un error devuelve una lista vacía.
  */
 export async function getShiftPaymentsByMethod(shiftId: string): Promise<ShiftMethodTotal[]> {
@@ -82,7 +100,7 @@ export async function getShiftPaymentsByMethod(shiftId: string): Promise<ShiftMe
     const supabase = await createClient()
     const res = await supabase
       .from('payments')
-      .select('amount, payment_method, sales!inner(status)')
+      .select('amount, payment_method, account_id, money_accounts(name, is_cash_drawer), sales!inner(status)')
       .eq('shift_id', shiftId)
       .neq('sales.status', 'voided')
     data = res.data
@@ -96,15 +114,44 @@ export async function getShiftPaymentsByMethod(shiftId: string): Promise<ShiftMe
     return []
   }
 
-  const totals = new Map<string, number>()
-  for (const row of data as { amount: number | string | null; payment_method: string | null }[]) {
-    const method = row.payment_method ?? 'other'
+  type Account = { name: string | null; is_cash_drawer: boolean | null }
+  type Row = {
+    amount: number | string | null
+    payment_method: string | null
+    account_id: string | null
+    money_accounts: Account | Account[] | null
+  }
+
+  const totals = new Map<string, ShiftMethodTotal>()
+  for (const row of data as Row[]) {
     const amount = Number(row.amount)
     if (!Number.isFinite(amount)) continue
-    totals.set(method, (totals.get(method) ?? 0) + amount)
+    const method = row.payment_method ?? 'other'
+    const account = Array.isArray(row.money_accounts) ? row.money_accounts[0] ?? null : row.money_accounts
+    const isPoints = method === 'loyalty_points'
+
+    let key: string
+    let label: string
+    let isCash: boolean
+    if (isPoints) {
+      key = 'loyalty_points'
+      label = SHIFT_METHOD_LABEL.loyalty_points
+      isCash = false
+    } else if (row.account_id) {
+      key = row.account_id
+      isCash = !!account?.is_cash_drawer
+      label = isCash ? 'Efectivo' : account?.name?.trim() || SHIFT_METHOD_LABEL[method] || method
+    } else {
+      key = method
+      label = SHIFT_METHOD_LABEL[method] ?? method
+      isCash = method === 'cash'
+    }
+
+    const prev = totals.get(key)
+    if (prev) prev.amount += amount
+    else totals.set(key, { key, label, isCash, isPoints, amount })
   }
-  return [...totals.entries()]
-    .map(([method, amount]) => ({ method, amount }))
+  return [...totals.values()]
     .filter(t => t.amount !== 0)
     .sort((a, b) => b.amount - a.amount)
 }

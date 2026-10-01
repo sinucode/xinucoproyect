@@ -1,4 +1,4 @@
-import { getShiftSummary, getActiveShiftDetails, openShift, closeShift, checkoutAppointment } from '../finance'
+import { getShiftSummary, getShiftPaymentsByMethod, getActiveShiftDetails, openShift, closeShift, checkoutAppointment } from '../finance'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 
@@ -126,6 +126,50 @@ describe('Finance Server Actions', () => {
       expect(details?.totalCashMovementsOut).toBe(30)
       // 100 base + 50 cobros + 200 aportes/traslados − 30 retiros/traslados
       expect(details?.expectedCashBalance).toBe(320)
+    })
+  })
+
+  describe('getShiftPaymentsByMethod', () => {
+    // La consulta termina en .neq(...): se resuelve ahí
+    const resolveNeq = (value: unknown) => {
+      mockSupabase.neq = jest.fn().mockResolvedValue(value)
+    }
+
+    it('agrupa por medio de pago del negocio (nombre de la cuenta), no por método', async () => {
+      resolveNeq({
+        data: [
+          { amount: 30000, payment_method: 'transfer', account_id: 'a-nequi', money_accounts: { name: 'Nequi', is_cash_drawer: false } },
+          { amount: '20000', payment_method: 'transfer', account_id: 'a-nequi', money_accounts: [{ name: 'Nequi', is_cash_drawer: false }] },
+          { amount: 10000, payment_method: 'transfer', account_id: 'a-banco', money_accounts: { name: 'Bancolombia', is_cash_drawer: false } },
+          { amount: 5000, payment_method: 'cash', account_id: 'a-caja', money_accounts: { name: 'Caja', is_cash_drawer: true } },
+          { amount: 7000, payment_method: 'cash', account_id: null, money_accounts: null },
+          { amount: 4000, payment_method: 'loyalty_points', account_id: null, money_accounts: null },
+          { amount: 3000, payment_method: 'card', account_id: null, money_accounts: null },
+        ],
+        error: null,
+      })
+
+      const res = await getShiftPaymentsByMethod('shift1')
+      expect(mockSupabase.select).toHaveBeenCalledWith(
+        'amount, payment_method, account_id, money_accounts(name, is_cash_drawer), sales!inner(status)',
+      )
+      expect(res).toEqual([
+        { key: 'a-nequi',  label: 'Nequi',       isCash: false, isPoints: false, amount: 50000 },
+        { key: 'a-banco',  label: 'Bancolombia', isCash: false, isPoints: false, amount: 10000 },
+        { key: 'cash',     label: 'Efectivo',    isCash: true,  isPoints: false, amount: 7000 },
+        { key: 'a-caja',   label: 'Efectivo',    isCash: true,  isPoints: false, amount: 5000 },
+        { key: 'loyalty_points', label: 'Puntos', isCash: false, isPoints: true, amount: 4000 },
+        { key: 'card',     label: 'Tarjeta',     isCash: false, isPoints: false, amount: 3000 },
+      ])
+    })
+
+    it('ante un error devuelve una lista vacía sin lanzar', async () => {
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      resolveNeq({ data: null, error: { message: 'boom' } })
+      expect(await getShiftPaymentsByMethod('shift1')).toEqual([])
+      ;(createClient as jest.Mock).mockRejectedValueOnce(new Error('down'))
+      expect(await getShiftPaymentsByMethod('shift1')).toEqual([])
+      spy.mockRestore()
     })
   })
 

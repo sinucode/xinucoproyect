@@ -219,7 +219,7 @@ function AccountSheet({
 
   const [name, setName] = useState(account?.name ?? '')
   const [kind, setKind] = useState<MoneyAccountKind>(account?.method_kind ?? 'transfer')
-  const [balance, setBalance] = useState(account ? String(Math.max(account.opening_balance, 0)) : '')
+  const [balance, setBalance] = useState(account ? String(Math.max(account.opening_balance, 0)) : '0')
   const [date, setDate] = useState(account?.opening_date ?? today)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()

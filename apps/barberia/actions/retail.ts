@@ -304,7 +304,7 @@ export async function getShiftSales(): Promise<{ sales: ShiftSale[]; error?: str
     .select(
       'id, created_at, total_amount, status, void_reason, appointment_id, ' +
       'customer:customer_id(full_name), seller:seller_staff_id(full_name), ' +
-      'sale_items(description, quantity), payments(payment_method)',
+      'sale_items(description, quantity), payments(payment_method, money_accounts(name, is_cash_drawer))',
     )
     .eq('business_id', businessId)
     .eq('shift_id', shiftId)
@@ -328,12 +328,15 @@ export async function getShiftSales(): Promise<{ sales: ShiftSale[]; error?: str
     customer: One<{ full_name: string }>
     seller: One<{ full_name: string }>
     sale_items: { description: string; quantity: number }[] | null
-    payments: { payment_method: string }[] | null
+    payments: { payment_method: string; money_accounts: One<{ name: string | null; is_cash_drawer: boolean | null }> }[] | null
   }
   const first = <T,>(v: One<T>): T | null => (Array.isArray(v) ? v[0] ?? null : v)
 
   const sales = ((data ?? []) as unknown as Row[]).map((row): ShiftSale => {
-    const method = row.payments?.[0]?.payment_method
+    const payment = row.payments?.[0]
+    const method = payment?.payment_method
+    const account = payment ? first(payment.money_accounts) : null
+    const accountName = account ? (account.is_cash_drawer ? 'Efectivo' : account.name?.trim() || null) : null
     return {
       id:            row.id,
       createdAt:     row.created_at,
@@ -341,6 +344,7 @@ export async function getShiftSales(): Promise<{ sales: ShiftSale[]; error?: str
       sellerName:    first(row.seller)?.full_name ?? null,
       items:         (row.sale_items ?? []).map((i) => ({ description: i.description, quantity: toInt(i.quantity) })),
       paymentMethod: method === 'cash' || method === 'card' || method === 'transfer' ? method : null,
+      paymentAccountName: accountName,
       total:         toInt(row.total_amount),
       status:        row.status === 'voided' ? 'voided' : 'paid',
       voidReason:    row.void_reason ?? null,

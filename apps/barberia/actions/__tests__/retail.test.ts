@@ -283,7 +283,7 @@ describe('retail (Punto de Venta)', () => {
         sales: [{ data: [
           { id: 's1', created_at: '2026-09-30T15:00:00Z', total_amount: 40000, status: 'paid', void_reason: null,
             appointment_id: null, customer: { full_name: 'Luis' }, seller: [{ full_name: 'Ana' }],
-            sale_items: [{ description: 'Cera', quantity: 2 }], payments: [{ payment_method: 'cash' }] },
+            sale_items: [{ description: 'Cera', quantity: 2 }], payments: [{ payment_method: 'transfer', money_accounts: { name: 'Nequi', is_cash_drawer: false } }] },
           { id: 's2', created_at: '2026-09-30T14:00:00Z', total_amount: 25000, status: 'voided', void_reason: 'Error de precio',
             appointment_id: 'a1', customer: null, seller: null,
             sale_items: [{ description: 'Corte', quantity: 1 }], payments: [] },
@@ -292,10 +292,10 @@ describe('retail (Punto de Venta)', () => {
       const r = await getShiftSales()
       expect(r.sales).toEqual([
         { id: 's1', createdAt: '2026-09-30T15:00:00Z', customerName: 'Luis', sellerName: 'Ana',
-          items: [{ description: 'Cera', quantity: 2 }], paymentMethod: 'cash', total: 40000,
+          items: [{ description: 'Cera', quantity: 2 }], paymentMethod: 'transfer', paymentAccountName: 'Nequi', total: 40000,
           status: 'paid', voidReason: null, source: 'pos' },
         { id: 's2', createdAt: '2026-09-30T14:00:00Z', customerName: null, sellerName: null,
-          items: [{ description: 'Corte', quantity: 1 }], paymentMethod: null, total: 25000,
+          items: [{ description: 'Corte', quantity: 1 }], paymentMethod: null, paymentAccountName: null, total: 25000,
           status: 'voided', voidReason: 'Error de precio', source: 'appointment' },
       ])
       const eqs = calls.find(c => c.table === 'sales')!.ops.filter(o => o.op === 'eq').map(o => o.args)

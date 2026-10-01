@@ -1,21 +1,11 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { Landmark, Lock, Unlock, DollarSign, Loader2, AlertTriangle, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { openShift, closeShift, type getActiveShiftDetails } from '@/actions/finance'
 
 // Tipo extraído para el detalle del turno
 type ShiftDetails = Awaited<ReturnType<typeof getActiveShiftDetails>>
-
-const PAYMENT_METHOD_LABEL: Record<string, string> = {
-  cash:           'Efectivo',
-  card:           'Tarjeta',
-  transfer:       'Transferencia',
-  mercadopago:    'Mercado Pago',
-  loyalty_points: 'Puntos',
-  mixed:          'Mixto',
-  other:          'Otro',
-}
 
 interface CashShiftManagerProps {
   initialShiftDetails: ShiftDetails | null
@@ -31,7 +21,11 @@ export function CashShiftManager({
   const [isPending, startTransition] = useTransition()
   
   // Estados locales
+  // El detalle del turno viene del servidor: se sincroniza cuando cambia (p. ej. tras "Mover plata" + router.refresh)
   const [shiftDetails, setShiftDetails] = useState<ShiftDetails | null>(initialShiftDetails)
+  useEffect(() => {
+    setShiftDetails(initialShiftDetails)
+  }, [initialShiftDetails])
   const [showOpenModal, setShowOpenModal] = useState(false)
   const [showCloseModal, setShowCloseModal] = useState(false)
   
@@ -241,13 +235,13 @@ export function CashShiftManager({
               </h4>
               <ul className="divide-y divide-zinc-900 rounded-xl border border-zinc-900 bg-zinc-900/30">
                 {shiftDetails.byMethod.map(m => (
-                  <li key={m.method} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <li key={m.key} className="flex items-center justify-between gap-3 px-4 py-3">
                     <span className="text-sm text-xinuco-text">
-                      {PAYMENT_METHOD_LABEL[m.method] ?? m.method}
-                      {m.method === 'cash' && (
+                      {m.label}
+                      {m.isCash && (
                         <span className="block text-xs text-xinuco-muted">En la caja deberías tener {formatCurrency(shiftDetails.expectedCashBalance)}</span>
                       )}
-                      {m.method === 'loyalty_points' && (
+                      {m.isPoints && (
                         <span className="block text-xs text-xinuco-muted">No es plata: se pagó con puntos</span>
                       )}
                     </span>
