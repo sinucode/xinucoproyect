@@ -27,13 +27,13 @@ export default async function BusinessProfilePage({ params }: { params: Promise<
     .single<ProfileRow>()
 
   return (
-    <div className="flex flex-col gap-6 max-w-3xl mx-auto pb-24">
+    <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto px-4 sm:px-6 py-6">
       <Link
         href={`/${slug}/dashboard/settings`}
-        className="inline-flex items-center gap-1.5 text-xs font-medium text-xinuco-muted hover:text-xinuco-text transition-colors w-fit"
+        className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-xinuco-muted hover:text-xinuco-text transition-colors w-fit"
       >
         <ArrowLeft size={14} />
-        Ajustes
+        Configuración
       </Link>
 
       <AdminPageHeader

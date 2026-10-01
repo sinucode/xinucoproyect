@@ -51,7 +51,7 @@ export default async function LoyaltyPage({
   const overview = await getLoyaltyOverview()
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6">
       {'error' in overview ? (
         <p role="alert" className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3">
           {overview.error}

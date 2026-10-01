@@ -28,7 +28,7 @@ export const FEATURE_CATALOG: Record<keyof BusinessFeatures, FeatureMeta> = {
   walk_ins:               { label: 'Fila de espera',          description: 'Fila de turnos de clientes sin cita previa',                    icon: 'Users',      category: 'operaciones' },
   crm:                    { label: 'CRM Clientes',           description: 'Expediente técnico y notas por cliente',                 icon: 'BookUser',   category: 'operaciones' },
   audit_logs:             { label: 'Auditoría',              description: 'Trail de auditoría inmutable de todas las acciones',     icon: 'Shield',     category: 'compliance' },
-  fixed_assets:           { label: 'Activos Fijos',          description: 'Inventario y depreciación de equipos',                   icon: 'Package',    category: 'compliance' },
+  fixed_assets:           { label: 'Activos fijos',          description: 'Inventario y depreciación de equipos',                   icon: 'Package',    category: 'compliance' },
   inventory:              { label: 'Inventario',             description: 'Control de stock de productos',                         icon: 'Archive',    category: 'operaciones' },
   advanced_reports:       { label: 'Reportes Avanzados',     description: 'Reportes financieros y de rendimiento',                 icon: 'BarChart2',  category: 'finanzas' },
   mercadopago_pos:        { label: 'MP — POS',               description: 'Cobro con MercadoPago en caja presencial',              icon: 'QrCode',     category: 'finanzas' },

@@ -9,11 +9,11 @@ interface AdminPageHeaderProps {
 
 export function AdminPageHeader({ title, subtitle, actionButton, hasData = true }: AdminPageHeaderProps) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b" style={{ borderColor: 'var(--border-color)' }}>
-      <div className="flex flex-col">
-        <h1 className="text-2xl font-serif font-bold text-xinuco-text tracking-wide">{title}</h1>
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+      <div className="flex min-w-0 flex-1 basis-60 flex-col">
+        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-xinuco-text">{title}</h1>
         {subtitle && (
-          <p className="text-sm text-xinuco-muted mt-1" style={{ color: 'var(--primary-color)' }}>
+          <p className="mt-1 text-sm text-xinuco-muted line-clamp-2 sm:line-clamp-none">
             {subtitle}
           </p>
         )}

@@ -48,14 +48,11 @@ export default async function BrandingPage({
   }
 
   return (
-    <div className="flex flex-col gap-6 max-w-3xl mx-auto pb-24">
+    <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto px-4 sm:px-6 py-6">
       {/* Header */}
-      <div
-        className="flex flex-col pb-6 border-b"
-        style={{ borderColor: 'var(--border-color)' }}
-      >
-        <h1 className="text-2xl font-serif font-bold text-xinuco-text tracking-wide">
-          Apariencia y Marca
+      <div className="flex flex-col">
+        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-xinuco-text">
+          Apariencia y marca
         </h1>
         <p className="text-sm text-xinuco-muted mt-1">
           Personaliza los colores y la tipografía de tu negocio. Los cambios se aplican al portal de reservas de tus clientes.

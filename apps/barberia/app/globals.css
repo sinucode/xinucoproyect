@@ -130,7 +130,7 @@ body {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3
            font-semibold text-sm transition-all duration-200
            bg-xinuco-primary text-xinuco-bg
-           hover:opacity-90 hover:scale-[1.02] active:scale-[0.98]
+           hover:opacity-90 active:scale-[0.98]
            disabled:opacity-50 disabled:cursor-not-allowed;
     box-shadow: var(--shadow-glow);
   }
@@ -147,7 +147,6 @@ body {
     @apply rounded-2xl p-5 transition-all duration-200;
     background: var(--secondary-color);
     border: 1px solid var(--border-color);
-    box-shadow: var(--shadow-card);
   }
 
   .input-base {

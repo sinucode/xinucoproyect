@@ -32,9 +32,9 @@ export default async function DashboardLayout({
       .single<Pick<Profile, 'full_name' | 'role'>>(),
     supabase
       .from('businesses')
-      .select('id, name, branding, features_enabled, trial_expires_at')
+      .select('id, name, branding, brand_config, features_enabled, trial_expires_at')
       .eq('slug', slug)
-      .single<Pick<Business, 'id' | 'name' | 'branding' | 'features_enabled' | 'trial_expires_at'>>(),
+      .single<Pick<Business, 'id' | 'name' | 'branding' | 'brand_config' | 'features_enabled' | 'trial_expires_at'>>(),
   ])
 
   const features        = (business?.features_enabled ?? {}) as unknown as BusinessFeatures
@@ -43,8 +43,8 @@ export default async function DashboardLayout({
   return (
     <RoleProvider role={(profile?.role ?? 'barber') as UserRole}>
       <FeaturesProvider features={features} trialExpiresAt={trialExpiresAt}>
-        <DashboardSidebar slug={slug} business={business}>
-          <div className="flex flex-col min-h-screen">
+        <DashboardSidebar slug={slug} business={business} userName={profile?.full_name ?? undefined}>
+          <div className="flex flex-col min-h-dvh">
             {/* Header en desktop y mobile */}
             <Header
               business={business}
@@ -56,7 +56,7 @@ export default async function DashboardLayout({
             <TrialBanner slug={slug} />
 
             {/* Área de contenido principal */}
-            <div className="flex-1 min-w-0 w-full pb-safe-bottom">
+            <div className="flex-1 min-w-0 w-full pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-8">
               {children}
             </div>
 

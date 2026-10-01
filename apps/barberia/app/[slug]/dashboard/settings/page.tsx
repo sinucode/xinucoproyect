@@ -1,14 +1,14 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { Store, CalendarClock, Bell, Palette, Users, CreditCard, ShoppingBag, Gift, ChevronRight, type LucideIcon } from 'lucide-react'
+import { Store, CalendarClock, Bell, Palette, Users, CreditCard, ShoppingBag, Gift, LayoutGrid, ChevronRight, type LucideIcon } from 'lucide-react'
 import { detectCurrentPlan, PLAN_BUNDLES } from '@xinuco/billing-catalog'
 import type { Business, BusinessFeatures } from '@xinuco/types'
 import { requireSettingsAdmin } from '@/lib/settings-guard'
 import { businessTodayISODate } from '@/lib/agenda-time'
-import { bookingStatus, hoursStatus, loyaltyStatus, profileStatus } from '@/lib/settings-status'
+import { bookingStatus, hoursStatus, loyaltyStatus, profileStatus, workstationsStatus } from '@/lib/settings-status'
 
 export const metadata: Metadata = {
-  title: 'Ajustes — Xinuco',
+  title: 'Configuración — Xinuco',
   description: 'Configuración del negocio',
 }
 
@@ -128,7 +128,7 @@ export default async function SettingsPage({
     | 'appointment_interval_minutes' | 'booking_products_enabled' | 'booking_max_product_units'
   > & { loyalty_mode?: string | null }
 
-  const [{ data: biz }, { data: closuresRaw }] = await Promise.all([
+  const [{ data: biz }, { data: closuresRaw }, workstationsRes] = await Promise.all([
     supabase
       .from('businesses')
       .select(
@@ -143,6 +143,12 @@ export default async function SettingsPage({
       .eq('business_id', businessId)
       .gte('date_to', todayKey)
       .order('date_from', { ascending: true }),
+    // Conteo barato de estaciones activas (solo cabeceras, sin filas)
+    supabase
+      .from('workstations')
+      .select('id', { count: 'exact', head: true })
+      .eq('business_id', businessId)
+      .eq('is_active', true),
   ])
 
   if (!biz) return null
@@ -196,6 +202,15 @@ export default async function SettingsPage({
           icon:        ShoppingBag,
           status:      bookingStatus(biz),
         },
+        ...(features.workstations
+          ? [{
+              label:       'Estaciones y espacios',
+              description: 'Lavacabezas, sillón de tinte y otros espacios compartidos',
+              href:        '../workstations',
+              icon:        LayoutGrid,
+              status:      workstationsStatus(workstationsRes.count),
+            }]
+          : []),
         {
           label:       'Notificaciones',
           description: 'Correos de confirmación y recordatorios',
@@ -243,18 +258,15 @@ export default async function SettingsPage({
   ]
 
   return (
-    <div className="flex flex-col gap-8 max-w-4xl mx-auto pb-24">
+    <div className="flex flex-col gap-8 w-full max-w-4xl mx-auto px-4 sm:px-6 py-6">
 
       {/* ── Header ── */}
-      <div
-        className="flex flex-col pb-6 border-b"
-        style={{ borderColor: 'var(--border-color)' }}
-      >
+      <div className="flex flex-col">
         <p className="text-xs font-semibold uppercase tracking-wider text-xinuco-muted mb-1">
           Bienvenido, {fullName?.split(' ')[0] ?? 'Administrador'}
         </p>
-        <h1 className="text-2xl font-serif font-bold text-xinuco-text tracking-wide">
-          Ajustes del Negocio
+        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-xinuco-text">
+          Configuración del negocio
         </h1>
         <p className="text-sm text-xinuco-muted mt-1">
           Configura tu barbería y personaliza la experiencia para tus clientes.

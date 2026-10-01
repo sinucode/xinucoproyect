@@ -1,4 +1,4 @@
-import { bookingStatus, hoursStatus, loyaltyStatus, profileStatus } from '../settings-status'
+import { bookingStatus, hoursStatus, loyaltyStatus, profileStatus, workstationsStatus } from '../settings-status'
 
 const day = (is_open: boolean) => ({ is_open, open_time: '09:00', close_time: '19:00' })
 const hours = {
@@ -93,5 +93,16 @@ describe('loyaltyStatus', () => {
     expect(loyaltyStatus({ enabled: true, mode: 'points' })).toBe('Puntos')
     expect(loyaltyStatus({ enabled: true, mode: 'stamps' })).toBe('Sellos')
     expect(loyaltyStatus({ enabled: false, mode: 'stamps' })).toBe('Apagada')
+  })
+})
+
+describe('workstationsStatus', () => {
+  it('cuenta las estaciones activas', () => {
+    expect(workstationsStatus(3)).toBe('3 estaciones activas')
+    expect(workstationsStatus(1)).toBe('1 estación activa')
+  })
+  it('avisa si no hay ninguna', () => {
+    expect(workstationsStatus(0)).toBe('Aún no hay estaciones')
+    expect(workstationsStatus(null)).toBe('Aún no hay estaciones')
   })
 })

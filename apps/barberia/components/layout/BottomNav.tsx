@@ -1,110 +1,219 @@
 'use client'
 
+import { useCallback, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, CalendarDays, Scissors, Wallet, Settings, UserPlus, type LucideIcon } from 'lucide-react'
+import { Plus, MoreHorizontal, Lock, LogOut, Loader2 } from 'lucide-react'
 import { useFeatures } from '@/lib/features/context'
 import { useIsAdmin } from '@/lib/features/role-context'
-import type { BusinessFeatures } from '@xinuco/types'
-
-interface NavItem {
-  id:        string
-  href:      string
-  icon:      LucideIcon
-  label:     string
-  feature:   keyof BusinessFeatures | null  // null = always visible
-  adminOnly: boolean
-  /** Etiqueta para administradores cuando el mismo ítem lo ven también otros roles. */
-  adminLabel?: string
-  /** Nombre completo para lectores de pantalla cuando la etiqueta visible es corta. */
-  adminAriaLabel?: string
-}
+import { logout } from '@/actions/auth'
+import {
+  bottomBar, isNavActive, toNavRole, visibleQuickActions,
+  type VisibleNavItem,
+} from '@/lib/navigation'
+import { BottomSheet } from '@/components/layout/BottomSheet'
 
 interface BottomNavProps {
   slug: string
 }
 
+const TAB_BASE =
+  'flex min-h-14 w-full flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1 transition-colors'
+
 /**
- * BottomNav — Navegación "One-Hand" optimizada para móvil.
+ * BottomNav — navegación móvil (<768px).
  *
- * Los ítems son alcanzables con el pulgar en pantallas de hasta 6.7".
- * Detecta la ruta activa con usePathname y aplica el color del tenant.
- * Solo muestra ítems cuya feature esté habilitada para el negocio
- * y que el rol del usuario tenga permitido ver.
+ * Admin:  Inicio · Agenda · [+] · Fila (o Clientes) · Más
+ * Barbero: Inicio · Agenda · Fila · Clientes · Mi cuenta (según features)
+ * Toda la información viene de lib/navigation.ts (misma fuente que el sidebar).
  */
 export function BottomNav({ slug }: BottomNavProps) {
   const pathname = usePathname()
   const features = useFeatures()
   const isAdmin  = useIsAdmin()
+  const [moreOpen, setMoreOpen]   = useState(false)
+  const [quickOpen, setQuickOpen] = useState(false)
+  const [isPending, startTransition] = useTransition()
 
-  const allItems: NavItem[] = [
-    { id: 'nav-home',         href: `/${slug}/dashboard`,              icon: Home,         label: 'Inicio',    feature: null,             adminOnly: false },
-    { id: 'nav-appointments', href: `/${slug}/dashboard/appointments`, icon: CalendarDays, label: 'Agenda',    feature: null,             adminOnly: false },
-    { id: 'nav-walk-ins',     href: `/${slug}/dashboard/walk-ins`,     icon: UserPlus,     label: 'Fila',      feature: 'walk_ins',       adminOnly: false },
-    { id: 'nav-services',     href: `/${slug}/dashboard/services`,     icon: Scissors,     label: 'Servicios', feature: null,             adminOnly: true  },
-    // Admin: pagos de todo el equipo. Barbero/manicurista: su propia cuenta.
-    { id: 'nav-ledger',       href: `/${slug}/dashboard/ledger`,       icon: Wallet,       label: 'Mi cuenta', feature: 'staff_ledger',   adminOnly: false, adminLabel: 'Pagos', adminAriaLabel: 'Pagos al equipo' },
-    { id: 'nav-settings',     href: `/${slug}/dashboard/settings`,     icon: Settings,     label: 'Ajustes',   feature: null,             adminOnly: true  },
-  ]
+  const closeMore  = useCallback(() => setMoreOpen(false), [])
+  const closeQuick = useCallback(() => setQuickOpen(false), [])
 
-  const navItems = allItems.filter(
-    (item) =>
-      (item.feature === null || features[item.feature] === true) &&
-      (!item.adminOnly || isAdmin)
-  ).map((item) => ({
-    ...item,
-    label:     isAdmin && item.adminLabel ? item.adminLabel : item.label,
-    ariaLabel: isAdmin ? item.adminAriaLabel : undefined,
-  }))
+  const bar = bottomBar(toNavRole(isAdmin), features)
+  const quickActions = visibleQuickActions(features)
+  const hasMore = bar.moreGroups.length > 0 || bar.moreFooter.length > 0 || isAdmin
+
+  const sheetItems = [...bar.moreGroups.flatMap((g) => g.items), ...bar.moreFooter]
+  const moreActive = sheetItems.some((i) => !i.locked && isNavActive(pathname, i.href(slug)))
+
+  // Admin: los ítems se reparten a ambos lados del "+" (Inicio · Agenda | Fila).
+  const leftItems  = bar.showQuick ? bar.items.slice(0, 2) : bar.items
+  const rightItems = bar.showQuick ? bar.items.slice(2) : []
+
+  const renderTab = (item: VisibleNavItem) => {
+    const href = item.href(slug)
+    const active = isNavActive(pathname, href)
+    return (
+      <li key={item.id} className="flex-1 min-w-0">
+        <Link
+          id={item.id}
+          href={href}
+          aria-label={item.label}
+          aria-current={active ? 'page' : undefined}
+          className={`${TAB_BASE} ${active ? 'text-xinuco-primary' : 'text-xinuco-muted active:text-xinuco-text'}`}
+        >
+          <item.icon size={22} strokeWidth={active ? 2.25 : 1.75} aria-hidden="true" />
+          <span className="max-w-full truncate text-xs font-medium leading-tight">{item.shortLabel ?? item.label}</span>
+        </Link>
+      </li>
+    )
+  }
 
   return (
-    <nav
-      role="navigation"
-      aria-label="Navegación principal"
-      className="fixed bottom-0 inset-x-0 z-50 pb-safe"
-    >
-      {/* Blur overlay */}
-      <div className="glass border-t border-xinuco-border">
-        <ul className="flex items-center justify-around px-2 py-2 max-w-2xl mx-auto">
-          {navItems.map(({ id, href, icon: Icon, label, ariaLabel }) => {
-            const isActive = href.endsWith('/dashboard')
-              ? pathname === href
-              : pathname === href || pathname.startsWith(`${href}/`)
+    <>
+      <nav
+        aria-label="Navegación principal"
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-xinuco-border bg-xinuco-bg/95 backdrop-blur-md pb-[env(safe-area-inset-bottom)]"
+      >
+        <ul className="mx-auto flex max-w-xl items-center justify-around px-1">
+          {leftItems.map(renderTab)}
 
-            return (
-              <li key={id} className="flex-1">
-                <Link
-                  id={id}
-                  href={href}
-                  aria-label={ariaLabel ?? label}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={[
-                    'flex flex-col items-center gap-1 py-1.5 px-2 rounded-xl transition-all duration-200 group',
-                    isActive ? 'text-xinuco-primary' : 'text-xinuco-muted hover:text-xinuco-text',
-                  ].join(' ')}
+          {bar.showQuick && (
+            <li className="flex flex-1 min-w-0 items-center justify-center">
+              <button
+                type="button"
+                id="nav-quick-actions"
+                onClick={() => setQuickOpen(true)}
+                aria-label="Acciones rápidas"
+                aria-haspopup="dialog"
+                aria-expanded={quickOpen}
+                className="-mt-5 flex h-[52px] w-[52px] items-center justify-center rounded-full shadow-lg active:scale-95 transition-transform"
+                style={{ backgroundColor: 'var(--primary-color)', color: 'var(--bg-color)' }}
+              >
+                <Plus size={26} strokeWidth={2.25} aria-hidden="true" />
+              </button>
+            </li>
+          )}
+
+          {rightItems.map(renderTab)}
+
+          {hasMore && (
+            <li className="flex-1 min-w-0">
+              <button
+                type="button"
+                id="nav-more"
+                onClick={() => setMoreOpen(true)}
+                aria-label="Más opciones"
+                aria-haspopup="dialog"
+                aria-expanded={moreOpen}
+                aria-current={moreActive ? 'page' : undefined}
+                className={`${TAB_BASE} ${moreActive ? 'text-xinuco-primary' : 'text-xinuco-muted active:text-xinuco-text'}`}
+              >
+                <MoreHorizontal size={22} strokeWidth={moreActive ? 2.25 : 1.75} aria-hidden="true" />
+                <span className="text-xs font-medium leading-tight">Más</span>
+              </button>
+            </li>
+          )}
+        </ul>
+      </nav>
+
+      {/* ── Acciones rápidas ─────────────────────────────── */}
+      <BottomSheet open={quickOpen} onClose={closeQuick} title="Acciones rápidas">
+        <ul className="flex flex-col gap-2 pt-1">
+          {quickActions.map((a) => (
+            <li key={a.id}>
+              <Link
+                href={a.href(slug)}
+                onClick={closeQuick}
+                className="flex min-h-14 items-center gap-3 rounded-xl border border-xinuco-border bg-xinuco-surface px-3 py-2 active:bg-white/[0.06]"
+              >
+                <span
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+                  style={{ background: 'color-mix(in srgb, var(--primary-color) 15%, transparent)', color: 'var(--primary-color)' }}
                 >
-                  <span
-                    className={[
-                      'flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-200',
-                      isActive
-                        ? 'glow-primary'
-                        : 'group-hover:bg-xinuco-surface',
-                    ].join(' ')}
-                    style={
-                      isActive
-                        ? { background: 'color-mix(in srgb, var(--primary-color) 15%, transparent)' }
-                        : undefined
-                    }
-                  >
-                    <Icon size={20} strokeWidth={isActive ? 2.5 : 1.75} />
-                  </span>
-                  <span className="text-[10px] font-medium leading-none">{label}</span>
-                </Link>
-              </li>
+                  <a.icon size={20} aria-hidden="true" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-xinuco-text">{a.label}</span>
+                  <span className="block text-xs text-xinuco-muted">{a.hint}</span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </BottomSheet>
+
+      {/* ── Más ──────────────────────────────────────────── */}
+      <BottomSheet open={moreOpen} onClose={closeMore} title="Menú">
+        {bar.moreGroups.map((group) => (
+          <section key={group.id} aria-label={group.label ?? 'Más'} className="pt-2">
+            {group.label && (
+              <h3 className="px-1 pb-1.5 pt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-xinuco-muted">
+                {group.label}
+              </h3>
+            )}
+            <ul className="grid grid-cols-3 gap-2">
+              {group.items.map((item) => {
+                const href = item.href(slug)
+                const active = isNavActive(pathname, href) && !item.locked
+                return (
+                  <li key={item.id}>
+                    <Link
+                      href={href}
+                      onClick={closeMore}
+                      aria-current={active ? 'page' : undefined}
+                      className={`relative flex min-h-[84px] h-full w-full flex-col items-center justify-center gap-1.5 rounded-xl border px-2 py-3 text-center transition-colors
+                        ${item.locked ? 'opacity-50' : ''}
+                        ${active
+                          ? 'border-[color-mix(in_srgb,var(--primary-color)_40%,transparent)] bg-[color-mix(in_srgb,var(--primary-color)_10%,transparent)] text-xinuco-text'
+                          : 'border-xinuco-border bg-xinuco-surface text-xinuco-muted active:bg-white/[0.06]'}`}
+                    >
+                      <item.icon
+                        size={22}
+                        strokeWidth={1.75}
+                        aria-hidden="true"
+                        style={active ? { color: 'var(--primary-color)' } : undefined}
+                      />
+                      <span className="line-clamp-2 text-xs font-medium leading-tight">{item.label}</span>
+                      {item.locked && (
+                        <Lock size={12} aria-label="Restringido" className="absolute right-1.5 top-1.5 opacity-70" />
+                      )}
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+        ))}
+
+        <div className="mt-4 flex flex-col gap-2 border-t border-xinuco-border pt-3">
+          {bar.moreFooter.map((item) => {
+            const href = item.href(slug)
+            const active = isNavActive(pathname, href)
+            return (
+              <Link
+                key={item.id}
+                href={href}
+                onClick={closeMore}
+                aria-current={active ? 'page' : undefined}
+                className={`flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-medium
+                  ${active ? 'bg-[color-mix(in_srgb,var(--primary-color)_10%,transparent)] text-xinuco-text' : 'text-xinuco-text active:bg-white/[0.06]'}`}
+              >
+                <item.icon size={22} strokeWidth={1.75} aria-hidden="true" />
+                {item.label}
+              </Link>
             )
           })}
-        </ul>
-      </div>
-    </nav>
+          <button
+            type="button"
+            onClick={() => startTransition(async () => { await logout() })}
+            disabled={isPending}
+            className="flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-medium text-red-500 active:bg-red-500/10 disabled:opacity-50"
+          >
+            {isPending ? <Loader2 size={22} className="animate-spin" /> : <LogOut size={22} strokeWidth={1.75} />}
+            {isPending ? 'Saliendo...' : 'Cerrar sesión'}
+          </button>
+        </div>
+      </BottomSheet>
+    </>
   )
 }

@@ -68,17 +68,17 @@ export default async function LoyaltySettingsPage({
   }
 
   return (
-    <div className="flex flex-col gap-6 max-w-3xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
+    <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto px-4 sm:px-6 py-6">
       <Link
         href={`/${slug}/dashboard/settings`}
         className="flex items-center gap-2 text-sm text-xinuco-muted hover:text-xinuco-text transition-colors self-start"
       >
         <ArrowLeft size={16} />
-        Ajustes
+        Configuración
       </Link>
 
-      <div className="flex flex-col pb-6 border-b" style={{ borderColor: 'var(--border-color)' }}>
-        <h1 className="text-2xl font-serif font-bold text-xinuco-text tracking-wide">Lealtad</h1>
+      <div className="flex flex-col">
+        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-xinuco-text">Lealtad</h1>
         <p className="text-sm text-xinuco-muted mt-1">
           Elige cómo premias a tus clientes. Se gana solo al pagar y se canjea en el cobro.
         </p>

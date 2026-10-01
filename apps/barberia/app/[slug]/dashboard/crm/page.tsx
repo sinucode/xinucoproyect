@@ -63,7 +63,7 @@ export default async function CRMPage({
   const list = await listCustomers({ query, filter, sort, page })
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6">
       <Suspense fallback={<CRMSkeleton />}>
         <CustomerCRM
           customers={list.items}

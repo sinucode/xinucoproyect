@@ -20,6 +20,7 @@ import {
   Globe,
   CalendarClock,
 } from 'lucide-react'
+import { AdminPageHeader } from '@xinuco/ui'
 import { deactivateInventoryItem } from '@/actions/inventory'
 import { INVENTORY_CATEGORIES } from '@/lib/inventory-utils'
 import type { InventoryItem, InventoryCategory } from '@xinuco/types'
@@ -391,48 +392,25 @@ export function InventoryManager({
   return (
     <div className="flex flex-col gap-5">
       {/* Page Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div
-            className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{
-              backgroundColor: 'color-mix(in srgb, var(--primary-color) 12%, transparent)',
-              border:          '1px solid color-mix(in srgb, var(--primary-color) 25%, transparent)',
-            }}
+      <AdminPageHeader
+        title="Inventario"
+        subtitle={
+          items.length > 0
+            ? `${items.length} ${items.length === 1 ? 'producto' : 'productos'} · Stock, compras, conteos y mermas`
+            : 'Stock, compras, conteos y mermas de tus productos'
+        }
+        actionButton={
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex min-h-11 items-center gap-2 text-sm font-bold px-4 py-2.5 rounded-xl transition-opacity hover:opacity-90 flex-shrink-0"
+            style={{ backgroundColor: 'var(--primary-color)', color: '#080808' }}
           >
-            <Package size={22} style={{ color: 'var(--primary-color)' }} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-serif font-bold text-xl text-zinc-100">Inventario</h1>
-              {items.length > 0 && (
-                <span
-                  className="text-[11px] font-bold px-2 py-0.5 rounded-full"
-                  style={{
-                    color:           'var(--primary-color)',
-                    backgroundColor: 'color-mix(in srgb, var(--primary-color) 15%, transparent)',
-                  }}
-                >
-                  {items.length} {items.length === 1 ? 'producto' : 'productos'}
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-zinc-500 mt-0.5">
-              Stock, compras, conteos y mermas de tus productos
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 text-sm font-bold px-4 py-2.5 rounded-xl transition-all hover:scale-105 flex-shrink-0"
-          style={{ backgroundColor: 'var(--primary-color)', color: '#080808' }}
-        >
-          <Plus size={15} />
-          <span className="hidden sm:inline">Agregar producto</span>
-          <span className="sm:hidden">Agregar</span>
-        </button>
-      </div>
+            <Plus size={15} />
+            <span className="hidden sm:inline">Agregar producto</span>
+            <span className="sm:hidden">Agregar</span>
+          </button>
+        }
+      />
 
       {/* Summary Bar */}
       <div className="flex flex-wrap gap-3">
@@ -604,7 +582,7 @@ export function InventoryManager({
           {items.length === 0 && (
             <button
               onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-xl transition-all hover:scale-105"
+              className="flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-xl transition-all"
               style={{
                 backgroundColor: 'color-mix(in srgb, var(--primary-color) 15%, transparent)',
                 color:           'var(--primary-color)',

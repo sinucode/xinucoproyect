@@ -31,7 +31,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-color)]'
 
-const NAV_BTN = `inline-flex h-8 w-8 items-center justify-center text-xinuco-muted hover:text-xinuco-text transition-colors ${FOCUS_RING} focus-visible:ring-inset`
+const NAV_BTN = `inline-flex h-11 w-11 items-center justify-center text-xinuco-muted hover:text-xinuco-text transition-colors ${FOCUS_RING} focus-visible:ring-inset`
 
 /** 'jue 1 oct' (sin puntos), a partir de 'YYYY-MM-DD'. */
 function shortDate(dateKey: string): string {
@@ -45,7 +45,7 @@ function shortDate(dateKey: string): string {
 
 function selectClass(active: boolean): string {
   return [
-    'h-8 w-auto max-w-[8.5rem] truncate rounded-lg border px-2 text-xs bg-transparent cursor-pointer transition-colors',
+    'h-11 w-auto max-w-[9.5rem] truncate rounded-lg border px-2 text-xs bg-transparent cursor-pointer transition-colors',
     FOCUS_RING,
     active
       ? 'border-[var(--primary-color)] text-[var(--primary-color)]'
@@ -122,7 +122,7 @@ export function AgendaFilters({ todayKey, staffOptions, showStaff }: AgendaFilte
           type="button"
           title="Alternar entre Próximas y un día"
           onClick={() => update({ date: isUpcoming ? todayKey : 'upcoming' })}
-          className={`h-8 px-2 text-xs font-medium whitespace-nowrap transition-colors ${FOCUS_RING} focus-visible:ring-inset ${
+          className={`h-11 px-2 text-xs font-medium whitespace-nowrap transition-colors ${FOCUS_RING} focus-visible:ring-inset ${
             isUpcoming ? 'text-xinuco-text' : 'text-[var(--primary-color)]'
           }`}
         >
@@ -187,7 +187,7 @@ export function AgendaFilters({ todayKey, staffOptions, showStaff }: AgendaFilte
           aria-label="Limpiar filtros"
           title="Limpiar filtros"
           onClick={() => router.push(pathname, { scroll: false })}
-          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text transition-colors ${FOCUS_RING}`}
+          className={`inline-flex h-11 w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text transition-colors ${FOCUS_RING}`}
         >
           <X size={14} />
         </button>

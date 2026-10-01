@@ -32,11 +32,11 @@ interface SidePanelProps {
 export function SidePanel({ title, subtitle, icon, onClose, children, footer, wide }: SidePanelProps) {
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
         role="dialog"
         aria-label={title}
-        className={`fixed right-0 top-0 h-full z-50 w-full ${wide ? 'max-w-lg' : 'max-w-md'} flex flex-col shadow-2xl`}
+        className={`fixed right-0 top-0 h-dvh z-50 w-full ${wide ? 'max-w-lg' : 'max-w-md'} flex flex-col shadow-2xl`}
         style={{ backgroundColor: 'var(--bg-color)', borderLeft: '1px solid var(--border-color)' }}
       >
         <div
@@ -67,7 +67,7 @@ export function SidePanel({ title, subtitle, icon, onClose, children, footer, wi
         {children}
 
         {footer && (
-          <div className="px-5 py-4 border-t flex gap-3" style={{ borderColor: 'var(--border-color)' }}>
+          <div className="px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] border-t flex gap-3" style={{ borderColor: 'var(--border-color)' }}>
             {footer}
           </div>
         )}

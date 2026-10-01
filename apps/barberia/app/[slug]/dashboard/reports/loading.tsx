@@ -3,7 +3,7 @@ const BLOCK = { background: 'var(--surface-color, rgba(255,255,255,0.06))' }
 export default function ReportsLoading() {
   return (
     <div
-      className="flex flex-col gap-6 max-w-5xl mx-auto w-full min-w-0 px-4 sm:px-6 py-6 pb-24 animate-pulse"
+      className="flex flex-col gap-6 max-w-5xl mx-auto w-full min-w-0 px-4 sm:px-6 py-6 animate-pulse"
       aria-busy="true"
       aria-label="Cargando reportes"
     >

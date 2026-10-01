@@ -121,7 +121,7 @@ export function FixedAssetsManager({
           <button
             type="button"
             onClick={() => setPanel({ kind: 'create' })}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 text-sm font-bold px-4 py-2.5 rounded-xl transition-all hover:scale-105"
+            className="w-full sm:w-auto flex items-center justify-center gap-2 text-sm font-bold px-4 py-2.5 rounded-xl transition-all"
             style={{ backgroundColor: 'var(--primary-color)', color: '#080808' }}
           >
             <Plus size={15} />
