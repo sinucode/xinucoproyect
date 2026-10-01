@@ -55,6 +55,8 @@ describe('Finance Server Actions', () => {
         totalCashInventoryPurchases: 9,
         totalCashAssetPurchases: 0,
         totalCashAssetSales: 0,
+        totalCashMovementsIn: 0,
+        totalCashMovementsOut: 0,
       })
     })
 
@@ -65,6 +67,8 @@ describe('Finance Server Actions', () => {
       })
       expect(await getShiftSummary('shift1')).toEqual({
         totalSales: 300, totalCashCollected: 50, totalCashExpenses: 0, totalCashTeamPayments: 0, totalCashInventoryPurchases: 0, totalCashAssetPurchases: 0, totalCashAssetSales: 0,
+        totalCashMovementsIn: 0,
+        totalCashMovementsOut: 0,
       })
     })
 
@@ -74,6 +78,8 @@ describe('Finance Server Actions', () => {
 
       expect(await getShiftSummary('shift1')).toEqual({
         totalSales: 0, totalCashCollected: 0, totalCashExpenses: 0, totalCashTeamPayments: 0, totalCashInventoryPurchases: 0, totalCashAssetPurchases: 0, totalCashAssetSales: 0,
+        totalCashMovementsIn: 0,
+        totalCashMovementsOut: 0,
       })
       expect(spy).toHaveBeenCalled()
       spy.mockRestore()
@@ -106,6 +112,20 @@ describe('Finance Server Actions', () => {
       expect(details?.totalCashAssetSales).toBe(15)
       // 100 base + 50 cobros − 40 compra de equipo + 15 venta de equipo
       expect(details?.expectedCashBalance).toBe(125)
+    })
+
+    it('getActiveShiftDetails suma los movimientos que entran a la caja y resta los que salen', async () => {
+      mockSupabase.maybeSingle.mockResolvedValueOnce({ data: { id: 'shift1', opening_balance: 100 }, error: null })
+      mockSupabase.rpc.mockResolvedValueOnce({
+        data: { total_sales: 300, cash_collected: 50, cash_expenses: 0, cash_team_payments: 0, cash_inventory_purchases: 0, cash_movements_in: 200, cash_movements_out: 30 },
+        error: null,
+      })
+
+      const details = await getActiveShiftDetails('b1')
+      expect(details?.totalCashMovementsIn).toBe(200)
+      expect(details?.totalCashMovementsOut).toBe(30)
+      // 100 base + 50 cobros + 200 aportes/traslados − 30 retiros/traslados
+      expect(details?.expectedCashBalance).toBe(320)
     })
   })
 

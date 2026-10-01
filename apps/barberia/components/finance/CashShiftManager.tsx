@@ -220,6 +220,16 @@ export function CashShiftManager({
                   Venta de equipos: +{formatCurrency(shiftDetails.totalCashAssetSales)}
                 </span>
               )}
+              {shiftDetails.totalCashMovementsIn > 0 && (
+                <span className="text-[11px] text-xinuco-muted block mt-1">
+                  Movimientos de la caja (aportes, traslados…): +{formatCurrency(shiftDetails.totalCashMovementsIn)}
+                </span>
+              )}
+              {shiftDetails.totalCashMovementsOut > 0 && (
+                <span className="text-[11px] text-xinuco-muted block mt-1">
+                  Movimientos de la caja (retiros, traslados…): −{formatCurrency(shiftDetails.totalCashMovementsOut)}
+                </span>
+              )}
             </div>
           </div>
 
@@ -407,6 +417,22 @@ export function CashShiftManager({
                     <span>Venta de equipos:</span>
                     <span className="font-semibold text-zinc-300">
                       +{formatCurrency(shiftDetails.totalCashAssetSales)}
+                    </span>
+                  </div>
+                )}
+                {shiftDetails.totalCashMovementsIn > 0 && (
+                  <div className="flex justify-between gap-3 text-xs text-xinuco-muted">
+                    <span>Movimientos de la caja (aportes, traslados…):</span>
+                    <span className="font-semibold text-zinc-300 whitespace-nowrap">
+                      +{formatCurrency(shiftDetails.totalCashMovementsIn)}
+                    </span>
+                  </div>
+                )}
+                {shiftDetails.totalCashMovementsOut > 0 && (
+                  <div className="flex justify-between gap-3 text-xs text-xinuco-muted">
+                    <span>Movimientos de la caja (retiros, traslados…):</span>
+                    <span className="font-semibold text-zinc-300 whitespace-nowrap">
+                      −{formatCurrency(shiftDetails.totalCashMovementsOut)}
                     </span>
                   </div>
                 )}

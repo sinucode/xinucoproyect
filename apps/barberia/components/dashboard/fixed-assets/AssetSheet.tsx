@@ -32,6 +32,7 @@ import type {
   FixedAssetCategory,
 } from '@xinuco/types'
 import { SidePanel, PanelFooter, panelLabelCls as labelCls } from '../inventory/SidePanel'
+import { FundsWarning, useFundsCheck } from '@/components/finance/FundsWarning'
 import { ChoiceButtons, ErrorBox, MoneyInput, formatCOP, inputCls, inputStyle, toInt } from './shared'
 
 interface AssetSheetProps {
@@ -86,6 +87,9 @@ export function AssetSheet({ editAsset, hasOpenShift, onClose, onDone }: AssetSh
   const dateOk    = /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= today && date >= MIN_ASSET_DATE
 
   const suggested = categoryDefaultMonths(category)
+
+  // Aviso de saldo del medio con el que se paga (solo al comprar; editar no mueve plata)
+  const funds = useFundsCheck({ method: payment, amount: priceOk ? priceN : 0, enabled: !isEdit })
 
   // Vista previa inmediata del desgaste
   const preview = priceOk && salvageOk && lifeOk && dateOk
@@ -174,6 +178,7 @@ export function AssetSheet({ editAsset, hasOpenShift, onClose, onDone }: AssetSh
           confirmLabel={isEdit ? 'Guardar cambios' : 'Agregar equipo'}
           confirmIcon={isEdit ? <Save size={14} /> : <Plus size={14} />}
           pending={isPending}
+          disabled={funds.blocked}
         />
       }
     >
@@ -249,6 +254,7 @@ export function AssetSheet({ editAsset, hasOpenShift, onClose, onDone }: AssetSh
               <p className={FIELD_HINT}>
                 Si sale de la caja, se descuenta del cuadre del turno. No se registra en Gastos.
               </p>
+              <FundsWarning check={funds} />
             </>
           )}
         </div>

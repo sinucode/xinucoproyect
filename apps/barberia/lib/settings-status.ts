@@ -80,3 +80,16 @@ export function workstationsStatus(activeCount: number | null | undefined): stri
   if (n <= 0) return 'Aún no hay estaciones'
   return `${n} ${n === 1 ? 'estación activa' : 'estaciones activas'}`
 }
+
+// ── Medios de pago ───────────────────────────────────────────────────────────
+
+/** "Efectivo · Transferencia" — los medios activos, en orden; con muchos: "A · B · C +2". */
+export function paymentMethodsStatus(
+  accounts: { name: string; is_active: boolean }[] | null | undefined,
+): string {
+  const names = (accounts ?? []).filter(a => a.is_active).map(a => a.name.trim()).filter(Boolean)
+  if (names.length === 0) return 'Aún no hay medios'
+  const MAX = 3
+  const shown = names.slice(0, MAX).join(' · ')
+  return names.length > MAX ? `${shown} +${names.length - MAX}` : shown
+}

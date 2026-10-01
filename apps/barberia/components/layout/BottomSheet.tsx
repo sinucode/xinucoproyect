@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { usePathname } from 'next/navigation'
 import { X } from 'lucide-react'
 
@@ -73,7 +74,9 @@ export function BottomSheet({ open, onClose, title, children }: BottomSheetProps
 
   if (!open) return null
 
-  return (
+  // Portal al body: un padre con filtros/transform (p. ej. backdrop-blur) no debe encerrar la hoja
+  if (typeof document === 'undefined') return null
+  return createPortal((
     <div className="fixed inset-0 z-50 md:hidden">
       {/* Fondo: un toque cierra */}
       <div
@@ -107,5 +110,5 @@ export function BottomSheet({ open, onClose, title, children }: BottomSheetProps
         </div>
       </div>
     </div>
-  )
+  ), document.body)
 }

@@ -57,6 +57,9 @@ export async function getShiftSummary(shiftId: string) {
     totalCashInventoryPurchases: num(summary.cash_inventory_purchases),
     totalCashAssetPurchases: num(summary.cash_asset_purchases),
     totalCashAssetSales: num(summary.cash_asset_sales),
+    // Aportes, préstamos, retiros y traslados que tocaron la caja durante el turno ("Mover plata")
+    totalCashMovementsIn: num(summary.cash_movements_in),
+    totalCashMovementsOut: num(summary.cash_movements_out),
   }
 }
 
@@ -124,12 +127,15 @@ export async function getActiveShiftDetails(businessId: string) {
     totalCashInventoryPurchases: summary.totalCashInventoryPurchases,
     totalCashAssetPurchases: summary.totalCashAssetPurchases,
     totalCashAssetSales: summary.totalCashAssetSales,
+    totalCashMovementsIn: summary.totalCashMovementsIn,
+    totalCashMovementsOut: summary.totalCashMovementsOut,
     byMethod,
     // Efectivo esperado = base + cobros en efectivo − gastos pagados con efectivo de la caja
     //                     − pagos/anticipos al equipo pagados con efectivo de la caja
     //                     − compras de inventario pagadas con efectivo de la caja
     //                     − compras de equipos pagadas con efectivo de la caja
     //                     + ventas de equipos cobradas en efectivo a la caja
+    //                     + aportes/traslados que entran a la caja − retiros/traslados que salen de ella
     expectedCashBalance:
       shift.opening_balance +
       summary.totalCashCollected -
@@ -137,7 +143,9 @@ export async function getActiveShiftDetails(businessId: string) {
       summary.totalCashTeamPayments -
       summary.totalCashInventoryPurchases -
       summary.totalCashAssetPurchases +
-      summary.totalCashAssetSales,
+      summary.totalCashAssetSales +
+      summary.totalCashMovementsIn -
+      summary.totalCashMovementsOut,
   }
 }
 
