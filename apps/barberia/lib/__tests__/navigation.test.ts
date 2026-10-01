@@ -96,20 +96,21 @@ describe('bottomBar', () => {
 })
 
 describe('visibleQuickActions', () => {
-  it('muestra las cuatro acciones con todo activo', () => {
+  it('muestra las cinco acciones con todo activo', () => {
     expect(visibleQuickActions(ALL_ON).map((a) => a.label)).toEqual([
-      'Nueva cita', 'Nuevo turno en fila', 'Vender producto', 'Registrar gasto',
+      'Nueva cita', 'Nuevo turno en fila', 'Vender producto', 'Registrar gasto', 'Mover plata',
     ])
   })
   it('solo muestra las acciones cuya feature está activa', () => {
     expect(visibleQuickActions(off('walk_ins', 'expenses_pgl')).map((a) => a.label)).toEqual([
-      'Nueva cita', 'Vender producto',
+      'Nueva cita', 'Vender producto', 'Mover plata',
     ])
   })
   it('las rutas llevan el slug', () => {
     const a = visibleQuickActions(ALL_ON)
     expect(a[0].href('b')).toBe('/b/book')
     expect(a[3].href('b')).toBe('/b/dashboard/expenses?nuevo=1')
+    expect(a[4].href('b')).toBe('/b/dashboard?mover=1')
   })
 })
 

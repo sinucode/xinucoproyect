@@ -1,11 +1,11 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { Store, CalendarClock, Bell, Palette, Users, CreditCard, ShoppingBag, Gift, LayoutGrid, ChevronRight, type LucideIcon } from 'lucide-react'
+import { Store, CalendarClock, Bell, Palette, Users, CreditCard, ShoppingBag, Gift, LayoutGrid, Wallet, ChevronRight, type LucideIcon } from 'lucide-react'
 import { detectCurrentPlan, PLAN_BUNDLES } from '@xinuco/billing-catalog'
 import type { Business, BusinessFeatures } from '@xinuco/types'
 import { requireSettingsAdmin } from '@/lib/settings-guard'
 import { businessTodayISODate } from '@/lib/agenda-time'
-import { bookingStatus, hoursStatus, loyaltyStatus, profileStatus, workstationsStatus } from '@/lib/settings-status'
+import { bookingStatus, hoursStatus, loyaltyStatus, paymentMethodsStatus, profileStatus, workstationsStatus } from '@/lib/settings-status'
 
 export const metadata: Metadata = {
   title: 'Configuración — Xinuco',
@@ -128,7 +128,7 @@ export default async function SettingsPage({
     | 'appointment_interval_minutes' | 'booking_products_enabled' | 'booking_max_product_units'
   > & { loyalty_mode?: string | null }
 
-  const [{ data: biz }, { data: closuresRaw }, workstationsRes] = await Promise.all([
+  const [{ data: biz }, { data: closuresRaw }, workstationsRes, { data: accountsRaw }] = await Promise.all([
     supabase
       .from('businesses')
       .select(
@@ -149,6 +149,13 @@ export default async function SettingsPage({
       .select('id', { count: 'exact', head: true })
       .eq('business_id', businessId)
       .eq('is_active', true),
+    // Medios de pago (para la línea de estado de la tarjeta)
+    (supabase as any)
+      .from('money_accounts')
+      .select('name, is_active')
+      .eq('business_id', businessId)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true }),
   ])
 
   if (!biz) return null
@@ -175,6 +182,13 @@ export default async function SettingsPage({
           icon:        Store,
           status:      profile.text,
           attention:   !profile.complete,
+        },
+        {
+          label:       'Medios de pago',
+          description: 'Efectivo, bancos y billeteras con los que cobras y pagas',
+          href:        './payment-methods',
+          icon:        Wallet,
+          status:      paymentMethodsStatus(accountsRaw as { name: string; is_active: boolean }[] | null),
         },
         {
           label:       'Apariencia y marca',

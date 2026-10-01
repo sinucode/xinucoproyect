@@ -76,4 +76,14 @@ export type {
   DisposalReason,
 } from './database'
 
+export type {
+  MoneyAccountKind,
+  MoneyAccountCustomKind,
+  MoneyAccount,
+  MoneyAccountStatus,
+  MoneyAccountsStatus,
+  AccountMovementKind,
+  AccountMovement,
+} from './money-accounts'
+
 export type { Database as DatabaseGenerated } from './database.types'

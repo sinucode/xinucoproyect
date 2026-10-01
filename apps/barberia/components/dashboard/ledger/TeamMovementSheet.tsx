@@ -13,6 +13,7 @@ import { formatCOP } from '@xinuco/utils'
 import { recordTeamMovement, type TeamMovementInput } from '@/actions/ledger'
 import { TEAM_METHOD_LABELS, TEAM_PAYMENT_METHODS, type TeamReceiptResult } from '@/lib/team-payments'
 import { METHOD_ICONS } from './AccountParts'
+import { FundsWarning, useFundsCheck } from '@/components/finance/FundsWarning'
 
 export type SheetKind = 'settle' | 'advance' | 'adjust'
 
@@ -81,6 +82,8 @@ export function TeamMovementSheet({
   const needsMethod = kind === 'settle' || kind === 'advance'
   const amount = Number(amountDigits)
   const isCash = needsMethod && method === 'cash_register'
+  // Aviso de saldo del medio con el que se paga (liquidación y anticipo; el ajuste no mueve plata)
+  const funds = useFundsCheck({ method, amount, enabled: needsMethod })
 
   // Cerrar con ESC
   useEffect(() => {
@@ -308,6 +311,7 @@ export function TeamMovementSheet({
                   Se resta del efectivo esperado al cerrar la caja.
                 </p>
               )}
+              <FundsWarning check={funds} />
             </div>
           )}
 
@@ -447,7 +451,7 @@ export function TeamMovementSheet({
               </button>
               <button
                 type="submit"
-                disabled={isPending}
+                disabled={isPending || funds.blocked}
                 className="flex-1 btn-primary !py-3"
               >
                 {isPending ? (

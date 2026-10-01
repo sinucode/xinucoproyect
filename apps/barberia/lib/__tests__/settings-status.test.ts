@@ -1,4 +1,4 @@
-import { bookingStatus, hoursStatus, loyaltyStatus, profileStatus, workstationsStatus } from '../settings-status'
+import { bookingStatus, hoursStatus, loyaltyStatus, paymentMethodsStatus, profileStatus, workstationsStatus } from '../settings-status'
 
 const day = (is_open: boolean) => ({ is_open, open_time: '09:00', close_time: '19:00' })
 const hours = {
@@ -104,5 +104,23 @@ describe('workstationsStatus', () => {
   it('avisa si no hay ninguna', () => {
     expect(workstationsStatus(0)).toBe('Aún no hay estaciones')
     expect(workstationsStatus(null)).toBe('Aún no hay estaciones')
+  })
+})
+
+describe('paymentMethodsStatus', () => {
+  const m = (name: string, is_active = true) => ({ name, is_active })
+
+  it('lista los medios activos', () => {
+    expect(paymentMethodsStatus([m('Efectivo'), m('Transferencia')])).toBe('Efectivo · Transferencia')
+  })
+  it('omite los apagados', () => {
+    expect(paymentMethodsStatus([m('Efectivo'), m('Nequi', false)])).toBe('Efectivo')
+  })
+  it('con muchos, resume el resto', () => {
+    expect(paymentMethodsStatus([m('A'), m('B'), m('C'), m('D'), m('E')])).toBe('A · B · C +2')
+  })
+  it('sin datos', () => {
+    expect(paymentMethodsStatus([])).toBe('Aún no hay medios')
+    expect(paymentMethodsStatus(null)).toBe('Aún no hay medios')
   })
 })

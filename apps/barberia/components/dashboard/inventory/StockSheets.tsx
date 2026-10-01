@@ -15,6 +15,7 @@ import {
   type PurchasePayment,
 } from '@/lib/inventory-utils'
 import type { InventoryItem } from '@xinuco/types'
+import { FundsWarning, useFundsCheck } from '@/components/finance/FundsWarning'
 import {
   SidePanel,
   PanelFooter,
@@ -63,6 +64,8 @@ export function PurchaseSheet({
   const costOk   = Number.isFinite(unitCost) && unitCost >= 0
 
   const total = qtyOk && costOk ? quantity * unitCost : null
+  // Aviso de saldo del medio con el que se paga la compra
+  const funds = useFundsCheck({ method: payment, amount: total ?? 0 })
   const newAvg = qtyOk && costOk
     ? weightedAverageCost(item.current_stock, item.unit_cost, quantity, unitCost)
     : null
@@ -105,6 +108,7 @@ export function PurchaseSheet({
           onConfirm={handleSubmit}
           confirmLabel="Registrar compra"
           pending={isPending}
+          disabled={funds.blocked}
         />
       }
     >
@@ -204,6 +208,7 @@ export function PurchaseSheet({
               Se resta del efectivo esperado del turno abierto.
             </p>
           )}
+          <FundsWarning check={funds} />
         </div>
 
         <p className="flex items-start gap-2 text-[11px] text-zinc-500 rounded-lg bg-white/[0.03] px-3 py-2">

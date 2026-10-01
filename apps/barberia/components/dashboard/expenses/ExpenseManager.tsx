@@ -43,6 +43,7 @@ import {
 } from '@/actions/expenses'
 import type { Expense, ExpenseCategoryRow, ExpensePaymentMethod, ProfitLossResult } from '@xinuco/types'
 import { AdminPageHeader, AdminEmptyState } from '@xinuco/ui'
+import { FundsWarning, useFundsCheck } from '@/components/finance/FundsWarning'
 import { formatCOP } from '@xinuco/utils'
 import {
   CATEGORY_PALETTE,
@@ -519,6 +520,8 @@ function ExpenseSheet({
   const [isPending,   startTransition] = useTransition()
 
   const isCash = method === 'cash_register'
+  // Aviso de saldo: solo al crear (un gasto que se edita ya descontó su plata)
+  const funds = useFundsCheck({ method, amount: Number(amountDigits), enabled: !isEdit })
 
   // Cerrar con ESC
   useEffect(() => {
@@ -765,6 +768,7 @@ function ExpenseSheet({
                 Se resta del efectivo esperado al cerrar la caja.
               </p>
             )}
+            <FundsWarning check={funds} />
           </div>
 
           {/* Fecha */}
@@ -825,7 +829,7 @@ function ExpenseSheet({
             >
               Cancelar
             </button>
-            <button type="submit" disabled={isPending} className="flex-1 btn-primary !py-3 flex items-center justify-center gap-2">
+            <button type="submit" disabled={isPending || funds.blocked} className="flex-1 btn-primary !py-3 flex items-center justify-center gap-2">
               {isPending ? (
                 <>
                   <Loader2 size={15} className="animate-spin" />

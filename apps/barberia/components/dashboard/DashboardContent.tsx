@@ -1,11 +1,14 @@
 import { createClient } from '@xinuco/supabase/server'
 import { redirect } from 'next/navigation'
+import type { MoneyAccountsStatus } from '@xinuco/types'
 import { getActiveShiftDetails } from '@/actions/finance'
 import { getUpcomingFixedExpenses } from '@/actions/expenses'
+import { getMoneyAccountsStatus } from '@/actions/money-accounts'
 import { getLowStockItems } from '@/actions/inventory'
 import { UpcomingFixedExpensesNotice } from '@/components/dashboard/expenses/UpcomingFixedExpensesNotice'
 import { LowStockNotice } from '@/components/dashboard/inventory/LowStockNotice'
 import { CashShiftManager } from '@/components/finance/CashShiftManager'
+import { MoneyAccountsCard } from '@/components/finance/MoneyAccountsCard'
 import { RetailSaleButton } from '@/components/finance/RetailSaleButton'
 import { NewAppointmentButton } from '@/components/dashboard/NewAppointmentButton'
 import { InteractiveAgenda } from './InteractiveAgenda'
@@ -41,8 +44,16 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
 
   // 3. Consultar Turno de Caja Activo (Solo para administradores)
   let activeShiftDetails = null
+  let moneyStatus: MoneyAccountsStatus | null = null
   if (isAdmin) {
-    activeShiftDetails = await getActiveShiftDetails(businessId)
+    // 3a. Turno de caja y saldos de cada medio ("Tu plata") en paralelo
+    const [shiftDetails, money] = await Promise.all([
+      getActiveShiftDetails(businessId),
+      getMoneyAccountsStatus(),
+    ])
+    activeShiftDetails = shiftDetails
+    // Si los saldos no cargan, el resto del Inicio sigue funcionando sin la tarjeta
+    moneyStatus = money.data ?? null
   }
 
   // 3b. Gastos fijos que vencen hoy o mañana sin registrar (Solo para administradores)
@@ -116,6 +127,13 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
             businessId={businessId}
             hasInProgressAppointments={hasInProgressAppointments}
           />
+        </section>
+      )}
+
+      {/* Tu plata: saldo de cada medio y movimientos del dueño (Solo para Administrador) */}
+      {isAdmin && moneyStatus && (
+        <section aria-label="Tu plata">
+          <MoneyAccountsCard initialStatus={moneyStatus} />
         </section>
       )}
 

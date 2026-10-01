@@ -6,7 +6,7 @@
 import {
   Home, CalendarDays, UserPlus, ShoppingBag, BookUser, Gift, Users, Wallet,
   Scissors, Archive, Receipt, BookOpen, Package, BarChart2, Shield, Settings,
-  CalendarPlus, type LucideIcon,
+  CalendarPlus, ArrowLeftRight, type LucideIcon,
 } from 'lucide-react'
 import type { BusinessFeatures } from '@xinuco/types'
 
@@ -203,6 +203,8 @@ export const QUICK_ACTIONS: QuickAction[] = [
   { id: 'qa-walk-in',     label: 'Nuevo turno en fila',   hint: 'Anotar a un cliente sin cita',    icon: UserPlus,     href: (s) => `/${s}/dashboard/walk-ins?nuevo=1`, feature: 'walk_ins' },
   { id: 'qa-retail',      label: 'Vender producto',       hint: 'Venta directa de productos',      icon: ShoppingBag,  href: (s) => `/${s}/dashboard/retail`,           feature: 'retail_sales' },
   { id: 'qa-expense',     label: 'Registrar gasto',       hint: 'Anotar un gasto del negocio',     icon: Receipt,      href: (s) => `/${s}/dashboard/expenses?nuevo=1`, feature: 'expenses_pgl' },
+  // Aportes, préstamos y traslados entre medios: abre la hoja "Mover plata" de Inicio
+  { id: 'qa-move-money',  label: 'Mover plata',           hint: 'Aportes, préstamos y traslados',  icon: ArrowLeftRight, href: (s) => `/${s}/dashboard?mover=1`,         feature: null },
 ]
 
 export function visibleQuickActions(features: Partial<BusinessFeatures>): QuickAction[] {
