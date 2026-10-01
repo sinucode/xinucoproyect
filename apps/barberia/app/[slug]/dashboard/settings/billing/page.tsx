@@ -83,7 +83,7 @@ export default async function BillingSettingsPage({
   const subscriptionStatus = mpSub?.status ?? null
 
   return (
-    <div className="flex flex-col gap-8 max-w-3xl mx-auto pb-24">
+    <div className="flex flex-col gap-8 w-full max-w-4xl mx-auto px-4 sm:px-6 py-6">
 
       {/* ── Header ── */}
       <div className="flex flex-col gap-2">
@@ -92,7 +92,7 @@ export default async function BillingSettingsPage({
           className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors w-fit"
         >
           <ChevronLeft size={13} />
-          Volver a Ajustes
+          Volver a Configuración
         </Link>
         <div className="flex items-center gap-3">
           <div

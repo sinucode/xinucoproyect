@@ -827,7 +827,7 @@ function ServiceSheet({
       onClick={(e) => { if (e.target === backdropRef.current) onClose() }}
     >
       <div
-        className="h-full overflow-y-auto animate-slide-in-right w-[95vw] sm:w-[450px]"
+        className="h-dvh overflow-y-auto pb-[env(safe-area-inset-bottom)] animate-slide-in-right w-[95vw] sm:w-[450px]"
         style={{ background: 'var(--bg-color)', borderLeft: '1px solid var(--border-color)' }}
       >
         <div

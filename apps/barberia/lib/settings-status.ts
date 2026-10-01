@@ -72,3 +72,11 @@ export function loyaltyStatus(biz: { enabled: boolean; mode?: string | null }): 
   if (!biz.enabled) return 'Apagada'
   return biz.mode === 'stamps' ? 'Sellos' : 'Puntos'
 }
+
+// ── Estaciones y espacios ────────────────────────────────────────────────────
+
+export function workstationsStatus(activeCount: number | null | undefined): string {
+  const n = activeCount ?? 0
+  if (n <= 0) return 'Aún no hay estaciones'
+  return `${n} ${n === 1 ? 'estación activa' : 'estaciones activas'}`
+}

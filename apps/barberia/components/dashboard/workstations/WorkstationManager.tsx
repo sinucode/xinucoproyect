@@ -439,7 +439,7 @@ function WorkstationSheet({
       onClick={e => { if (e.target === backdropRef.current) onClose() }}
     >
       <div
-        className="h-full overflow-y-auto animate-slide-in-right w-[95vw] sm:w-[420px]"
+        className="h-dvh overflow-y-auto pb-[env(safe-area-inset-bottom)] animate-slide-in-right w-[95vw] sm:w-[420px]"
         style={{ background: 'var(--bg-color)', borderLeft: '1px solid var(--border-color)' }}
       >
         <div

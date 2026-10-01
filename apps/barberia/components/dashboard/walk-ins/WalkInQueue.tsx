@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useTransition, useCallback } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
   Users,
   Plus,
@@ -716,7 +717,7 @@ function WalkInCard({
             {isWaiting && !showAttend && (
               <button
                 onClick={() => setShowAttend(true)}
-                className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-all hover:scale-105"
+                className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-all"
                 style={{
                   color:           'var(--primary-color)',
                   backgroundColor: 'color-mix(in srgb, var(--primary-color) 15%, transparent)',
@@ -730,7 +731,7 @@ function WalkInCard({
             {hasAppointment && !readyToPay && (
               <button
                 onClick={handleFinish}
-                className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-amber-500/15 text-amber-400 transition-all hover:scale-105"
+                className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-amber-500/15 text-amber-400 transition-all"
               >
                 <Flag size={11} />
                 Terminar
@@ -739,7 +740,7 @@ function WalkInCard({
             {hasAppointment && readyToPay && (
               <button
                 onClick={() => onCharge(entry)}
-                className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 transition-all hover:scale-105"
+                className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 transition-all"
               >
                 <Banknote size={11} />
                 Cobrar
@@ -748,7 +749,7 @@ function WalkInCard({
             {entry.status === 'in_progress' && !hasAppointment && (
               <button
                 onClick={handleLegacyComplete}
-                className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 transition-all hover:scale-105"
+                className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 transition-all"
               >
                 <CheckCircle size={11} />
                 Completar
@@ -852,13 +853,13 @@ function AddWalkInSheet({ businessId, staffList, serviceList, serviceAudiences, 
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+        className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
         onClick={onClose}
       />
 
       {/* Panel */}
       <div
-        className="fixed right-0 top-0 h-full z-50 w-full max-w-md flex flex-col shadow-2xl"
+        className="fixed right-0 top-0 h-dvh z-50 w-full max-w-md flex flex-col shadow-2xl"
         style={{ backgroundColor: 'var(--bg-color)', borderLeft: '1px solid var(--border-color)' }}
       >
         {/* Header */}
@@ -975,7 +976,7 @@ function AddWalkInSheet({ businessId, staffList, serviceList, serviceAudiences, 
 
         {/* Footer */}
         <div
-          className="px-5 py-4 border-t flex gap-3"
+          className="px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] border-t flex gap-3"
           style={{ borderColor: 'var(--border-color)' }}
         >
           <button
@@ -990,7 +991,7 @@ function AddWalkInSheet({ businessId, staffList, serviceList, serviceAudiences, 
             type="button"
             onClick={() => formRef.current?.requestSubmit()}
             disabled={isPending}
-            className="flex-1 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all hover:scale-105 disabled:opacity-50 disabled:scale-100"
+            className="flex-1 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
             style={{
               backgroundColor: 'var(--primary-color)',
               color:           '#080808',
@@ -1056,6 +1057,19 @@ export function WalkInQueue({
   const [staffStatus, setStaffStatus] = useState<StaffStatusNow[]>(initialStaffStatus)
   const [suggestions, setSuggestions] = useState<Record<string, WalkInSuggestion[]>>(initialSuggestions)
   const [showAddSheet, setShowAdd]  = useState(false)
+
+  // ?nuevo=1 (acción rápida "+" del menú móvil): abre el formulario y limpia el parámetro
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  useEffect(() => {
+    if (searchParams.get('nuevo') !== '1') return
+    setShowAdd(true)
+    const next = new URLSearchParams(searchParams.toString())
+    next.delete('nuevo')
+    const qs = next.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }, [searchParams, pathname, router])
   const [showHistory, setShowHistory] = useState(false)
   const [checkoutEntry, setCheckoutEntry] = useState<WalkInWithRelations | null>(null)
   const [checkoutWarning, setCheckoutWarning] = useState<string | null>(null)
@@ -1196,7 +1210,7 @@ export function WalkInQueue({
 
         <button
           onClick={() => setShowAdd(true)}
-          className="flex items-center gap-2 text-sm font-bold px-4 py-2.5 rounded-xl transition-all hover:scale-105 flex-shrink-0"
+          className="flex min-h-11 items-center gap-2 text-sm font-bold px-4 py-2.5 rounded-xl transition-colors hover:opacity-90 flex-shrink-0"
           style={{
             backgroundColor: 'var(--primary-color)',
             color:           '#080808',
@@ -1238,7 +1252,7 @@ export function WalkInQueue({
           </div>
           <button
             onClick={() => setShowAdd(true)}
-            className="flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-xl transition-all hover:scale-105"
+            className="flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-xl transition-all"
             style={{
               backgroundColor: 'color-mix(in srgb, var(--primary-color) 15%, transparent)',
               color:           'var(--primary-color)',

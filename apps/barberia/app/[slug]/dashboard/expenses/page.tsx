@@ -64,7 +64,7 @@ export default async function ExpensesPage({
   if ('error' in overview) redirect(`/${slug}/dashboard`)
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6">
       <ExpenseManager
         overview={overview}
         slug={slug}

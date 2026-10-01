@@ -433,7 +433,7 @@ function AdjustSheet({
       aria-label={`Ajustar ${word} de ${customer.full_name}`}
     >
       <div
-        className="w-full max-w-sm h-full overflow-y-auto p-5 flex flex-col gap-5 border-l"
+        className="w-full max-w-sm h-dvh overflow-y-auto p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] flex flex-col gap-5 border-l"
         style={{ background: 'var(--bg-color)', borderColor: 'var(--border-color)' }}
       >
         <div className="flex items-start justify-between gap-3">

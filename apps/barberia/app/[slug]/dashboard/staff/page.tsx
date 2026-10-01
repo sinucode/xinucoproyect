@@ -3,19 +3,33 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
 import { getTeamOverview } from '@/actions/staff'
+import { getCommissionsOverview } from '@/actions/commissions'
 import { StaffManager } from '@/components/dashboard/staff/StaffManager'
+import { StaffTabs } from '@/components/dashboard/staff/StaffTabs'
+import { CommissionsLocked } from '@/components/dashboard/staff/CommissionsLocked'
+import { CommissionManager } from '@/components/dashboard/commissions/CommissionManager'
+import { businessTodayISODate } from '@/lib/agenda-time'
 import { getBusinessBySlug } from '@/actions/businesses'
 import { notFound } from 'next/navigation'
 import { operatingHoursToStaffRows } from '@/lib/business-hours'
-import type { Profile } from '@xinuco/types'
+import type { BusinessFeatures, Profile } from '@xinuco/types'
 
 export const metadata: Metadata = {
   title: 'Equipo — Xinuco',
   description: 'Profesionales, horarios y servicios',
 }
 
-export default async function StaffPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function StaffPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
   const { slug } = await params
+  const sp = await searchParams
+  const rawTab = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab
+  const tab: 'profesionales' | 'comisiones' = rawTab === 'comisiones' ? 'comisiones' : 'profesionales'
 
   // Auth guard
   const supabase = await createClient()
@@ -37,7 +51,46 @@ export default async function StaffPage({ params }: { params: Promise<{ slug: st
   const business = await getBusinessBySlug(slug)
   if (!business) notFound()
 
-  // 1b. Horario del negocio (para "Copiar horario del negocio" al crear un profesional)
+  // Features efectivas (con el override de trial, igual que el sidebar)
+  const { data: biz } = await supabase
+    .from('businesses')
+    .select('features_enabled, trial_expires_at')
+    .eq('id', business.id)
+    .maybeSingle<{ features_enabled: unknown; trial_expires_at: string | null }>()
+  const trialActive = !!biz?.trial_expires_at && new Date(biz.trial_expires_at) > new Date()
+  const features = (biz?.features_enabled ?? {}) as unknown as BusinessFeatures
+  const commissionsEnabled = trialActive || features?.commissions === true
+
+  const wrapper = 'flex flex-col gap-6 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6'
+
+  // ── Pestaña Comisiones ──────────────────────────────────────────────────────
+  if (tab === 'comisiones') {
+    if (!commissionsEnabled) {
+      return (
+        <div className={wrapper}>
+          <StaffTabs slug={slug} active="comisiones" commissionsLocked />
+          <CommissionsLocked slug={slug} />
+        </div>
+      )
+    }
+
+    // El resumen "ganado" ya no se muestra aquí; se pide el mes actual solo por contrato de la acción.
+    const today = businessTodayISODate()
+    const overview = await getCommissionsOverview({ from: `${today.slice(0, 8)}01`, to: today })
+    if ('error' in overview) redirect(`/${slug}/dashboard`)
+
+    return (
+      <div className={wrapper}>
+        <StaffTabs slug={slug} active="comisiones" commissionsLocked={false} />
+        <Suspense fallback={<StaffSkeleton />}>
+          <CommissionManager overview={overview} slug={slug} />
+        </Suspense>
+      </div>
+    )
+  }
+
+  // ── Pestaña Profesionales ───────────────────────────────────────────────────
+  // Horario del negocio (para "Copiar horario del negocio" al crear un profesional)
   const { data: hoursRow } = await supabase
     .from('businesses')
     .select('operating_hours')
@@ -45,12 +98,13 @@ export default async function StaffPage({ params }: { params: Promise<{ slug: st
     .maybeSingle<{ operating_hours: unknown }>()
   const businessSchedule = operatingHoursToStaffRows(hoursRow?.operating_hours)
 
-  // 2. Obtener el equipo (profesionales + horarios + servicios + estado ahora)
+  // El equipo (profesionales + horarios + servicios + estado ahora)
   const overview = await getTeamOverview()
   if ('error' in overview) redirect(`/${slug}/dashboard`)
 
   return (
-    <div className="flex flex-col gap-6 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
+    <div className={wrapper}>
+      <StaffTabs slug={slug} active="profesionales" commissionsLocked={!commissionsEnabled} />
       <Suspense fallback={<StaffSkeleton />}>
         <StaffManager
           businessId={business.id}
@@ -73,7 +127,7 @@ function StaffSkeleton() {
   return (
     <div className="flex flex-col gap-6 animate-pulse">
       {/* Header Skeleton */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b" style={{ borderColor: 'var(--border-color)' }}>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
           <div className="flex flex-col gap-2">

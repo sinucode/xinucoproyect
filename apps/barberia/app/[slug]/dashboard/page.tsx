@@ -2,10 +2,7 @@ import { Suspense }           from 'react'
 import { createClient }        from '@xinuco/supabase/server'
 import { redirect }            from 'next/navigation'
 import type { Metadata }       from 'next'
-import type { Business }       from '@xinuco/types'
 
-import { Header }              from '@/components/layout/Header'
-import { BottomNav }           from '@/components/layout/BottomNav'
 import { DashboardContent }    from '@/components/dashboard/DashboardContent'
 import { DashboardSkeleton }   from '@/components/dashboard/DashboardSkeleton'
 
@@ -39,7 +36,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
 
   return (
     <div className="bg-xinuco-bg">
-      <main className="px-4 py-6 pb-24 space-y-6 max-w-2xl mx-auto">
+      <main className="px-4 py-6 space-y-6 max-w-2xl mx-auto">
         <Suspense fallback={<DashboardSkeleton />}>
           <DashboardContent slug={slug} />
         </Suspense>

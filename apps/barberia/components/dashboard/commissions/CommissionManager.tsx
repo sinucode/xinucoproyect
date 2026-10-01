@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useRef, useEffect, useMemo } from 'react'
-import { useRouter, usePathname } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   Plus,
@@ -23,9 +23,8 @@ import type {
   CommissionRuleWithRelations,
   CommissionRuleInput,
   CommissionsOverview,
-  CommissionSummaryRow,
 } from '@/actions/commissions'
-import { AdminPageHeader, AdminEmptyState } from '@xinuco/ui'
+import { AdminEmptyState } from '@xinuco/ui'
 import { addDaysToDateKey, businessTodayISODate } from '@/lib/agenda-time'
 import { AUDIENCE_LABELS } from '@/lib/service-audience'
 
@@ -38,14 +37,6 @@ function formatCOP(amount: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount)
-}
-
-const MAX_RANGE_DAYS = 366
-
-function daysBetween(from: string, to: string): number {
-  return Math.round(
-    (new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86_400_000,
-  )
 }
 
 // ── Períodos rápidos ──────────────────────────────────────────────────────────
@@ -72,7 +63,7 @@ interface CommissionManagerProps {
 }
 
 export function CommissionManager({ overview, slug }: CommissionManagerProps) {
-  const { rules, staff, services, summary, range } = overview
+  const { rules, staff, services } = overview
   const router = useRouter()
 
   const [modal, setModal] = useState<{ rule: CommissionRuleWithRelations | null } | null>(null)
@@ -92,29 +83,19 @@ export function CommissionManager({ overview, slug }: CommissionManagerProps) {
 
   return (
     <>
-      <AdminPageHeader
-        title="Comisiones"
-        subtitle="Se registran solas al cobrar y quedan en la cuenta de cada profesional."
-        hasData={true}
-        actionButton={
-          <button
-            type="button"
-            onClick={() => setModal({ rule: null })}
-            className="btn-primary flex items-center gap-2 animate-fade-in"
-          >
-            <Plus size={16} strokeWidth={2.5} />
-            <span className="hidden sm:inline">Nueva regla</span>
-            <span className="sm:hidden">Nueva</span>
-          </button>
-        }
-      />
-
-      <EarningsSection
-        summary={summary}
-        range={range}
-        slug={slug}
-        onApplied={() => router.refresh()}
-      />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="min-w-0 flex-1 basis-60 text-sm text-xinuco-muted">
+          Se registran solas al cobrar y quedan en la cuenta de cada profesional.
+        </p>
+        <button
+          type="button"
+          onClick={() => setModal({ rule: null })}
+          className="btn-primary flex items-center gap-2 min-h-11 animate-fade-in"
+        >
+          <Plus size={16} strokeWidth={2.5} />
+          <span>Nueva regla</span>
+        </button>
+      </div>
 
       <RulesSection
         rules={rules}
@@ -123,6 +104,8 @@ export function CommissionManager({ overview, slug }: CommissionManagerProps) {
         onEdit={rule => setModal({ rule })}
         onDeleted={() => router.refresh()}
       />
+
+      <ApplyRulesSection slug={slug} onApplied={() => router.refresh()} />
 
       {modal && (
         <RuleModal
@@ -139,36 +122,19 @@ export function CommissionManager({ overview, slug }: CommissionManagerProps) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// SECCIÓN "GANADO EN EL PERÍODO"
+// APLICAR REGLAS A VENTAS SIN COMISIÓN
+// (lo ganado por período vive en Pagos al equipo y Contabilidad › Por profesional)
 // ════════════════════════════════════════════════════════════════════════════
 
-function EarningsSection({
-  summary,
-  range,
-  slug,
-  onApplied,
-}: {
-  summary:   CommissionSummaryRow[]
-  range:     { from: string; to: string }
-  slug:      string
-  onApplied: () => void
-}) {
+function ApplyRulesSection({ slug, onApplied }: { slug: string; onApplied: () => void }) {
+  const [period, setPeriod] = useState<'month' | 'prev'>('month')
   const [applyMsg, setApplyMsg] = useState<{ text: string; error: boolean } | null>(null)
   const [isApplying, startApply] = useTransition()
 
-  const totals = summary.reduce(
-    (acc, r) => ({
-      services: acc.services + r.services_amount,
-      count:    acc.count + r.services_count,
-      products: acc.products + r.products_amount,
-      tips:     acc.tips + r.tips_amount,
-      total:    acc.total + r.total,
-    }),
-    { services: 0, count: 0, products: 0, tips: 0, total: 0 },
-  )
-
   function handleApply() {
     setApplyMsg(null)
+    const today = businessTodayISODate()
+    const range = period === 'month' ? thisMonthRange(today) : lastMonthRange(today)
     startApply(async () => {
       const result = await applyPendingCommissions(range)
       if ('error' in result) {
@@ -186,264 +152,59 @@ function EarningsSection({
   }
 
   return (
-    <section aria-label="Ganado en el período" className="flex flex-col gap-4">
-      <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-xinuco-text">Ganado en el período</h2>
-        <PeriodBar range={range} />
-      </div>
-
-      {summary.length === 0 ? (
-        <p
-          className="text-sm text-xinuco-muted rounded-xl px-5 py-8 text-center"
-          style={{ border: '1px dashed var(--border-color)' }}
-        >
-          Aún no hay comisiones en este período.
-        </p>
-      ) : (
-        <div
-          className="rounded-xl overflow-hidden animate-fade-in"
-          style={{ border: '1px solid var(--border-color)' }}
-        >
-          {/* Encabezado (solo escritorio) */}
-          <div
-            className="hidden sm:grid grid-cols-[1.4fr_1.2fr_1fr_1fr_1fr] gap-3 px-5 py-3 text-xs font-semibold text-xinuco-muted uppercase tracking-wider"
-            style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
-          >
-            <span>Profesional</span>
-            <span className="text-right">Servicios</span>
-            <span className="text-right">Productos</span>
-            <span className="text-right">Propinas</span>
-            <span className="text-right">Total</span>
-          </div>
-
-          {summary.map(row => (
-            <SummaryRow
-              key={row.staff_id}
-              name={row.staff_name}
-              servicesAmount={row.services_amount}
-              servicesCount={row.services_count}
-              productsAmount={row.products_amount}
-              tipsAmount={row.tips_amount}
-              total={row.total}
-            />
-          ))}
-
-          {summary.length > 1 && (
-            <SummaryRow
-              name="Total"
-              servicesAmount={totals.services}
-              servicesCount={totals.count}
-              productsAmount={totals.products}
-              tipsAmount={totals.tips}
-              total={totals.total}
-              footer
-            />
-          )}
-        </div>
-      )}
-
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <Link
-            href={`/${slug}/dashboard/ledger`}
-            className="inline-flex items-center gap-1 text-sm font-medium hover:underline"
-            style={{ color: 'var(--primary-color)' }}
-          >
-            Ver cuentas y pagos →
-          </Link>
-
-          <button
-            type="button"
-            onClick={handleApply}
-            disabled={isApplying}
-            className="btn-ghost !px-4 !py-2 text-xs disabled:opacity-50"
-          >
-            {isApplying ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-            Aplicar reglas a ventas sin comisión
-          </button>
-        </div>
-
-        <p className="text-xs text-xinuco-muted sm:text-right">
+    <section aria-label="Aplicar reglas a ventas sin comisión" className="flex flex-col gap-3 rounded-xl p-4" style={{ border: '1px solid var(--border-color)' }}>
+      <div>
+        <h2 className="text-sm font-semibold text-xinuco-text">Ventas sin comisión</h2>
+        <p className="text-xs text-xinuco-muted mt-0.5">
           Úsalo si creaste o cambiaste reglas después de cobrar. Lo ya registrado no cambia.
         </p>
-
-        {applyMsg && (
-          <p
-            role="status"
-            className={`text-xs rounded-lg border px-4 py-2.5 animate-fade-in ${
-              applyMsg.error
-                ? 'text-red-400 bg-red-400/10 border-red-400/20'
-                : ''
-            }`}
-            style={applyMsg.error ? undefined : {
-              background:  'rgba(197,160,89,0.08)',
-              borderColor: 'rgba(197,160,89,0.2)',
-              color:       'var(--primary-color)',
-            }}
-          >
-            {applyMsg.text}
-          </p>
-        )}
-      </div>
-    </section>
-  )
-}
-
-function SummaryRow({
-  name,
-  servicesAmount,
-  servicesCount,
-  productsAmount,
-  tipsAmount,
-  total,
-  footer = false,
-}: {
-  name:           string
-  servicesAmount: number
-  servicesCount:  number
-  productsAmount: number
-  tipsAmount:     number
-  total:          number
-  footer?:        boolean
-}) {
-  return (
-    <div
-      className="grid grid-cols-3 sm:grid-cols-[1.4fr_1.2fr_1fr_1fr_1fr] gap-x-3 gap-y-2 px-5 py-4 items-center"
-      style={{
-        borderTop:  '1px solid var(--border-color)',
-        background: footer ? 'var(--surface-color, rgba(255,255,255,0.02))' : undefined,
-      }}
-    >
-      {/* Nombre + total (en móvil comparten la primera línea) */}
-      <div className="col-span-2 sm:col-span-1 font-medium text-sm text-xinuco-text truncate">
-        {name}
-      </div>
-      <div className="sm:hidden text-right text-sm font-bold tabular-nums text-xinuco-text">
-        {formatCOP(total)}
       </div>
 
-      <div className="sm:text-right flex flex-col">
-        <span className="sm:hidden text-[10px] uppercase tracking-wide text-xinuco-muted">Servicios</span>
-        <span className="text-sm tabular-nums text-xinuco-text">{formatCOP(servicesAmount)}</span>
-        <span className="text-[11px] text-xinuco-muted">
-          {servicesCount} {servicesCount === 1 ? 'servicio' : 'servicios'}
-        </span>
-      </div>
-      <div className="sm:text-right flex flex-col">
-        <span className="sm:hidden text-[10px] uppercase tracking-wide text-xinuco-muted">Productos</span>
-        <span className="text-sm tabular-nums text-xinuco-text">{formatCOP(productsAmount)}</span>
-      </div>
-      <div className="sm:text-right flex flex-col">
-        <span className="sm:hidden text-[10px] uppercase tracking-wide text-xinuco-muted">Propinas</span>
-        <span className="text-sm tabular-nums text-xinuco-text">{formatCOP(tipsAmount)}</span>
-      </div>
-      <div className="hidden sm:block text-right text-sm font-bold tabular-nums text-xinuco-text">
-        {formatCOP(total)}
-      </div>
-    </div>
-  )
-}
-
-// ── Barra de período (una línea, actualiza la URL) ───────────────────────────
-
-function PeriodBar({ range }: { range: { from: string; to: string } }) {
-  const router   = useRouter()
-  const pathname = usePathname()
-
-  const today = businessTodayISODate()
-  const month = thisMonthRange(today)
-  const prev  = lastMonthRange(today)
-
-  const active: 'month' | 'prev' | 'custom' =
-    range.from === month.from && range.to === month.to ? 'month'
-    : range.from === prev.from && range.to === prev.to ? 'prev'
-    : 'custom'
-
-  const [showRange, setShowRange] = useState(active === 'custom')
-  const [from, setFrom] = useState(range.from)
-  const [to, setTo]     = useState(range.to)
-  const [error, setError] = useState<string | null>(null)
-
-  // Mantener los inputs sincronizados si el rango cambia desde afuera
-  useEffect(() => { setFrom(range.from); setTo(range.to) }, [range.from, range.to])
-
-  function go(f: string, t: string) {
-    router.push(`${pathname}?from=${f}&to=${t}`, { scroll: false })
-  }
-
-  function pick(r: { from: string; to: string }) {
-    setError(null)
-    setShowRange(false)
-    go(r.from, r.to)
-  }
-
-  function onDates(nextFrom: string, nextTo: string) {
-    setFrom(nextFrom)
-    setTo(nextTo)
-    if (!nextFrom || !nextTo) return
-    if (nextFrom > nextTo) return setError('La fecha inicial no puede ser posterior a la final.')
-    if (daysBetween(nextFrom, nextTo) + 1 > MAX_RANGE_DAYS) {
-      return setError('El período no puede superar 366 días.')
-    }
-    setError(null)
-    go(nextFrom, nextTo)
-  }
-
-  const chip = (isActive: boolean) =>
-    `px-3.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-      isActive ? '' : 'text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.04]'
-    }`
-  const chipStyle = (isActive: boolean) =>
-    isActive
-      ? { background: 'var(--primary-color)', color: '#080808', borderColor: 'var(--primary-color)' }
-      : { borderColor: 'var(--border-color)' }
-
-  return (
-    <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => pick(month)} className={chip(active === 'month')} style={chipStyle(active === 'month')}>
-          Este mes
-        </button>
-        <button type="button" onClick={() => pick(prev)} className={chip(active === 'prev')} style={chipStyle(active === 'prev')}>
-          Mes pasado
-        </button>
+        <select
+          aria-label="Período"
+          value={period}
+          onChange={e => setPeriod(e.target.value as 'month' | 'prev')}
+          className="input-base !w-auto !py-2 !px-3 text-sm min-h-11"
+        >
+          <option value="month">Este mes</option>
+          <option value="prev">Mes pasado</option>
+        </select>
         <button
           type="button"
-          onClick={() => setShowRange(v => !v)}
-          className={chip(active === 'custom')}
-          style={chipStyle(active === 'custom')}
-          aria-expanded={showRange}
+          onClick={handleApply}
+          disabled={isApplying}
+          className="btn-ghost !px-4 !py-2 text-sm min-h-11 disabled:opacity-50"
         >
-          Rango
+          {isApplying ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          Aplicar reglas a ventas sin comisión
         </button>
-
-        {showRange && (
-          <div className="flex items-center gap-2 animate-fade-in">
-            <input
-              type="date"
-              aria-label="Desde"
-              value={from}
-              max={to || undefined}
-              onChange={e => onDates(e.target.value, to)}
-              className="input-base !w-auto !py-1.5 !px-3 text-xs"
-            />
-            <span className="text-xs text-xinuco-muted">a</span>
-            <input
-              type="date"
-              aria-label="Hasta"
-              value={to}
-              min={from || undefined}
-              onChange={e => onDates(from, e.target.value)}
-              className="input-base !w-auto !py-1.5 !px-3 text-xs"
-            />
-          </div>
-        )}
       </div>
 
-      {error && (
-        <p role="alert" className="text-xs text-red-400">{error}</p>
+      <Link
+        href={`/${slug}/dashboard/ledger`}
+        className="inline-flex w-fit items-center gap-1 text-sm font-medium hover:underline"
+        style={{ color: 'var(--primary-color)' }}
+      >
+        Ver cuentas y pagos →
+      </Link>
+
+      {applyMsg && (
+        <p
+          role="status"
+          className={`text-xs rounded-lg border px-4 py-2.5 animate-fade-in ${
+            applyMsg.error ? 'text-red-400 bg-red-400/10 border-red-400/20' : ''
+          }`}
+          style={applyMsg.error ? undefined : {
+            background:  'rgba(197,160,89,0.08)',
+            borderColor: 'rgba(197,160,89,0.2)',
+            color:       'var(--primary-color)',
+          }}
+        >
+          {applyMsg.text}
+        </p>
       )}
-    </div>
+    </section>
   )
 }
 
@@ -799,7 +560,7 @@ function RuleModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="rule-modal-title"
-        className="w-full sm:max-w-md max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl animate-fade-in"
+        className="w-full sm:max-w-md max-h-[92dvh] overflow-y-auto pb-[env(safe-area-inset-bottom)] sm:pb-0 rounded-t-2xl sm:rounded-2xl animate-fade-in"
         style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}
       >
         {/* Header */}

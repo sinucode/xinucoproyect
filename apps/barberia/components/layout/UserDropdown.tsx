@@ -27,15 +27,21 @@ export function UserDropdown({ initials, userName, role }: UserDropdownProps) {
         id="btn-user-avatar"
         onClick={() => setIsOpen(!isOpen)}
         aria-label={userName ? `Perfil de ${userName}` : 'Perfil'}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
         title={userName ?? 'Perfil'}
-        className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-all duration-200 hover:opacity-80 active:scale-95 cursor-pointer"
-        style={{
-          background: 'color-mix(in srgb, var(--primary-color) 20%, transparent)',
-          color:       'var(--primary-color)',
-          border:      '1.5px solid color-mix(in srgb, var(--primary-color) 50%, transparent)',
-        }}
+        className="w-11 h-11 -mr-1 flex items-center justify-center shrink-0 cursor-pointer active:scale-95 transition-transform"
       >
-        {initials}
+        <span
+          className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold hover:opacity-80 transition-opacity"
+          style={{
+            background: 'color-mix(in srgb, var(--primary-color) 20%, transparent)',
+            color:       'var(--primary-color)',
+            border:      '1.5px solid color-mix(in srgb, var(--primary-color) 50%, transparent)',
+          }}
+        >
+          {initials}
+        </span>
       </button>
 
       {isOpen && (
@@ -58,7 +64,7 @@ export function UserDropdown({ initials, userName, role }: UserDropdownProps) {
               <button
                 onClick={handleLogout}
                 disabled={isPending}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-500/10 rounded-lg transition-colors text-left font-medium"
+                className="w-full flex items-center gap-2 px-3 min-h-11 text-sm text-red-500 hover:bg-red-500/10 rounded-lg transition-colors text-left font-medium"
               >
                 {isPending ? <Loader2 size={16} className="animate-spin" /> : <LogOut size={16} />}
                 <span>{isPending ? 'Saliendo...' : 'Cerrar sesión'}</span>

@@ -64,7 +64,7 @@ export default async function ReportsPage({
   const categories = (categoriesRes.data ?? []) as Pick<ExpenseCategoryRow, 'slug' | 'name' | 'color' | 'is_hidden'>[]
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full min-w-0 px-4 sm:px-6 py-6 pb-24">
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full min-w-0 px-4 sm:px-6 py-6">
       <AdminPageHeader
         title="Reportes"
         subtitle="Cómo va el negocio: ganancias, pérdidas y oportunidades."

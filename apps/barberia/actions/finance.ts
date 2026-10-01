@@ -60,6 +60,49 @@ export async function getShiftSummary(shiftId: string) {
   }
 }
 
+export interface ShiftMethodTotal {
+  method: string
+  amount: number
+}
+
+/**
+ * getShiftPaymentsByMethod — Lo cobrado en el turno por medio de pago (sin ventas anuladas).
+ * Nunca tumba el dashboard: ante un error devuelve una lista vacía.
+ */
+export async function getShiftPaymentsByMethod(shiftId: string): Promise<ShiftMethodTotal[]> {
+  let data: unknown = null
+  let error: unknown = null
+  try {
+    const supabase = await createClient()
+    const res = await supabase
+      .from('payments')
+      .select('amount, payment_method, sales!inner(status)')
+      .eq('shift_id', shiftId)
+      .neq('sales.status', 'voided')
+    data = res.data
+    error = res.error
+  } catch (e) {
+    error = e
+  }
+
+  if (error || !Array.isArray(data)) {
+    if (error) console.error('Error fetching shift payments by method:', error)
+    return []
+  }
+
+  const totals = new Map<string, number>()
+  for (const row of data as { amount: number | string | null; payment_method: string | null }[]) {
+    const method = row.payment_method ?? 'other'
+    const amount = Number(row.amount)
+    if (!Number.isFinite(amount)) continue
+    totals.set(method, (totals.get(method) ?? 0) + amount)
+  }
+  return [...totals.entries()]
+    .map(([method, amount]) => ({ method, amount }))
+    .filter(t => t.amount !== 0)
+    .sort((a, b) => b.amount - a.amount)
+}
+
 /**
  * getActiveShiftDetails — Retorna el turno activo junto con su resumen financiero.
  */
@@ -67,7 +110,10 @@ export async function getActiveShiftDetails(businessId: string) {
   const shift = await getActiveShift(businessId)
   if (!shift) return null
 
-  const summary = await getShiftSummary(shift.id)
+  const [summary, byMethod] = await Promise.all([
+    getShiftSummary(shift.id),
+    getShiftPaymentsByMethod(shift.id),
+  ])
 
   return {
     shift,
@@ -78,6 +124,7 @@ export async function getActiveShiftDetails(businessId: string) {
     totalCashInventoryPurchases: summary.totalCashInventoryPurchases,
     totalCashAssetPurchases: summary.totalCashAssetPurchases,
     totalCashAssetSales: summary.totalCashAssetSales,
+    byMethod,
     // Efectivo esperado = base + cobros en efectivo − gastos pagados con efectivo de la caja
     //                     − pagos/anticipos al equipo pagados con efectivo de la caja
     //                     − compras de inventario pagadas con efectivo de la caja

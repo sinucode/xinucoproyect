@@ -14,7 +14,7 @@ interface RetailSaleButtonProps {
 /**
  * RetailSaleButton — Acceso rápido "Venta Rápida" del Dashboard.
  *
- * Abre el mismo Punto de Venta de /retail dentro de un modal (disposición compacta).
+ * Abre la misma Venta de productos de /retail dentro de un modal (disposición compacta).
  * - Con caja abierta: botón habilitado.
  * - Sin caja: botón deshabilitado con tooltip explicativo.
  */
@@ -111,7 +111,7 @@ export function RetailSaleButton({ slug, activeShiftId }: RetailSaleButtonProps)
         )}
       </div>
 
-      {/* Punto de Venta en modal */}
+      {/* Venta de productos en modal */}
       {isOpen && (
         <div
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/75 backdrop-blur-sm animate-fade-in"
@@ -122,7 +122,7 @@ export function RetailSaleButton({ slug, activeShiftId }: RetailSaleButtonProps)
             aria-modal="true"
             aria-labelledby="quick-sale-title"
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl border bg-zinc-950 shadow-2xl text-zinc-100"
+            className="w-full max-w-4xl max-h-[92dvh] flex flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl border bg-zinc-950 shadow-2xl text-zinc-100"
             style={{ borderColor: 'var(--border-color)' }}
           >
             <div className="flex items-center justify-between border-b border-zinc-800 p-4 shrink-0">
@@ -140,7 +140,7 @@ export function RetailSaleButton({ slug, activeShiftId }: RetailSaleButtonProps)
               </button>
             </div>
 
-            <div className="overflow-y-auto p-4">
+            <div className="overflow-y-auto p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
               {loadError ? (
                 <div role="alert" className="p-3 bg-red-950/40 border border-red-900/30 rounded-xl text-red-400 text-sm">
                   {loadError}

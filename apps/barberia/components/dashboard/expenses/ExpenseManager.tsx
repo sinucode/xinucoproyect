@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
   Plus,
   X,
@@ -337,7 +337,7 @@ function ExpenseRow({
 }) {
   const lockedTip = 'Ya se cuadró en un cierre de caja'
   const actionClass =
-    'p-2 rounded-lg text-xinuco-muted transition-colors hover:text-xinuco-text hover:bg-white/[0.05] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-xinuco-muted'
+    'inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted transition-colors hover:text-xinuco-text hover:bg-white/[0.05] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-xinuco-muted'
 
   return (
     <li
@@ -623,7 +623,7 @@ function ExpenseSheet({
       onClick={(e) => { if (e.target === backdropRef.current) onClose() }}
     >
       <div
-        className="h-full overflow-y-auto animate-slide-in-right w-[95vw] sm:w-[440px]"
+        className="h-dvh overflow-y-auto pb-[env(safe-area-inset-bottom)] animate-slide-in-right w-[95vw] sm:w-[440px]"
         style={{ background: 'var(--bg-color)', borderLeft: '1px solid var(--border-color)' }}
       >
         <div
@@ -637,7 +637,7 @@ function ExpenseSheet({
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
             aria-label="Cerrar panel"
           >
             <X size={20} />
@@ -1111,7 +1111,7 @@ function CategoriesSheet({
       onClick={(e) => { if (e.target === backdropRef.current) close() }}
     >
       <div
-        className="h-full overflow-y-auto animate-slide-in-right w-[95vw] sm:w-[440px]"
+        className="h-dvh overflow-y-auto pb-[env(safe-area-inset-bottom)] animate-slide-in-right w-[95vw] sm:w-[440px]"
         style={{ background: 'var(--bg-color)', borderLeft: '1px solid var(--border-color)' }}
         role="dialog"
         aria-modal="true"
@@ -1128,7 +1128,7 @@ function CategoriesSheet({
           <button
             type="button"
             onClick={close}
-            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
             aria-label="Cerrar panel"
           >
             <X size={20} />
@@ -1222,6 +1222,18 @@ export function ExpenseManager({
   const [recurringBusy, setRecurringBusy] = useState<string | null>(null)
   const [pageError, setPageError] = useState<string | null>(null)
 
+  // ?nuevo=1 (acción rápida "+" del menú móvil): abre el formulario y limpia el parámetro
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  useEffect(() => {
+    if (searchParams.get('nuevo') !== '1') return
+    setSheet({ expense: null })
+    const next = new URLSearchParams(searchParams.toString())
+    next.delete('nuevo')
+    const qs = next.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }, [searchParams, pathname, router])
+
   const basePath = `/${slug}/dashboard/expenses`
   function goToMonth(key: string) {
     setFilter('all')
@@ -1294,13 +1306,13 @@ export function ExpenseManager({
             <button
               type="button"
               onClick={() => setCategoriesOpen(true)}
-              className="flex items-center gap-2 !py-2.5 px-4 rounded-lg text-sm font-medium text-xinuco-text border transition-colors hover:bg-white/[0.05]"
+              className="flex min-h-11 items-center gap-2 !py-2.5 px-4 rounded-lg text-sm font-medium text-xinuco-text border transition-colors hover:bg-white/[0.05]"
               style={{ borderColor: 'var(--border-color)' }}
             >
               <Tags size={16} />
               Categorías
             </button>
-            <button type="button" onClick={() => setSheet({ expense: null })} className="btn-primary !py-2.5">
+            <button type="button" onClick={() => setSheet({ expense: null })} className="btn-primary min-h-11 !py-2.5">
               <Plus size={16} />
               Nuevo gasto
             </button>
@@ -1317,7 +1329,7 @@ export function ExpenseManager({
           type="button"
           onClick={() => goToMonth(prevMonthKey)}
           disabled={navPending}
-          className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors disabled:opacity-40"
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors disabled:opacity-40"
           aria-label="Mes anterior"
         >
           <ChevronLeft size={18} />
@@ -1330,7 +1342,7 @@ export function ExpenseManager({
           type="button"
           onClick={() => nextMonthKey && goToMonth(nextMonthKey)}
           disabled={navPending || !nextMonthKey}
-          className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           aria-label="Mes siguiente"
         >
           <ChevronRight size={18} />

@@ -1,6 +1,8 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { ArrowLeft } from 'lucide-react'
 import { createClient } from '@xinuco/supabase/server'
 import { getWorkstationsOverview } from '@/actions/workstations'
 import { WorkstationManager } from '@/components/dashboard/workstations/WorkstationManager'
@@ -47,7 +49,14 @@ export default async function WorkstationsPage({ params }: { params: Promise<{ s
   if ('error' in overview) redirect(`/${slug}/dashboard`)
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 pb-24">
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full px-4 sm:px-6 py-6">
+      <Link
+        href={`/${slug}/dashboard/settings`}
+        className="inline-flex min-h-11 w-fit items-center gap-1.5 text-sm font-medium text-xinuco-muted transition-colors hover:text-xinuco-text"
+      >
+        <ArrowLeft size={14} />
+        Configuración
+      </Link>
       <Suspense fallback={<WorkstationsSkeleton />}>
         <WorkstationManager overview={overview} />
       </Suspense>

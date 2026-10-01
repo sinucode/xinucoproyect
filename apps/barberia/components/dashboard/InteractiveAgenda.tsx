@@ -75,7 +75,7 @@ const COP = new Intl.NumberFormat('es-CO', {
 })
 
 const SECONDARY_BTN =
-  'text-xs px-2.5 py-1.5 rounded-lg border border-xinuco-border text-xinuco-muted hover:text-xinuco-text transition-colors shrink-0'
+  'min-h-11 xl:min-h-0 w-full xl:w-auto inline-flex items-center justify-center text-xs px-3 py-1.5 rounded-lg border border-xinuco-border text-xinuco-muted hover:text-xinuco-text transition-colors shrink-0'
 
 export function InteractiveAgenda({
   appointments: initialAppointments,
@@ -312,10 +312,10 @@ export function InteractiveAgenda({
                   </div>
 
                   {/* Acciones del Administrador en base al estado actual */}
-                  <div className="flex flex-wrap items-center justify-between xl:justify-end gap-2 shrink-0 pt-2 xl:pt-0 border-t border-zinc-900/50 xl:border-0">
+                  <div className="grid grid-cols-2 gap-2 xl:flex xl:flex-wrap xl:items-center xl:justify-end shrink-0 pt-2 xl:pt-0 border-t border-zinc-900/50 xl:border-0">
                     {/* Badge de estado estático */}
                     <span
-                      className={`badge shrink-0 text-[10px] font-bold uppercase tracking-wider ${cfg.textClass}`}
+                      className={`badge col-span-2 xl:col-span-1 justify-self-start shrink-0 text-xs font-bold uppercase tracking-wider ${cfg.textClass}`}
                       style={{ background: 'color-mix(in srgb, currentColor 10%, transparent)' }}
                     >
                       {cfg.label}
@@ -328,7 +328,7 @@ export function InteractiveAgenda({
                           <button
                             onClick={() => handleStatusChange(appt.id, 'in_progress')}
                             disabled={isPending}
-                            className="text-xs px-3.5 py-1.5 rounded-lg bg-[var(--primary-color)] text-black font-bold hover:opacity-90 transition-opacity flex items-center gap-1 shrink-0 shadow-sm"
+                            className="col-span-2 xl:col-span-1 min-h-11 xl:min-h-0 w-full xl:w-auto text-xs px-3.5 py-1.5 rounded-lg bg-[var(--primary-color)] text-black font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-1 shrink-0 shadow-sm"
                           >
                             <Play size={11} fill="black" />
                             Iniciar
@@ -367,10 +367,10 @@ export function InteractiveAgenda({
                           <button
                             onClick={() => handleStatusChange(appt.id, 'ready_to_pay')}
                             disabled={isPending}
-                            className="text-xs px-3.5 py-1.5 rounded-lg bg-emerald-500 text-black font-bold hover:opacity-90 transition-opacity flex items-center gap-1 shrink-0 shadow-sm"
+                            className="col-span-2 xl:col-span-1 min-h-11 xl:min-h-0 w-full xl:w-auto text-xs px-3.5 py-1.5 rounded-lg bg-emerald-500 text-black font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-1 shrink-0 shadow-sm"
                           >
                             <CheckCircle2 size={11} />
-                            Terminar Cita
+                            Terminar cita
                           </button>
                         )}
 
@@ -378,7 +378,7 @@ export function InteractiveAgenda({
                           <button
                             onClick={() => handleOpenCheckout(appt)}
                             disabled={isPending}
-                            className="text-xs px-3.5 py-1.5 rounded-lg bg-amber-400 text-black font-bold hover:opacity-90 transition-opacity flex items-center gap-1 shrink-0 shadow-sm"
+                            className="col-span-2 xl:col-span-1 min-h-11 xl:min-h-0 w-full xl:w-auto text-xs px-3.5 py-1.5 rounded-lg bg-amber-400 text-black font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-1 shrink-0 shadow-sm"
                           >
                             <ArrowRight size={11} strokeWidth={2.5} />
                             Cobrar

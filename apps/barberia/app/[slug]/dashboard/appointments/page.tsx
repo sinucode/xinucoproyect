@@ -233,11 +233,11 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
 
   return (
     <div className="bg-xinuco-bg min-h-screen">
-      <main className="px-4 py-6 pb-24 space-y-6 max-w-2xl mx-auto">
+      <main className="px-4 py-6 space-y-6 max-w-2xl mx-auto">
         <section aria-label="Encabezado de Agenda">
           <div className="flex items-start justify-between gap-3">
             <h1 className="text-2xl font-bold text-xinuco-text">
-              Agenda Completa
+              Agenda
             </h1>
             <NewAppointmentButton slug={slug} />
           </div>

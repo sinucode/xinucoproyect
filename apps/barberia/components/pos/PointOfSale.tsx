@@ -458,7 +458,7 @@ export function PointOfSale({ slug, catalog, compact = false, onSold }: PointOfS
                       onClick={() => changeQuantity(product, -1)}
                       aria-label={`Quitar una unidad de ${product.name}`}
                       disabled={quantity <= 1}
-                      className="p-1.5 text-zinc-400 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center text-zinc-400 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Minus size={12} />
                     </button>
@@ -468,7 +468,7 @@ export function PointOfSale({ slug, catalog, compact = false, onSold }: PointOfS
                       onClick={() => changeQuantity(product, 1)}
                       aria-label={`Agregar una unidad de ${product.name}`}
                       disabled={quantity >= product.available}
-                      className="p-1.5 text-zinc-400 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center text-zinc-400 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Plus size={12} />
                     </button>
@@ -480,7 +480,7 @@ export function PointOfSale({ slug, catalog, compact = false, onSold }: PointOfS
                     type="button"
                     onClick={() => removeProduct(product.id)}
                     aria-label={`Quitar ${product.name} del carrito`}
-                    className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-white/[0.05] transition-colors shrink-0"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-zinc-500 hover:text-red-400 hover:bg-white/[0.05] transition-colors shrink-0"
                   >
                     <Trash2 size={14} />
                   </button>

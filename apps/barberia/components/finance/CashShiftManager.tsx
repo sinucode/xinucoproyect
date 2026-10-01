@@ -7,6 +7,16 @@ import { openShift, closeShift, type getActiveShiftDetails } from '@/actions/fin
 // Tipo extraído para el detalle del turno
 type ShiftDetails = Awaited<ReturnType<typeof getActiveShiftDetails>>
 
+const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  cash:           'Efectivo',
+  card:           'Tarjeta',
+  transfer:       'Transferencia',
+  mercadopago:    'Mercado Pago',
+  loyalty_points: 'Puntos',
+  mixed:          'Mixto',
+  other:          'Otro',
+}
+
 interface CashShiftManagerProps {
   initialShiftDetails: ShiftDetails | null
   businessId: string
@@ -130,17 +140,11 @@ export function CashShiftManager({
       ) : (
         /* ────────────────── CASO 2: TURNO ACTIVO (TARJETA EJECUTIVA) ────────────────── */
         <div 
-          className="card relative overflow-hidden border border-zinc-850 p-6 rounded-2xl bg-zinc-950/85 backdrop-blur-sm shadow-xl"
+          className="card relative overflow-hidden border border-zinc-850 p-4 sm:p-6 rounded-2xl bg-zinc-950/85 backdrop-blur-sm shadow-xl"
           style={{ borderColor: 'color-mix(in srgb, var(--primary-color) 25%, transparent)' }}
         >
-          {/* Luz indicadora de actividad en esquina */}
-          <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-full">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Caja Abierta</span>
-          </div>
-
-          {/* Icono + Titular */}
-          <div className="flex items-center gap-3.5 mb-5">
+          {/* Icono + Titular + estado (en móvil la etiqueta baja bajo el título, sin montarse) */}
+          <div className="flex items-start gap-3.5 mb-5 min-w-0">
             <div 
               className="w-11 h-11 rounded-xl flex items-center justify-center border shrink-0"
               style={{
@@ -150,37 +154,43 @@ export function CashShiftManager({
             >
               <Landmark size={20} style={{ color: 'var(--primary-color)' }} />
             </div>
-            <div>
-              <h3 className="text-base font-bold text-xinuco-text">Turno de Caja Activo</h3>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <h3 className="text-base font-bold text-xinuco-text">Caja abierta</h3>
+                <span className="inline-flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  <span className="text-xs font-semibold text-emerald-400">En curso</span>
+                </span>
+              </div>
               <p className="text-xs text-xinuco-muted mt-0.5">
-                Iniciado el: <span className="text-xinuco-text">{new Date(shiftDetails.shift.opened_at).toLocaleString('es-CO', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })}</span>
+                Desde el <span className="text-xinuco-text">{new Date(shiftDetails.shift.opened_at).toLocaleString('es-CO', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short', timeZone: 'America/Bogota' })}</span>
               </p>
             </div>
           </div>
 
           {/* Grid de Métricas Financieras */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-            <div className="bg-zinc-900/30 border border-zinc-900 p-4 rounded-xl">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+            <div className="bg-zinc-900/30 border border-zinc-900 p-3 sm:p-4 rounded-xl min-w-0">
               <span className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider block mb-1">
-                Base Inicial
+                Base inicial
               </span>
               <span className="text-lg font-bold text-xinuco-text">
                 {formatCurrency(shiftDetails.shift.opening_balance)}
               </span>
             </div>
 
-            <div className="bg-zinc-900/30 border border-zinc-900 p-4 rounded-xl">
+            <div className="bg-zinc-900/30 border border-zinc-900 p-3 sm:p-4 rounded-xl min-w-0">
               <span className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider block mb-1">
-                Total Ventas
+                Ventas del turno
               </span>
               <span className="text-lg font-bold text-[var(--primary-color)]">
                 {formatCurrency(shiftDetails.totalSales)}
               </span>
             </div>
 
-            <div className="bg-zinc-900/30 border border-zinc-900 p-4 rounded-xl">
+            <div className="col-span-2 sm:col-span-1 bg-zinc-900/30 border border-zinc-900 p-3 sm:p-4 rounded-xl min-w-0">
               <span className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider block mb-1">
-                Efectivo Esperado
+                Efectivo esperado
               </span>
               <span className="text-lg font-bold text-xinuco-text">
                 {formatCurrency(shiftDetails.expectedCashBalance)}
@@ -213,6 +223,31 @@ export function CashShiftManager({
             </div>
           </div>
 
+          {/* Plata del turno por medio de pago */}
+          {shiftDetails.byMethod.length > 0 && (
+            <div className="mb-6">
+              <h4 className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider mb-2">
+                Cobrado por medio de pago
+              </h4>
+              <ul className="divide-y divide-zinc-900 rounded-xl border border-zinc-900 bg-zinc-900/30">
+                {shiftDetails.byMethod.map(m => (
+                  <li key={m.method} className="flex items-center justify-between gap-3 px-4 py-3">
+                    <span className="text-sm text-xinuco-text">
+                      {PAYMENT_METHOD_LABEL[m.method] ?? m.method}
+                      {m.method === 'cash' && (
+                        <span className="block text-xs text-xinuco-muted">En la caja deberías tener {formatCurrency(shiftDetails.expectedCashBalance)}</span>
+                      )}
+                      {m.method === 'loyalty_points' && (
+                        <span className="block text-xs text-xinuco-muted">No es plata: se pagó con puntos</span>
+                      )}
+                    </span>
+                    <span className="text-sm font-bold text-xinuco-text tabular-nums whitespace-nowrap">{formatCurrency(m.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* Botón Cierre */}
           <div className="flex justify-end border-t border-zinc-900 pt-4">
             <button
@@ -224,7 +259,7 @@ export function CashShiftManager({
               className="px-4 py-2 rounded-xl text-xs font-bold border border-zinc-800 text-zinc-300 hover:text-zinc-150 hover:bg-white/[0.04] transition-all flex items-center gap-2"
             >
               <Lock size={13} />
-              Cerrar Turno de Caja (Arqueo)
+              Cerrar caja (arqueo)
             </button>
           </div>
         </div>

@@ -360,7 +360,7 @@ export function CheckoutModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
       <div 
-        className="w-full max-w-lg overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl text-zinc-100 flex flex-col max-h-[90vh]"
+        className="w-full max-w-lg overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl text-zinc-100 flex flex-col max-h-[90dvh]"
         style={{ borderColor: 'var(--border-color)' }}
       >
         {/* Header del Modal */}
@@ -373,7 +373,7 @@ export function CheckoutModal({
           </div>
           <button
             onClick={loyaltyWarning ? onSuccess : onClose}
-            className="p-1 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
             title="Cerrar modal"
           >
             <X size={20} />
@@ -562,7 +562,7 @@ export function CheckoutModal({
                           onClick={() => handleChangeQuantity(idx, -1)}
                           aria-label={`Quitar una unidad de ${item.description}`}
                           disabled={item.quantity <= 1}
-                          className="p-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="inline-flex min-h-11 min-w-11 items-center justify-center text-zinc-400 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
                           title="Quitar una unidad"
                         >
                           <Minus size={12} />
@@ -572,7 +572,7 @@ export function CheckoutModal({
                           type="button"
                           onClick={() => handleChangeQuantity(idx, 1)}
                           aria-label={`Agregar una unidad de ${item.description}`}
-                          className="p-1 text-zinc-400 hover:text-zinc-100"
+                          className="inline-flex min-h-11 min-w-11 items-center justify-center text-zinc-400 hover:text-zinc-100"
                           title="Agregar una unidad"
                         >
                           <Plus size={12} />
@@ -584,7 +584,7 @@ export function CheckoutModal({
                     </span>
                     <button
                       onClick={() => handleRemoveItem(idx)}
-                      className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-white/[0.05] transition-colors"
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-zinc-500 hover:text-red-400 hover:bg-white/[0.05] transition-colors"
                       title="Eliminar del ticket"
                     >
                       <Trash size={14} />
