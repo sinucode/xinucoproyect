@@ -6,6 +6,7 @@ import { getTeamOverview } from '@/actions/staff'
 import { StaffManager } from '@/components/dashboard/staff/StaffManager'
 import { getBusinessBySlug } from '@/actions/businesses'
 import { notFound } from 'next/navigation'
+import { operatingHoursToStaffRows } from '@/lib/business-hours'
 import type { Profile } from '@xinuco/types'
 
 export const metadata: Metadata = {
@@ -36,6 +37,14 @@ export default async function StaffPage({ params }: { params: Promise<{ slug: st
   const business = await getBusinessBySlug(slug)
   if (!business) notFound()
 
+  // 1b. Horario del negocio (para "Copiar horario del negocio" al crear un profesional)
+  const { data: hoursRow } = await supabase
+    .from('businesses')
+    .select('operating_hours')
+    .eq('id', business.id)
+    .maybeSingle<{ operating_hours: unknown }>()
+  const businessSchedule = operatingHoursToStaffRows(hoursRow?.operating_hours)
+
   // 2. Obtener el equipo (profesionales + horarios + servicios + estado ahora)
   const overview = await getTeamOverview()
   if ('error' in overview) redirect(`/${slug}/dashboard`)
@@ -49,6 +58,7 @@ export default async function StaffPage({ params }: { params: Promise<{ slug: st
           services={overview.services}
           todayKey={overview.todayKey}
           linkableUsers={overview.linkableUsers}
+          businessSchedule={businessSchedule}
         />
       </Suspense>
     </div>

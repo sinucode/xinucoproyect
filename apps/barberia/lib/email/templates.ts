@@ -15,6 +15,14 @@ export interface EmailBrand {
   primaryColor?: string | null
   /** URL pública de reservas (botón "Reservar otra cita"). */
   bookingUrl?:   string | null
+  /** Dirección (con ciudad) del negocio, si la configuró. */
+  address?:      string | null
+  /** Enlace https de Google Maps ("Cómo llegar"). */
+  mapsUrl?:      string | null
+  /** Enlace de WhatsApp (https://wa.me/…). */
+  whatsappUrl?:  string | null
+  /** Número de WhatsApp para mostrar (p. ej. "300 123 4567"). */
+  whatsappLabel?: string | null
 }
 
 interface Theme {
@@ -257,6 +265,27 @@ function productRows(
   }))
 }
 
+/** Filas "Dirección" y "WhatsApp" (con enlaces https) a partir de los datos de contacto de la marca. */
+function contactRows(brand: EmailBrand | undefined, theme: Theme): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = []
+  const maps = safeHttpsUrl(brand?.mapsUrl)
+  const address = brand?.address?.trim()
+  if (address) {
+    const link = maps
+      ? `<br><a href="${escapeHtml(maps)}" target="_blank" style="color:${theme.accentText};font-weight:600;">Cómo llegar</a>`
+      : ''
+    rows.push({ label: 'Dirección', value: `${escapeHtml(address)}${link}` })
+  } else if (maps) {
+    rows.push({ label: 'Cómo llegar', value: `<a href="${escapeHtml(maps)}" target="_blank" style="color:${theme.accentText};font-weight:600;">Abrir en Google Maps</a>` })
+  }
+  const wa = safeHttpsUrl(brand?.whatsappUrl)
+  if (wa) {
+    const label = brand?.whatsappLabel?.trim() || 'Escríbenos'
+    rows.push({ label: 'WhatsApp', value: `<a href="${escapeHtml(wa)}" target="_blank" style="color:${theme.accentText};font-weight:600;">${escapeHtml(label)}</a>` })
+  }
+  return rows
+}
+
 // ── 1. Correo de confirmación de cita ────────────────────────────────────────
 
 export function appointmentConfirmationEmail(data: {
@@ -292,6 +321,7 @@ export function appointmentConfirmationEmail(data: {
   if (data.businessPhone) {
     detailRows.push({ label: 'Teléfono', value: escapeHtml(data.businessPhone) })
   }
+  detailRows.push(...contactRows(data.brand, theme))
 
   const productsNote = products.length > 0
     ? 'Te guardamos los productos apartados hasta el día de tu cita; los pagas en el local.<br>'
@@ -335,6 +365,7 @@ export function appointmentReminderEmail(data: {
   if (data.businessPhone) {
     detailRows.push({ label: 'Teléfono', value: escapeHtml(data.businessPhone) })
   }
+  detailRows.push(...contactRows(data.brand, theme))
 
   const content = `
     ${heading(

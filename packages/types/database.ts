@@ -84,8 +84,18 @@ export interface Business {
   branding:         BusinessBranding
   features_enabled: BusinessFeatures
   brand_config:     BrandConfig        // JSONB — tema visual del tenant
-  operating_hours?: OperatingHours     // JSONB
+  operating_hours?: OperatingHours | null  // JSONB — horario del negocio (se muestra en la página de reservas)
   workstations_count?: number          // INT — deprecado: usar tabla workstations
+  // ── Datos de contacto (públicos) ─────────────────────────────────────────
+  address?:   string | null            // ≤ 160
+  city?:      string | null            // ≤ 80
+  whatsapp?:  string | null            // solo dígitos, 7–15
+  phone?:     string | null            // solo dígitos, 7–15
+  instagram?: string | null            // usuario sin @ ([A-Za-z0-9._]{1,30})
+  maps_url?:  string | null            // https://… ≤ 300
+  // ── Datos privados (facturación / contador) — nunca se exponen en la página pública ──
+  tax_id?:     string | null           // NIT o cédula, ≤ 30
+  legal_name?: string | null           // razón social, ≤ 120
   // ── Configuración operativa ──────────────────────────────────────────────
   appointment_interval_minutes?: number  // 15 | 30 — granularidad de slots en el calendario
   service_audiences?: ServiceAudience[]  // TEXT[] — públicos que atiende ('men' | 'women' | 'kids'); por defecto ['men']
@@ -258,6 +268,20 @@ export interface StaffTimeOff {
   kind:        StaffTimeOffKind
   reason:      string | null   // ≤ 200 chars
   created_by:  string | null   // → auth.users.id
+  created_at:  string
+}
+
+// ---------- Tabla: business_closures (días cerrados del negocio) ----------
+export type BusinessClosureKind = 'holiday' | 'custom'
+
+export interface BusinessClosure {
+  id:          string
+  business_id: string
+  date_from:   string   // 'YYYY-MM-DD'
+  date_to:     string   // 'YYYY-MM-DD' (máx. 60 días después de date_from)
+  kind:        BusinessClosureKind
+  reason:      string   // 2–80 caracteres
+  created_by:  string | null
   created_at:  string
 }
 

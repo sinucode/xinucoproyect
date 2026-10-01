@@ -4,6 +4,8 @@ import { createClient, createAdminClient }      from '@xinuco/supabase/server'
 import { revalidatePath }    from 'next/cache'
 import { Database }          from '@xinuco/types'
 import type { BusinessInsert, BusinessFeatures, BrandConfig, BusinessBranding, Json } from '@xinuco/types'
+import { validateBusinessProfile, type BusinessProfileInput } from '@/lib/business-profile'
+import { isValidBookingInterval } from '@/lib/booking-settings'
 
 // ── Tipos de resultado compartidos ────────────────────────────────────────────
 
@@ -147,31 +149,54 @@ export async function updateBusinessTheme(businessId: string, config: BrandConfi
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
+// Autorización de la configuración del negocio
+// La RLS de businesses solo deja actualizar al admin (un UPDATE de otro rol afecta 0 filas en
+// silencio), pero la restricción se repite aquí: el business_id sale SIEMPRE del perfil
+// (nunca del cliente) y se detecta el caso de 0 filas.
+// ════════════════════════════════════════════════════════════════════════════════
+
+const NOT_ADMIN = 'Solo un administrador puede cambiar la configuración del negocio.'
+const NOT_SAVED = 'No se pudo guardar: solo un administrador puede cambiar esto.'
+
+type Supabase = Awaited<ReturnType<typeof createClient>>
+
+async function requireAdmin(): Promise<{ supabase: Supabase; businessId: string } | { error: string }> {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: NOT_ADMIN }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, business_id')
+    .eq('id', user.id)
+    .single()
+
+  const role = (profile as { role?: string } | null)?.role
+  const businessId = (profile as { business_id?: string | null } | null)?.business_id
+  if ((role !== 'admin' && role !== 'super_admin') || !businessId) return { error: NOT_ADMIN }
+
+  return { supabase, businessId }
+}
+
+function revalidateBusinessPages() {
+  revalidatePath('/[slug]/dashboard', 'layout')
+  revalidatePath('/[slug]/book', 'page')
+  revalidatePath('/[slug]', 'page')
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
 // updateBusinessBranding — Actualiza la columna `branding` (JSONB) del tenant
 // ════════════════════════════════════════════════════════════════════════════════
 
 export async function updateBusinessBranding(
-  businessId: string,
-  branding:   Partial<BusinessBranding>,
+  branding: Partial<BusinessBranding>,
 ): Promise<ActionResult> {
-  const supabase = await createClient()
+  const auth = await requireAdmin()
+  if ('error' in auth) return { error: auth.error }
+  const { supabase, businessId } = auth
 
-  // 1. Verificar sesión
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'No autenticado. Inicia sesión para continuar.' }
-
-  // 2. Verificar que el usuario pertenezca a este negocio (Anti-IDOR)
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('business_id')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile || profile.business_id !== businessId) {
-    return { error: 'Autorización denegada.' }
-  }
-
-  // 3. Leer el branding actual para hacer merge (no pisar campos existentes)
+  // Leer el branding actual para hacer merge (no pisar campos existentes)
   const { data: biz, error: fetchError } = await supabase
     .from('businesses')
     .select('branding')
@@ -183,104 +208,68 @@ export async function updateBusinessBranding(
   const current = (biz.branding ?? {}) as unknown as BusinessBranding
   const merged: BusinessBranding = { ...current, ...branding }
 
-  // 4. Persistir el JSONB fusionado
-  const { error: updateError } = await supabase
+  // Persistir el JSONB fusionado
+  const { data: updated, error: updateError } = await supabase
     .from('businesses')
     .update({ branding: merged as unknown as Record<string, Json> })
     .eq('id', businessId)
+    .select('id')
 
   if (updateError) return { error: updateError.message }
+  if (!updated || updated.length === 0) return { error: NOT_SAVED }
 
-  revalidatePath('/[slug]/dashboard', 'layout')
+  revalidateBusinessPages()
   return { success: true }
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// updateBusinessInfo — Actualiza campos básicos del negocio (nombre, etc.)
+// updateBusinessProfile — Datos del negocio (nombre, contacto público y datos privados
+// para facturación). La validación vive en lib/business-profile.ts (espejo de los CHECK).
 // ════════════════════════════════════════════════════════════════════════════════
 
-export async function updateBusinessInfo(
-  businessId: string,
-  info:        { name?: string },
-): Promise<ActionResult> {
-  const supabase = await createClient()
+export async function updateBusinessProfile(input: BusinessProfileInput): Promise<ActionResult> {
+  const auth = await requireAdmin()
+  if ('error' in auth) return { error: auth.error }
+  const { supabase, businessId } = auth
 
-  // 1. Verificar sesión
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'No autenticado. Inicia sesión para continuar.' }
+  const checked = validateBusinessProfile(input)
+  if (!checked.ok) return { error: checked.error }
 
-  // 2. Verificar que el usuario pertenezca a este negocio (Anti-IDOR)
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('business_id')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile || profile.business_id !== businessId) {
-    return { error: 'Autorización denegada.' }
-  }
-
-  // 3. Validar que el nombre no esté vacío si se provee
-  if (info.name !== undefined && !info.name.trim()) {
-    return { error: 'El nombre del negocio no puede estar vacío.' }
-  }
-
-  const payload: { name?: string } = {}
-  if (info.name !== undefined) payload.name = info.name.trim()
-
-  if (Object.keys(payload).length === 0) {
-    return { success: true }  // Nada que actualizar
-  }
-
-  const { error: updateError } = await supabase
+  const { data: updated, error: updateError } = await supabase
     .from('businesses')
-    .update(payload)
+    .update(checked.value)
     .eq('id', businessId)
+    .select('id')
 
   if (updateError) return { error: updateError.message }
+  if (!updated || updated.length === 0) return { error: NOT_SAVED }
 
-  revalidatePath('/[slug]/dashboard', 'layout')
+  revalidatePath('/[slug]/dashboard/settings', 'layout')
+  revalidateBusinessPages()
   return { success: true }
 }
 
-
 // ════════════════════════════════════════════════════════════════════════════════
-// updateBookingSettings — Límites de productos apartados en la reserva en línea
-// (Los límites se hacen cumplir en la BD: create_public_booking / get_bookable_products.)
+// updateBookingSettings — Reservas en línea: intervalo entre horarios y límites de
+// productos apartados. (Los límites se hacen cumplir en la BD: create_public_booking /
+// get_bookable_products.)
 // ════════════════════════════════════════════════════════════════════════════════
 
 export interface BookingSettingsInput {
   booking_products_enabled:                 boolean
   booking_max_product_units:                number   // 0–50 (0 desactiva la función)
   booking_max_open_with_products_per_phone: number   // 0–50 (0 = sin límite)
+  appointment_interval_minutes:             number   // 15 | 20 | 30 | 60
 }
 
 export async function updateBookingSettings(
-  businessId: string,
-  settings:   BookingSettingsInput,
+  settings: BookingSettingsInput,
 ): Promise<ActionResult> {
-  const supabase = await createClient()
+  const auth = await requireAdmin()
+  if ('error' in auth) return { error: auth.error }
+  const { supabase, businessId } = auth
 
-  // 1. Verificar sesión
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'No autenticado. Inicia sesión para continuar.' }
-
-  // 2. Solo un admin de ESTE negocio (Anti-IDOR)
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('business_id, role')
-    .eq('id', user.id)
-    .single()
-
-  if (
-    !profile ||
-    profile.business_id !== businessId ||
-    (profile.role !== 'admin' && profile.role !== 'super_admin')
-  ) {
-    return { error: 'Autorización denegada.' }
-  }
-
-  // 3. Validar
+  // Validar
   if (typeof settings.booking_products_enabled !== 'boolean') {
     return { error: 'Valor inválido para permitir productos.' }
   }
@@ -293,20 +282,27 @@ export async function updateBookingSettings(
       return { error: `${label} debe ser un entero entre 0 y 50.` }
     }
   }
+  if (!isValidBookingInterval(settings.appointment_interval_minutes)) {
+    return { error: 'El intervalo entre horarios debe ser de 15, 20, 30 o 60 minutos.' }
+  }
 
-  // 4. Persistir (RLS tenant: solo su propio negocio)
-  const { error: updateError } = await supabase
+  // Persistir (RLS tenant: solo su propio negocio)
+  const { data: updated, error: updateError } = await supabase
     .from('businesses')
     .update({
       booking_products_enabled:                 settings.booking_products_enabled,
       booking_max_product_units:                settings.booking_max_product_units,
       booking_max_open_with_products_per_phone: settings.booking_max_open_with_products_per_phone,
+      appointment_interval_minutes:             settings.appointment_interval_minutes,
     })
     .eq('id', businessId)
+    .select('id')
 
   if (updateError) return { error: updateError.message }
+  if (!updated || updated.length === 0) return { error: NOT_SAVED }
 
   revalidatePath('/[slug]/dashboard/settings/booking', 'page')
+  revalidatePath('/[slug]/dashboard/appointments', 'page')
   revalidatePath('/[slug]/book', 'page')
   revalidatePath('/[slug]', 'page')
   return { success: true }

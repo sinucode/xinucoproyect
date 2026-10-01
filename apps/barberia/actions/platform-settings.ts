@@ -156,3 +156,96 @@ export async function purgeAuditLogsBeforeToday(
   revalidatePath('/[slug]/dashboard/audit', 'page')
   return { success: true, deleted }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// Tareas diarias (solo super_admin)
+// El cron diario corre para TODAS las barberías (recordatorios del día siguiente, gastos
+// fijos y depuración de auditoría). Se dispara aquí con el mismo CRON_SECRET que usa Vercel,
+// sin exponer el secreto al navegador.
+// ════════════════════════════════════════════════════════════════════════════
+
+export interface DailyTasksSummary {
+  reminders: { processed: number; sent: number; skipped: number; failed: number }
+  fixedExpenses:
+    | { registered: number; reminders: number; errors: number }
+    | { error: string }
+  auditPurge:
+    | { deleted: number; retentionMonths: number | null }
+    | { error: string }
+}
+
+/** Origen del propio servidor: variable configurada → URL de Vercel → local. (Nunca el header Host.) */
+function cronOrigin(): string {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim()
+  if (configured) return configured.replace(/\/+$/, '')
+  const vercel = process.env.VERCEL_URL?.trim()
+  if (vercel) return `https://${vercel.replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
+  return `http://localhost:${process.env.PORT ?? 3001}`
+}
+
+export async function runDailyTasks(): Promise<
+  { success: true; summary: DailyTasksSummary } | { success: false; error: string }
+> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user || user.app_metadata?.role !== 'super_admin') {
+    return { success: false, error: NOT_SUPER_ADMIN }
+  }
+
+  const cronSecret = process.env.CRON_SECRET
+  if (!cronSecret) {
+    return { success: false, error: 'CRON_SECRET no está configurado en las variables de entorno.' }
+  }
+
+  try {
+    const response = await fetch(`${cronOrigin()}/api/cron/send-reminders`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${cronSecret}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(60_000),
+    })
+
+    if (!response.ok) {
+      return { success: false, error: `Las tareas respondieron con el código ${response.status}.` }
+    }
+
+    const data = await response.json() as {
+      ok?:               boolean
+      processed?:        number
+      sent?:             number
+      skipped?:          number
+      failed?:           number
+      recurringExpenses?: { registered?: unknown[]; reminders?: unknown[]; errors?: unknown[]; error?: string }
+      auditPurge?:        { deleted?: number; retention_months?: number; error?: string }
+    }
+    if (!data.ok) return { success: false, error: 'Las tareas no terminaron bien.' }
+
+    const fe = data.recurringExpenses
+    const ap = data.auditPurge
+
+    return {
+      success: true,
+      summary: {
+        reminders: {
+          processed: Number(data.processed ?? 0),
+          sent:      Number(data.sent ?? 0),
+          skipped:   Number(data.skipped ?? 0),
+          failed:    Number(data.failed ?? 0),
+        },
+        fixedExpenses: fe?.error
+          ? { error: String(fe.error) }
+          : {
+              registered: fe?.registered?.length ?? 0,
+              reminders:  fe?.reminders?.length ?? 0,
+              errors:     fe?.errors?.length ?? 0,
+            },
+        auditPurge: ap?.error
+          ? { error: String(ap.error) }
+          : { deleted: Number(ap?.deleted ?? 0), retentionMonths: ap?.retention_months ?? null },
+      },
+    }
+  } catch (err) {
+    console.error('[runDailyTasks]', err instanceof Error ? err.message : err)
+    return { success: false, error: 'No se pudieron correr las tareas. Intenta de nuevo.' }
+  }
+}

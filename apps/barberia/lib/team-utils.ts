@@ -105,8 +105,9 @@ export function formatHour(t: string): string {
  * Resume el horario semanal: 'Lun–Sáb 9:00–19:00 · Dom 10:00–14:00'.
  * Días consecutivos (lunes primero) con las mismas horas se agrupan.
  * Si un día tiene varias filas usa la entrada más temprana y la salida más tardía.
+ * `formatTime` permite otro formato de hora (p. ej. 12 h para la página pública).
  */
-export function summarizeSchedule(rows: ScheduleRow[]): string {
+export function summarizeSchedule(rows: ScheduleRow[], formatTime: (t: string) => string = formatHour): string {
   if (!rows || rows.length === 0) return 'Sin horario'
 
   const byDay = new Map<number, { start: string; end: string }>()
@@ -143,7 +144,7 @@ export function summarizeSchedule(rows: ScheduleRow[]): string {
       const days = g.days.length === 1
         ? DAY_SHORT[g.days[0]]
         : `${DAY_SHORT[g.days[0]]}–${DAY_SHORT[g.days[g.days.length - 1]]}`
-      return `${days} ${formatHour(g.start)}–${formatHour(g.end)}`
+      return `${days} ${formatTime(g.start)}–${formatTime(g.end)}`
     })
     .join(' · ')
 }

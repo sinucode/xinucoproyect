@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import { Loader2, Check, AlertCircle, ImageOff } from 'lucide-react'
-import { updateBusinessBranding, updateBusinessInfo } from '@/actions/businesses'
+import { updateBusinessBranding } from '@/actions/businesses'
 import type { Business, BusinessBranding } from '@xinuco/types'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -176,7 +177,8 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
   // Merge stored branding with defaults
   const stored = (business.branding ?? {}) as unknown as Partial<BusinessBranding>
 
-  const [name,   setName]   = useState(business.name)
+  // El nombre se edita en "Datos del negocio"; aquí solo alimenta la vista previa.
+  const name = business.name
   const [colors, setColors] = useState<Omit<BusinessBranding, 'logo_url' | 'font_family'>>({
     primary_color:   stored.primary_color   ?? DEFAULT_BRANDING.primary_color,
     secondary_color: stored.secondary_color ?? DEFAULT_BRANDING.secondary_color,
@@ -207,20 +209,11 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
           font_family:     font,
         }
 
-        // Run both updates in parallel
-        const [brandingResult, infoResult] = await Promise.all([
-          updateBusinessBranding(business.id, brandingPayload),
-          updateBusinessInfo(business.id, { name }),
-        ])
+        const brandingResult = await updateBusinessBranding(brandingPayload)
 
         if (brandingResult.error) {
           setStatus('error')
           setStatusMsg(brandingResult.error)
-          return
-        }
-        if (infoResult.error) {
-          setStatus('error')
-          setStatusMsg(infoResult.error)
           return
         }
 
@@ -246,23 +239,21 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
           className="rounded-xl p-5 flex flex-col gap-4"
           style={{ background: '#111111', border: '1px solid var(--border-color)' }}
         >
-          {/* Nombre */}
+          {/* Nombre — se edita en Datos del negocio */}
           <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="biz-name"
-              className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider"
-            >
+            <span className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
               Nombre del negocio
-            </label>
-            <input
-              id="biz-name"
-              type="text"
-              value={name}
-              onChange={e => { setName(e.target.value); setStatus('idle') }}
-              maxLength={80}
-              placeholder="Ej: Barbería El Patrón"
-              className="input-base"
-            />
+            </span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-xinuco-text break-words min-w-0">{business.name}</p>
+              <Link
+                href={`/${slug}/dashboard/settings/business`}
+                className="text-xs font-semibold underline underline-offset-2"
+                style={{ color: 'var(--primary-color)' }}
+              >
+                Cambiar en Datos del negocio
+              </Link>
+            </div>
           </div>
 
           {/* Slug — read-only */}

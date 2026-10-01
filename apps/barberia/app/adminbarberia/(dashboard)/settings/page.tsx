@@ -9,6 +9,7 @@ import { adminLoginUrl, BARBERIA_URL } from '@xinuco/utils'
 import { getAuditRetentionSetting } from '@/actions/platform-settings'
 import { AuditRetentionCard } from '@/components/admin/AuditRetentionCard'
 import { AuditPurgeCard } from '@/components/admin/AuditPurgeCard'
+import { DailyTasksCard } from '@/components/admin/DailyTasksCard'
 import { businessTodayISODate } from '@/lib/agenda-time'
 
 export const metadata: Metadata = {
@@ -148,6 +149,9 @@ export default async function SettingsPage() {
           initialUpdatedByName={retention.updatedByName}
         />
       )}
+
+      {/* Tareas diarias: recordatorios, gastos fijos y depuración (todas las barberías) */}
+      <DailyTasksCard secretConfigured={Boolean(process.env.CRON_SECRET)} />
 
       {/* Auditoría: borrado manual (zona de peligro) */}
       <AuditPurgeCard businesses={purgeBusinesses} todayISO={todayISO} />

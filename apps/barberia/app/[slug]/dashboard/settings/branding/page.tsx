@@ -6,7 +6,7 @@ import type { Business, Profile } from '@xinuco/types'
 
 export const metadata: Metadata = {
   title: 'Apariencia y Marca — Xinuco',
-  description: 'Personaliza los colores, fuente y nombre de tu negocio',
+  description: 'Personaliza los colores y la fuente de tu negocio',
 }
 
 export default async function BrandingPage({
@@ -58,7 +58,7 @@ export default async function BrandingPage({
           Apariencia y Marca
         </h1>
         <p className="text-sm text-xinuco-muted mt-1">
-          Personaliza los colores, tipografía y nombre de tu negocio. Los cambios se aplican al portal de reservas de tus clientes.
+          Personaliza los colores y la tipografía de tu negocio. Los cambios se aplican al portal de reservas de tus clientes.
         </p>
       </div>
 

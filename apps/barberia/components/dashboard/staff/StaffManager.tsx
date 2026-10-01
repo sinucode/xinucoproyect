@@ -32,6 +32,7 @@ import {
   stateToScheduleRows,
   summarizeSchedule,
   validateWeeklySchedule,
+  type ScheduleRow,
   type WeeklyScheduleState,
 } from '@/lib/team-utils'
 import { WeeklyScheduleEditor } from './WeeklyScheduleEditor'
@@ -48,11 +49,13 @@ interface StaffManagerProps {
   services: TeamService[]
   todayKey: string
   linkableUsers: LinkableUser[]
+  /** Horario del negocio (Configuración → Horario), para "Copiar horario del negocio" al crear. null = sin definir. */
+  businessSchedule?: ScheduleRow[] | null
 }
 
 type SheetState = { mode: 'create' } | { mode: 'edit'; memberId: string } | null
 
-export function StaffManager({ businessId, members, services, todayKey, linkableUsers }: StaffManagerProps) {
+export function StaffManager({ businessId, members, services, todayKey, linkableUsers, businessSchedule = null }: StaffManagerProps) {
   const router = useRouter()
   const [list, setList] = useState<TeamMember[]>(members)
   const [sheet, setSheet] = useState<SheetState>(null)
@@ -154,6 +157,7 @@ export function StaffManager({ businessId, members, services, todayKey, linkable
           services={services}
           members={list}
           linkableUsers={linkableUsers}
+          businessSchedule={businessSchedule}
           onClose={() => setSheet(null)}
           onDone={() => { setSheet(null); router.refresh() }}
         />
@@ -472,6 +476,7 @@ function StaffSheet({
   services,
   members,
   linkableUsers,
+  businessSchedule,
   onClose,
   onDone,
 }: {
@@ -481,6 +486,7 @@ function StaffSheet({
   services: TeamService[]
   members: TeamMember[]
   linkableUsers: LinkableUser[]
+  businessSchedule: ScheduleRow[] | null
   onClose: () => void
   onDone: () => void
 }) {
@@ -498,9 +504,10 @@ function StaffSheet({
   const [selected, setSelected] = useState<Set<string>>(
     new Set((member?.service_ids ?? []).filter(id => activeIds.has(id))),
   )
-  // Horario (solo al crear): el más común del equipo activo, o Lun–Sáb 9:00–19:00
+  // Horario (solo al crear): el más común del equipo activo; si no hay equipo con horario, el del
+  // negocio; y si tampoco, Lun–Sáb 9:00–19:00
   const [scheduleState, setScheduleState] = useState<WeeklyScheduleState>(() => {
-    const common = mostCommonSchedule(members)
+    const common = mostCommonSchedule(members) ?? businessSchedule
     return common
       ? scheduleRowsToState(common)
       : applyQuickSchedule(scheduleRowsToState([]), DEFAULT_WORK_DAYS, DEFAULT_START_TIME, DEFAULT_END_TIME)
@@ -807,6 +814,18 @@ function StaffSheet({
               <legend className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider mb-1">
                 Horario
               </legend>
+
+              {businessSchedule && (
+                <button
+                  type="button"
+                  onClick={() => { setCopyFrom(''); setScheduleState(scheduleRowsToState(businessSchedule)) }}
+                  disabled={isPending}
+                  className="btn-ghost !py-2.5 text-sm w-full flex-wrap text-center disabled:opacity-50"
+                >
+                  Copiar horario del negocio
+                  <span className="text-xs text-xinuco-muted font-normal">({summarizeSchedule(businessSchedule)})</span>
+                </button>
+              )}
 
               {members.length > 0 && (
                 <div className="flex flex-col gap-2">

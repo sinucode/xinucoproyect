@@ -1,196 +1,125 @@
 'use client'
 
+// AvailabilityClient — "Horario y días cerrados".
+//  1. Horario del negocio (se muestra en la página de reservas).
+//  2. Festivos de Colombia: Abrimos / Cerramos.
+//  3. Cierres propios: vacaciones, remodelación…
+// El horario de cada profesional se maneja en Equipo; los cierres bloquean a todos.
+
 import { useState, useTransition } from 'react'
+import { Loader2, Save, CheckCircle2, AlertCircle, Clock } from 'lucide-react'
+import type { OperatingHours } from '@xinuco/types'
 import { updateAvailability } from '@/actions/availability'
-import type { OperatingHours, DayHours } from '@xinuco/types'
-import { Loader2, Plus, Minus, Save, Clock, Armchair } from 'lucide-react'
-
-const DAYS_OF_WEEK = [
-  { key: 'monday', label: 'Lunes' },
-  { key: 'tuesday', label: 'Martes' },
-  { key: 'wednesday', label: 'Miércoles' },
-  { key: 'thursday', label: 'Jueves' },
-  { key: 'friday', label: 'Viernes' },
-  { key: 'saturday', label: 'Sábado' },
-  { key: 'sunday', label: 'Domingo' }
-] as const
-
-const DEFAULT_DAY: DayHours = { is_open: true, open_time: '09:00', close_time: '19:00' }
-const DEFAULT_HOURS: OperatingHours = {
-  monday: { ...DEFAULT_DAY },
-  tuesday: { ...DEFAULT_DAY },
-  wednesday: { ...DEFAULT_DAY },
-  thursday: { ...DEFAULT_DAY },
-  friday: { ...DEFAULT_DAY },
-  saturday: { ...DEFAULT_DAY, close_time: '14:00' },
-  sunday: { ...DEFAULT_DAY, is_open: false }
-}
+import { WeeklyScheduleEditor } from '@/components/dashboard/staff/WeeklyScheduleEditor'
+import { HolidaysPanel } from '@/components/dashboard/settings/HolidaysPanel'
+import { CustomClosuresPanel } from '@/components/dashboard/settings/CustomClosuresPanel'
+import { SectionHeader, cardStyle, type ClosureRow } from '@/components/dashboard/settings/ClosuresShared'
+import { operatingHoursToState, stateToOperatingHours, hasOperatingHours, validateOperatingHours } from '@/lib/business-hours'
+import type { WeeklyScheduleState } from '@/lib/team-utils'
 
 interface AvailabilityClientProps {
-  businessId: string
-  initialOperatingHours: OperatingHours | null | undefined
-  initialWorkstationsCount: number | null | undefined
+  slug:                  string
+  todayKey:              string
+  initialOperatingHours: OperatingHours | null
+  initialClosures:       ClosureRow[]
 }
 
-export function AvailabilityClient({ businessId, initialOperatingHours, initialWorkstationsCount }: AvailabilityClientProps) {
-  const [hours, setHours] = useState<OperatingHours>(initialOperatingHours || DEFAULT_HOURS)
-  const [workstations, setWorkstations] = useState<number>(initialWorkstationsCount || 1)
-  const [isPending, startTransition] = useTransition()
-  const [error, setError] = useState<string | null>(null)
+export function AvailabilityClient({ slug, todayKey, initialOperatingHours, initialClosures }: AvailabilityClientProps) {
+  const [closures, setClosures] = useState<ClosureRow[]>(initialClosures)
 
-  const handleDayChange = (dayKey: keyof OperatingHours, field: keyof DayHours, value: any) => {
-    setHours(prev => ({
-      ...prev,
-      [dayKey]: {
-        ...prev[dayKey],
-        [field]: value
-      }
-    }))
+  // ── Horario del negocio ──────────────────────────────────────────────────
+  const [schedule, setSchedule] = useState<WeeklyScheduleState>(() => operatingHoursToState(initialOperatingHours))
+  const [isPending, startTransition] = useTransition()
+  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [statusMsg, setStatusMsg] = useState('')
+  const defined = hasOperatingHours(initialOperatingHours)
+
+  function handleChange(next: WeeklyScheduleState) {
+    setSchedule(next)
+    setStatus('idle')
   }
 
-  const handleSave = () => {
-    setError(null)
+  function handleSave() {
+    const hours = stateToOperatingHours(schedule)
+    const checked = validateOperatingHours(hours)
+    if (!checked.ok) {
+      setStatus('error'); setStatusMsg(checked.error)
+      return
+    }
+    setStatus('idle')
     startTransition(async () => {
-      const result = await updateAvailability(businessId, {
-        operating_hours: hours,
-        workstations_count: workstations
-      })
-
+      const result = await updateAvailability({ operating_hours: checked.value })
       if (result.error) {
-        setError(result.error)
+        setStatus('error'); setStatusMsg(result.error)
       } else {
-        alert('Disponibilidad actualizada exitosamente.')
+        setStatus('success'); setStatusMsg('Horario guardado.')
       }
     })
   }
 
   return (
-    <div className="flex flex-col gap-8 pb-32">
-      
-      {/* Sección 1: Horarios de Operación */}
-      <section className="flex flex-col gap-4">
-        <div className="flex items-center gap-3 px-2">
-          <Clock size={20} style={{ color: 'var(--primary-color)' }} />
-          <h2 className="text-xl font-bold text-xinuco-text">Horarios de Atención</h2>
-        </div>
-        
-        <div className="card p-0 overflow-hidden divide-y divide-xinuco-border" style={{ borderColor: 'var(--surface-color, #333)' }}>
-          {DAYS_OF_WEEK.map((day) => {
-            const dayData = hours[day.key]
-            return (
-              <div key={day.key} className="flex flex-col sm:flex-row sm:items-center justify-between p-5 gap-4 transition-colors hover:bg-white/[0.01]">
-                <div className="flex items-center gap-4 min-w-[120px]">
-                  {/* iOS Style Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => handleDayChange(day.key, 'is_open', !dayData.is_open)}
-                    className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0"
-                    style={{ backgroundColor: dayData.is_open ? 'var(--primary-color)' : 'var(--surface-color, #333)' }}
-                  >
-                    <span 
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        dayData.is_open ? 'translate-x-6' : 'translate-x-1'
-                      }`} 
-                    />
-                  </button>
-                  <span className={`font-medium ${dayData.is_open ? 'text-xinuco-text' : 'text-xinuco-muted'}`}>
-                    {day.label}
-                  </span>
-                </div>
+    <div className="flex flex-col gap-6">
+      {/* ── 1. Horario del negocio ───────────────────────────────────────── */}
+      <section className="rounded-2xl p-5 flex flex-col gap-5" style={cardStyle()} aria-label="Horario del negocio">
+        <SectionHeader
+          icon={<Clock size={17} style={{ color: 'var(--primary-color)' }} />}
+          title="Horario del negocio"
+          subtitle="Se muestra en tu página de reservas. Las horas de cada profesional se manejan en Equipo."
+        />
 
-                <div className={`flex items-center gap-3 transition-all duration-300 ${dayData.is_open ? 'opacity-100 translate-y-0 h-10' : 'opacity-0 -translate-y-2 h-0 overflow-hidden sm:h-10 sm:overflow-visible sm:opacity-0 pointer-events-none'}`}>
-                  <input
-                    type="time"
-                    value={dayData.open_time}
-                    onChange={(e) => handleDayChange(day.key, 'open_time', e.target.value)}
-                    className="input-base !w-auto !py-2 text-center font-mono cursor-pointer bg-transparent"
-                    disabled={!dayData.is_open}
-                  />
-                  <span className="text-xinuco-muted text-sm px-1">a</span>
-                  <input
-                    type="time"
-                    value={dayData.close_time}
-                    onChange={(e) => handleDayChange(day.key, 'close_time', e.target.value)}
-                    className="input-base !w-auto !py-2 text-center font-mono cursor-pointer bg-transparent"
-                    disabled={!dayData.is_open}
-                  />
-                </div>
-                
-                {!dayData.is_open && (
-                  <span className="hidden sm:block text-sm text-xinuco-muted italic mr-4">
-                    Cerrado
-                  </span>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </section>
+        {!defined && (
+          <p className="text-xs text-amber-400 bg-amber-400/10 rounded-lg px-3 py-2">
+            Aún no has guardado el horario. Ajusta los días y toca Guardar horario.
+          </p>
+        )}
 
-      {/* Sección 2: Capacidad Física (Workstations) */}
-      <section className="flex flex-col gap-4">
-        <div className="flex items-center gap-3 px-2">
-          <Armchair size={20} style={{ color: 'var(--primary-color)' }} />
-          <h2 className="text-xl font-bold text-xinuco-text">Capacidad Física</h2>
-        </div>
+        <WeeklyScheduleEditor value={schedule} onChange={handleChange} disabled={isPending} />
 
-        <div className="card p-6 md:p-8 flex flex-col md:flex-row items-center gap-8 justify-between">
-          <div className="flex flex-col gap-2 flex-1 text-center md:text-left">
-            <h3 className="text-lg font-bold text-xinuco-text">Sillas o Estaciones de Trabajo</h3>
-            <p className="text-sm text-xinuco-muted leading-relaxed">
-              Limitará la cantidad de citas simultáneas que se pueden agendar, independientemente de la cantidad de personal que tengas disponible.
-            </p>
+        {status !== 'idle' && (
+          <div
+            role={status === 'error' ? 'alert' : 'status'}
+            className={`flex items-start gap-2 text-xs rounded-lg px-3 py-2 ${
+              status === 'success' ? 'text-emerald-400 bg-emerald-400/10' : 'text-red-400 bg-red-400/10'
+            }`}
+          >
+            {status === 'success'
+              ? <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
+              : <AlertCircle size={14} className="shrink-0 mt-0.5" />}
+            <span>{statusMsg}</span>
           </div>
+        )}
 
-          <div className="flex items-center justify-center gap-6 bg-xinuco-bg p-2 rounded-2xl border border-xinuco-border shrink-0" style={{ borderColor: 'var(--surface-color, #333)' }}>
-            <button
-              onClick={() => setWorkstations(Math.max(1, workstations - 1))}
-              className="w-14 h-14 rounded-xl flex items-center justify-center text-xinuco-text hover:bg-white/5 active:scale-95 transition-all disabled:opacity-30 disabled:pointer-events-none"
-              disabled={workstations <= 1}
-            >
-              <Minus size={24} />
-            </button>
-            
-            <div className="w-16 text-center">
-              <span className="text-4xl font-bold font-mono text-xinuco-text">{workstations}</span>
-            </div>
-
-            <button
-              onClick={() => setWorkstations(workstations + 1)}
-              className="w-14 h-14 rounded-xl flex items-center justify-center text-xinuco-text hover:bg-white/5 active:scale-95 transition-all disabled:opacity-30 disabled:pointer-events-none"
-              disabled={workstations >= 50}
-            >
-              <Plus size={24} />
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* Error Global */}
-      {error && (
-        <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm text-center">
-          {error}
-        </div>
-      )}
-
-      {/* Footer Flotante para Guardar */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-xinuco-bg via-xinuco-bg/90 to-transparent z-40 pointer-events-none">
-        <div className="max-w-3xl mx-auto flex justify-end pointer-events-auto pb-4 md:pb-8 pr-4 md:pr-0">
+        <div className="flex justify-end">
           <button
+            type="button"
             onClick={handleSave}
             disabled={isPending}
-            className="btn-primary flex items-center gap-2 shadow-xl shadow-black/20 px-8 py-4 text-base rounded-full"
+            className="flex items-center gap-2 text-sm font-bold px-5 py-2.5 rounded-xl transition-all disabled:opacity-50"
+            style={{ backgroundColor: 'var(--primary-color)', color: '#080808' }}
           >
-            {isPending ? (
-              <Loader2 size={20} className="animate-spin" />
-            ) : (
-              <Save size={20} />
-            )}
-            <span>{isPending ? 'Guardando...' : 'Guardar Disponibilidad'}</span>
+            {isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            Guardar horario
           </button>
         </div>
-      </div>
-      
+      </section>
+
+      {/* ── 2. Festivos ──────────────────────────────────────────────────── */}
+      <HolidaysPanel
+        slug={slug}
+        todayKey={todayKey}
+        closures={closures}
+        onAdd={row => setClosures(prev => [...prev, row])}
+        onRemove={id => setClosures(prev => prev.filter(c => c.id !== id))}
+      />
+
+      {/* ── 3. Cierres propios ───────────────────────────────────────────── */}
+      <CustomClosuresPanel
+        slug={slug}
+        todayKey={todayKey}
+        closures={closures}
+        onAdd={row => setClosures(prev => [...prev, row])}
+        onRemove={id => setClosures(prev => prev.filter(c => c.id !== id))}
+      />
     </div>
   )
 }

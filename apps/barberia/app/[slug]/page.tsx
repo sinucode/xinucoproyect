@@ -4,9 +4,10 @@ import type { Metadata } from 'next'
 import type { Service, Staff } from '@xinuco/types'
 import { filterVisibleServices, normalizeAudiences } from '@/lib/service-audience'
 import { BookingWizard, type BookableProducts } from '@/components/booking/BookingWizard'
+import { BusinessContactBlock, type PublicContactData } from '@/components/booking/BusinessContactBlock'
 
 // Fila devuelta por la RPC pública get_public_business (solo campos seguros)
-interface PublicBusinessRow {
+interface PublicBusinessRow extends PublicContactData {
   id:        string
   name:      string
   is_active: boolean
@@ -137,6 +138,7 @@ export default async function PublicBookingPage({ params }: PublicBookingPagePro
           BOOKING WIZARD — El Motor Visual
           ════════════════════════════════════════════════════════════════════ */}
       <main className="px-4 pb-32">
+        <BusinessContactBlock data={business} />
         <BookingWizard
           businessId={business.id}
           services={services}

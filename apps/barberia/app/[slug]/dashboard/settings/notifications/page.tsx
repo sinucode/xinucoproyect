@@ -1,13 +1,12 @@
 // app/[slug]/dashboard/settings/notifications/page.tsx
-// RF18 — Configuración de Notificaciones por Correo + Panel Cron
+// RF18 — Notificaciones por correo: estado, historial y plantillas
 
 import type { Metadata } from 'next'
-import { notFound, redirect } from 'next/navigation'
-import { createClient } from '@xinuco/supabase/server'
+import { notFound } from 'next/navigation'
+import { requireSettingsAdmin } from '@/lib/settings-guard'
 import { getBusinessBySlug }  from '@/actions/businesses'
-import type { Profile } from '@xinuco/types'
 import { getNotificationLog } from '@/actions/notifications'
-import { CronPanel }          from '@/components/dashboard/settings/CronPanel'
+import { NotificationHistory } from '@/components/dashboard/settings/NotificationHistory'
 import type { BusinessFeatures } from '@xinuco/types'
 import {
   appointmentConfirmationEmail,
@@ -17,7 +16,7 @@ import {
 
 export const metadata: Metadata = {
   title: 'Notificaciones — Xinuco',
-  description: 'Estado, cron job y preview de las notificaciones por correo electrónico.',
+  description: 'Estado, historial y vista previa de las notificaciones por correo electrónico.',
 }
 
 // ── Datos de muestra para el preview ─────────────────────────────────────────
@@ -95,21 +94,8 @@ export default async function NotificationsSettingsPage({
 }) {
   const { slug } = await params
 
-  // Auth guard
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect(`/${slug}/login`)
-
-  // Role guard: solo admin puede acceder
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, business_id')
-    .eq('id', user.id)
-    .single<Pick<Profile, 'role' | 'business_id'>>()
-
-  if (!profile || (profile.role !== 'admin' && profile.role !== 'super_admin')) {
-    redirect(`/${slug}/dashboard`)
-  }
+  // Guardia: solo el administrador de este negocio
+  await requireSettingsAdmin(slug)
 
   const business = await getBusinessBySlug(slug)
   if (!business) notFound()
@@ -120,7 +106,7 @@ export default async function NotificationsSettingsPage({
   const cronSecretPresent  = Boolean(process.env.CRON_SECRET)
 
   // Cargar historial de notificaciones
-  const { data: notifLog } = await getNotificationLog(business.id, 50)
+  const { data: notifLog } = await getNotificationLog(50)
 
   // Generar previews en el servidor
   const confirmationHtml = appointmentConfirmationEmail(PREVIEW_DATA)
@@ -141,7 +127,7 @@ export default async function NotificationsSettingsPage({
           Notificaciones por Correo
         </h1>
         <p style={{ margin: 0, fontSize: '14px', color: '#999', maxWidth: '600px', lineHeight: '1.6' }}>
-          Estado del módulo RF18 — cron job de recordatorios, historial de envíos y preview de plantillas.
+          Estado de los correos, historial de envíos y vista previa de las plantillas. Los recordatorios salen solos cada día a las 8:00 a. m.
         </p>
       </div>
 
@@ -177,16 +163,12 @@ export default async function NotificationsSettingsPage({
         </div>
       </section>
 
-      {/* ── Cron Job Panel (Client Component) ─────────────────────────────── */}
+      {/* ── Historial ─────────────────────────────────────────────────────── */}
       <section style={{ marginBottom: '40px' }}>
         <h2 style={{ margin: '0 0 16px 0', fontSize: '16px', fontWeight: 600, color: '#C5A059', textTransform: 'uppercase', letterSpacing: '1px' }}>
-          Cron Job & Historial
+          Historial reciente
         </h2>
-        <CronPanel
-          businessId={business.id}
-          cronSecret={cronSecretPresent}
-          initialLog={notifLog ?? []}
-        />
+        <NotificationHistory log={notifLog ?? []} />
       </section>
 
       {/* Disparadores */}

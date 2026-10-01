@@ -1,12 +1,12 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Loader2, Save, CheckCircle2, AlertCircle, ShoppingBag } from 'lucide-react'
+import { Loader2, Save, CheckCircle2, AlertCircle, ShoppingBag, Clock } from 'lucide-react'
 import { updateBookingSettings, type BookingSettingsInput } from '@/actions/businesses'
+import { BOOKING_INTERVAL_OPTIONS, bookingIntervalLabel } from '@/lib/booking-settings'
 
 interface BookingSettingsFormProps {
-  businessId: string
-  initial:    BookingSettingsInput
+  initial: BookingSettingsInput
 }
 
 const MAX_LIMIT = 50
@@ -17,7 +17,8 @@ function clampInt(raw: string): number {
   return Math.min(MAX_LIMIT, Math.max(0, n))
 }
 
-export function BookingSettingsForm({ businessId, initial }: BookingSettingsFormProps) {
+export function BookingSettingsForm({ initial }: BookingSettingsFormProps) {
+  const [interval, setIntervalMinutes] = useState(initial.appointment_interval_minutes)
   const [enabled,  setEnabled]  = useState(initial.booking_products_enabled)
   const [maxUnits, setMaxUnits] = useState(String(initial.booking_max_product_units))
   const [maxOpen,  setMaxOpen]  = useState(String(initial.booking_max_open_with_products_per_phone))
@@ -49,7 +50,8 @@ export function BookingSettingsForm({ businessId, initial }: BookingSettingsForm
     }
 
     startTransition(async () => {
-      const result = await updateBookingSettings(businessId, {
+      const result = await updateBookingSettings({
+        appointment_interval_minutes:             interval,
         booking_products_enabled:                 enabled,
         booking_max_product_units:                units,
         booking_max_open_with_products_per_phone: open,
@@ -67,6 +69,41 @@ export function BookingSettingsForm({ businessId, initial }: BookingSettingsForm
       className="rounded-2xl border p-5 flex flex-col gap-6"
       style={{ backgroundColor: '#111111', borderColor: 'var(--border-color)' }}
     >
+      <div className="flex items-center gap-3">
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center"
+          style={{ backgroundColor: 'color-mix(in srgb, var(--primary-color) 12%, transparent)' }}
+        >
+          <Clock size={17} style={{ color: 'var(--primary-color)' }} />
+        </div>
+        <div>
+          <h2 className="text-sm font-bold text-zinc-100">Intervalo entre horarios</h2>
+          <p className="text-xs text-zinc-500">
+            Cada cuánto se ofrece un horario al reservar (9:00, 9:30, 10:00…).
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="booking-interval" className={labelCls}>Horarios cada</label>
+        <select
+          id="booking-interval"
+          value={interval}
+          onChange={(e) => { setIntervalMinutes(Number(e.target.value)); setStatus('idle') }}
+          className={inputCls}
+          style={inputStyle}
+        >
+          {BOOKING_INTERVAL_OPTIONS.map((m) => (
+            <option key={m} value={m}>{bookingIntervalLabel(m)}</option>
+          ))}
+        </select>
+        <p className="text-[11px] text-zinc-500">
+          Un intervalo corto ofrece más horarios; uno largo deja las citas más ordenadas.
+        </p>
+      </div>
+
+      <div className="h-px w-full" style={{ backgroundColor: 'var(--border-color)' }} />
+
       <div className="flex items-center gap-3">
         <div
           className="w-9 h-9 rounded-xl flex items-center justify-center"

@@ -4,6 +4,7 @@ import { createClient } from '@xinuco/supabase/server'
 import { BookingWizard, type BookableProducts } from '@/components/booking/BookingWizard'
 import type { Service, Staff } from '@xinuco/types'
 import { filterVisibleServices, normalizeAudiences } from '@/lib/service-audience'
+import { BusinessContactBlock, type PublicContactData } from '@/components/booking/BusinessContactBlock'
 
 interface BookPageProps {
   params: Promise<{ slug: string }>
@@ -16,7 +17,7 @@ export default async function BookPage({ params }: BookPageProps) {
   // Fetch de control para inyectar la metadata y asegurar existencia del negocio
   const { data: business } = await supabase
     .rpc('get_public_business', { p_slug: slug })
-    .maybeSingle<{ id: string; name: string; online_payments: boolean; service_audiences: string[] | null }>()
+    .maybeSingle<{ id: string; name: string; online_payments: boolean; service_audiences: string[] | null } & PublicContactData>()
 
   if (!business) {
     notFound()
@@ -73,6 +74,8 @@ export default async function BookPage({ params }: BookPageProps) {
           Tu cita, tu momento.
         </p>
       </div>
+
+      <BusinessContactBlock data={business} />
 
       <div className="w-full flex-1 flex flex-col">
         <Suspense fallback={<div className="h-96 w-full max-w-xl mx-auto border rounded-2xl animate-pulse" style={{ borderColor: 'var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }} />}>

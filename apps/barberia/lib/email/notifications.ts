@@ -14,6 +14,7 @@ import {
   type EmailBrand,
 } from './templates'
 import { maskEmail } from '@/lib/team-utils'
+import { formatPhoneDisplay, whatsappLink } from '@/lib/business-profile'
 import {
   formatMoneyPlain,
   receiptBreakdown,
@@ -91,6 +92,10 @@ async function loadBusinessBrand(
         slug: string
         branding: { logo_url?: string | null; primary_color?: string | null } | null
         brand_config: { logoUrl?: string | null; primaryColor?: string | null } | null
+        address?:  string | null
+        city?:     string | null
+        whatsapp?: string | null
+        maps_url?: string | null
       } | null
     }
   if (!data) return { business: null, brand: undefined, cancelUrl: null }
@@ -102,6 +107,10 @@ async function loadBusinessBrand(
       logoUrl:      data.brand_config?.logoUrl ?? data.branding?.logo_url ?? null,
       primaryColor: data.brand_config?.primaryColor ?? data.branding?.primary_color ?? null,
       bookingUrl:   `${PUBLIC_SITE_URL}/${data.slug}/book`,
+      address:      [data.address?.trim(), data.city?.trim()].filter(Boolean).join(', ') || null,
+      mapsUrl:      data.maps_url ?? null,
+      whatsappUrl:  whatsappLink(data.whatsapp),
+      whatsappLabel: data.whatsapp ? formatPhoneDisplay(data.whatsapp) : null,
     },
     // Enlace privado (token) para que el cliente cancele desde el correo.
     cancelUrl: publicToken ? `${PUBLIC_SITE_URL}/${data.slug}/cancelar/${publicToken}` : null,

@@ -1,10 +1,11 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
-import { createClient } from '@xinuco/supabase/server'
-import { Clock, Bell, Palette, Users, CreditCard, ShoppingBag, Gift, ChevronRight, type LucideIcon } from 'lucide-react'
+import { Store, CalendarClock, Bell, Palette, Users, CreditCard, ShoppingBag, Gift, ChevronRight, type LucideIcon } from 'lucide-react'
 import { detectCurrentPlan, PLAN_BUNDLES } from '@xinuco/billing-catalog'
-import type { Business, BusinessFeatures, Profile } from '@xinuco/types'
+import type { Business, BusinessFeatures } from '@xinuco/types'
+import { requireSettingsAdmin } from '@/lib/settings-guard'
+import { businessTodayISODate } from '@/lib/agenda-time'
+import { bookingStatus, hoursStatus, loyaltyStatus, profileStatus } from '@/lib/settings-status'
 
 export const metadata: Metadata = {
   title: 'Ajustes — Xinuco',
@@ -18,6 +19,15 @@ interface SettingCard {
   description: string
   href:        string
   icon:        LucideIcon
+  /** Línea de estado en vivo (p. ej. "Falta la dirección"). */
+  status?:     string
+  /** true = algo por completar: el estado se resalta. */
+  attention?:  boolean
+}
+
+interface SettingGroup {
+  title: string
+  cards: SettingCard[]
 }
 
 // ── Componentes internos ──────────────────────────────────────────────────────
@@ -79,6 +89,14 @@ function NavCard({
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-xinuco-text leading-tight">{card.label}</p>
         <p className="text-xs text-xinuco-muted mt-0.5 leading-tight">{card.description}</p>
+        {card.status && (
+          <p
+            className="text-xs font-medium mt-1.5 leading-tight break-words"
+            style={{ color: card.attention ? '#f59e0b' : 'var(--primary-color)' }}
+          >
+            {card.status}
+          </p>
+        )}
       </div>
       <ChevronRight
         size={16}
@@ -97,84 +115,130 @@ export default async function SettingsPage({
 }) {
   const { slug } = await params
 
-  // 1. Auth guard
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) redirect(`/${slug}/login`)
+  // 1. Guardia: solo el administrador de ESTE negocio
+  const { supabase, businessId, fullName } = await requireSettingsAdmin(slug)
 
-  // 2. Obtener perfil y business en paralelo
-  const [{ data: profile }, { data: biz }] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('full_name, role, business_id')
-      .eq('id', user.id)
-      .single<Pick<Profile, 'full_name' | 'role' | 'business_id'>>(),
+  const todayKey = businessTodayISODate()
+
+  // 2. Negocio y cierres próximos en paralelo
+  type BizRow = Pick<
+    Business,
+    | 'id' | 'name' | 'slug' | 'features_enabled'
+    | 'address' | 'whatsapp' | 'phone' | 'operating_hours'
+    | 'appointment_interval_minutes' | 'booking_products_enabled' | 'booking_max_product_units'
+  > & { loyalty_mode?: string | null }
+
+  const [{ data: biz }, { data: closuresRaw }] = await Promise.all([
     supabase
       .from('businesses')
-      .select('id, name, slug, features_enabled, branding')
-      .eq('slug', slug)
-      .single<Pick<Business, 'id' | 'name' | 'slug' | 'features_enabled' | 'branding'>>(),
+      .select(
+        'id, name, slug, features_enabled, address, whatsapp, phone, operating_hours, ' +
+        'appointment_interval_minutes, booking_products_enabled, booking_max_product_units, loyalty_mode',
+      )
+      .eq('id', businessId)
+      .single<BizRow>(),
+    (supabase as any)
+      .from('business_closures')
+      .select('date_from, date_to, kind')
+      .eq('business_id', businessId)
+      .gte('date_to', todayKey)
+      .order('date_from', { ascending: true }),
   ])
 
-  if (!profile?.business_id || !biz) redirect(`/${slug}/login`)
+  if (!biz) return null
 
-  // Role guard: solo admin puede acceder
-  if (!profile || (profile.role !== 'admin' && profile.role !== 'super_admin')) {
-    redirect(`/${slug}/dashboard`)
-  }
+  const closures = (closuresRaw ?? []) as { date_from: string; date_to: string; kind: 'holiday' | 'custom' }[]
 
   const features    = (biz.features_enabled ?? {}) as unknown as BusinessFeatures
   const currentPlan = detectCurrentPlan(features)
   const planMeta    = PLAN_BUNDLES[currentPlan as keyof typeof PLAN_BUNDLES]
   const bookingUrl  = `https://www.xinuco.com/${slug}/book`
 
-  // 3. Tarjetas de navegación
-  const settingCards: SettingCard[] = [
+  // 3. Grupos de tarjetas, con su estado en vivo
+  const profile = profileStatus(biz)
+  const hours   = hoursStatus({ operatingHours: biz.operating_hours, closures, todayKey })
+
+  const groups: SettingGroup[] = [
     {
-      label:       'Horarios de Atención',
-      description: 'Configura los días y horas de operación',
-      href:        './availability',
-      icon:        Clock,
+      title: 'Tu negocio',
+      cards: [
+        {
+          label:       'Datos del negocio',
+          description: 'Nombre, dirección, contacto y datos para facturación',
+          href:        './business',
+          icon:        Store,
+          status:      profile.text,
+          attention:   !profile.complete,
+        },
+        {
+          label:       'Apariencia y marca',
+          description: 'Colores y tipografía de tu página de reservas',
+          href:        './branding',
+          icon:        Palette,
+        },
+      ],
     },
     {
-      label:       'Reservas en línea',
-      description: 'Productos apartados y límites por cita',
-      href:        './booking',
-      icon:        ShoppingBag,
+      title: 'Agenda y reservas',
+      cards: [
+        {
+          label:       'Horario y días cerrados',
+          description: 'Horario del negocio, festivos y vacaciones',
+          href:        './availability',
+          icon:        CalendarClock,
+          status:      hours.text,
+          attention:   !hours.complete,
+        },
+        {
+          label:       'Reservas en línea',
+          description: 'Intervalo entre horarios y productos apartados',
+          href:        './booking',
+          icon:        ShoppingBag,
+          status:      bookingStatus(biz),
+        },
+        {
+          label:       'Notificaciones',
+          description: 'Correos de confirmación y recordatorios',
+          href:        './notifications',
+          icon:        Bell,
+          status:      features.notifications_email ? 'Correos activos' : 'Correos apagados',
+          attention:   !features.notifications_email,
+        },
+      ],
     },
     ...(features.loyalty
       ? [{
-          label:       'Lealtad',
-          description: 'Puntos o sellos para premiar a tus clientes',
-          href:        './loyalty',
-          icon:        Gift,
+          title: 'Clientes',
+          cards: [{
+            label:       'Lealtad',
+            description: 'Puntos o sellos para premiar a tus clientes',
+            href:        './loyalty',
+            icon:        Gift,
+            status:      loyaltyStatus({ enabled: true, mode: biz.loyalty_mode }),
+          }],
         }]
       : []),
     {
-      label:       'Notificaciones',
-      description: 'Email y recordatorios automáticos',
-      href:        './notifications',
-      icon:        Bell,
+      title: 'Equipo',
+      cards: [
+        {
+          label:       'Equipo y servicios',
+          description: 'Profesionales, horarios individuales y servicios',
+          href:        '../staff',
+          icon:        Users,
+        },
+      ],
     },
     {
-      label:       'Apariencia y Marca',
-      description: 'Colores, logo y nombre del negocio',
-      href:        './branding',
-      icon:        Palette,
-    },
-    {
-      label:       'Equipo y Servicios',
-      description: 'Gestiona barberos y servicios',
-      href:        '../staff',
-      icon:        Users,
-    },
-    {
-      label:       'Facturación',
-      description: 'Plan Xinuco y suscripción MercadoPago',
-      href:        './billing',
-      icon:        CreditCard,
+      title: 'Plan',
+      cards: [
+        {
+          label:       'Facturación',
+          description: 'Plan Xinuco y suscripción MercadoPago',
+          href:        './billing',
+          icon:        CreditCard,
+        },
+      ],
     },
   ]
 
@@ -187,7 +251,7 @@ export default async function SettingsPage({
         style={{ borderColor: 'var(--border-color)' }}
       >
         <p className="text-xs font-semibold uppercase tracking-wider text-xinuco-muted mb-1">
-          Bienvenido, {profile.full_name?.split(' ')[0] ?? 'Administrador'}
+          Bienvenido, {fullName?.split(' ')[0] ?? 'Administrador'}
         </p>
         <h1 className="text-2xl font-serif font-bold text-xinuco-text tracking-wide">
           Ajustes del Negocio
@@ -199,9 +263,6 @@ export default async function SettingsPage({
 
       {/* ── Info del negocio ── */}
       <section aria-label="Información del negocio">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-xinuco-muted mb-4">
-          Tu negocio
-        </h2>
         <div
           className="rounded-xl px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
           style={{
@@ -209,11 +270,11 @@ export default async function SettingsPage({
             border:     '1px solid var(--border-color)',
           }}
         >
-          <div className="flex flex-col gap-2">
-            <p className="text-lg font-bold text-xinuco-text">{biz.name}</p>
+          <div className="flex flex-col gap-2 min-w-0">
+            <p className="text-lg font-bold text-xinuco-text break-words">{biz.name}</p>
             <div className="flex items-center gap-2 flex-wrap">
               <span
-                className="text-xs font-mono px-2 py-0.5 rounded"
+                className="text-xs font-mono px-2 py-0.5 rounded break-all"
                 style={{
                   background: 'rgba(197,160,89,0.08)',
                   color:      'var(--primary-color)',
@@ -235,17 +296,19 @@ export default async function SettingsPage({
         </div>
       </section>
 
-      {/* ── Secciones de configuración ── */}
-      <section aria-label="Secciones de configuración">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-xinuco-muted mb-4">
-          Configuración
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {settingCards.map(card => (
-            <NavCard key={card.label} card={card} slug={slug} />
-          ))}
-        </div>
-      </section>
+      {/* ── Grupos de configuración ── */}
+      {groups.map(group => (
+        <section key={group.title} aria-label={group.title}>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-xinuco-muted mb-4">
+            {group.title}
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {group.cards.map(card => (
+              <NavCard key={card.label} card={card} slug={slug} />
+            ))}
+          </div>
+        </section>
+      ))}
 
     </div>
   )
