@@ -1,4 +1,5 @@
 import {
+  getTeamOverview,
   createStaffMember,
   updateStaffMember,
   toggleStaffStatus,
@@ -25,6 +26,8 @@ interface Op {
   table: string
   op: 'select' | 'insert' | 'update' | 'delete'
   payload?: any
+  /** Argumento de .select(...) (columnas pedidas; también el RETURNING de un insert/update) */
+  columns?: string
   filters: [string, ...any[]][]
 }
 
@@ -37,10 +40,12 @@ interface Setup {
   user?: { id: string } | null
   /** Resultados por `${tabla}.${operación}`. Un arreglo se consume en orden (el último se repite). */
   handlers?: Record<string, Handler>
+  /** Resultados de supabase.rpc por nombre de función (por defecto `{ data: [], error: null }`) */
+  rpc?: Record<string, Result>
 }
 
 /** Builder encadenable y "thenable" que registra cada operación. */
-function makeSupabase({ role = 'admin', businessId = 'biz1', user = { id: 'user1' }, handlers = {} }: Setup = {}) {
+function makeSupabase({ role = 'admin', businessId = 'biz1', user = { id: 'user1' }, handlers = {}, rpc = {} }: Setup = {}) {
   const ops: Op[] = []
   const counters: Record<string, number> = {}
 
@@ -68,7 +73,7 @@ function makeSupabase({ role = 'admin', businessId = 'biz1', user = { id: 'user1
   const from = jest.fn((table: string) => {
     const state: Op = { table, op: 'select', filters: [] }
     const builder: any = {
-      select: jest.fn(() => builder),
+      select: jest.fn((cols?: string) => { state.columns = cols; return builder }),
       insert: jest.fn((payload: any) => { state.op = 'insert'; state.payload = payload; return builder }),
       update: jest.fn((payload: any) => { state.op = 'update'; state.payload = payload; return builder }),
       delete: jest.fn(() => { state.op = 'delete'; return builder }),
@@ -76,6 +81,10 @@ function makeSupabase({ role = 'admin', businessId = 'biz1', user = { id: 'user1
       in: jest.fn((...args: any[]) => { state.filters.push(['in', ...args]); return builder }),
       neq: jest.fn((...args: any[]) => { state.filters.push(['neq', ...args]); return builder }),
       limit: jest.fn(() => builder),
+      order: jest.fn(() => builder),
+      range: jest.fn(() => builder),
+      gte: jest.fn(() => builder),
+      lt: jest.fn(() => builder),
       single: jest.fn(async () => resolve({ ...state })),
       maybeSingle: jest.fn(async () => resolve({ ...state })),
       then: (ok: any, fail: any) => Promise.resolve(resolve({ ...state })).then(ok, fail),
@@ -86,6 +95,7 @@ function makeSupabase({ role = 'admin', businessId = 'biz1', user = { id: 'user1
   const supabase = {
     auth: { getUser: jest.fn().mockResolvedValue({ data: { user } }) },
     from,
+    rpc: jest.fn(async (fn: string) => rpc[fn] ?? { data: [], error: null }),
   }
   return { supabase, ops }
 }
@@ -105,6 +115,72 @@ describe('Staff Server Actions', () => {
   }
 
   const STAFF_ROW = { id: 'staff1', full_name: 'John', specialty_role: 'Barbero', is_active: true }
+
+  describe('getTeamOverview', () => {
+    const rows = [
+      { id: 's1', full_name: 'Ana', specialty_role: 'Barbero', is_active: true, created_at: '2026-01-01T00:00:00Z', user_id: null },
+      { id: 's2', full_name: 'Beto', specialty_role: 'Barbero', is_active: true, created_at: '2026-01-02T00:00:00Z', user_id: 'u2' },
+    ]
+
+    it('rechaza a quien no es administrador', async () => {
+      use({ role: 'barber' })
+      expect(await getTeamOverview()).toEqual({ error: 'Solo un administrador puede gestionar el equipo.' })
+    })
+
+    it('lee staff sin correo ni celular y los mezcla desde get_staff_contacts', async () => {
+      const { ops, supabase } = use({
+        handlers: { 'staff.select': { data: rows, error: null } },
+        rpc: {
+          get_staff_contacts: {
+            data: [
+              { id: 's1', email: 'ana@correo.com', phone: '+573001112233' },
+              { id: 's2', email: null, phone: null },
+            ],
+            error: null,
+          },
+        },
+      })
+
+      const r = await getTeamOverview()
+      if ('error' in r) throw new Error(r.error)
+
+      const staffSelect = find(ops, 'staff', 'select')[0]
+      expect(staffSelect.columns).not.toMatch(/email|phone|\*/)
+      expect(supabase.rpc).toHaveBeenCalledWith('get_staff_contacts', { p_business_id: 'biz1' })
+      expect(r.members.map(m => [m.id, m.email, m.phone])).toEqual([
+        ['s1', 'ana@correo.com', '+573001112233'],
+        ['s2', null, null],
+      ])
+    })
+
+    it('si get_staff_contacts falla, el equipo se ve igual con contactos en null', async () => {
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      use({
+        handlers: { 'staff.select': { data: rows, error: null } },
+        rpc: { get_staff_contacts: { data: null, error: { message: 'function get_staff_contacts does not exist' } } },
+      })
+
+      const r = await getTeamOverview()
+      if ('error' in r) throw new Error(r.error)
+
+      expect(r.members.map(m => m.id)).toEqual(['s1', 's2'])
+      expect(r.members.every(m => m.email === null && m.phone === null)).toBe(true)
+      spy.mockRestore()
+    })
+
+    it('si get_staff_contacts lanza, tampoco rompe la página', async () => {
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      const m = use({ handlers: { 'staff.select': { data: rows, error: null } } })
+      m.supabase.rpc.mockImplementation(async (fn: string) => {
+        if (fn === 'get_staff_contacts') throw new Error('boom')
+        return { data: [], error: null }
+      })
+
+      const r = await getTeamOverview()
+      expect('error' in r).toBe(false)
+      spy.mockRestore()
+    })
+  })
 
   describe('createStaffMember', () => {
     it('rechaza a quien no es administrador', async () => {
@@ -155,6 +231,9 @@ describe('Staff Server Actions', () => {
         specialty_role: 'Barbero',
         is_active: true,
       })
+      // El RETURNING pide columnas explícitas: email/phone no son legibles con el cliente del usuario
+      expect(find(ops, 'staff', 'insert')[0].columns).toBeDefined()
+      expect(find(ops, 'staff', 'insert')[0].columns).not.toMatch(/email|phone|\*/)
       expect(find(ops, 'staff_services', 'insert')).toHaveLength(0)
       // El alta la audita el trigger de la BD
       expect(logAction).not.toHaveBeenCalled()

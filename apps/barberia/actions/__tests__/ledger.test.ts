@@ -47,6 +47,8 @@ function makeSupabase(role: string | null, queues: Record<string, Result[]> = {}
 
   const supabase = {
     from,
+    // get_staff_contacts (correo/celular del equipo): por defecto sin contactos
+    rpc: jest.fn().mockResolvedValue({ data: [], error: null }),
     auth: { getUser: jest.fn().mockResolvedValue({ data: { user: role === null ? null : { id: 'u1' } } }) },
   }
   if (role !== null && !queues.profiles) {
@@ -510,12 +512,12 @@ describe('Pagos al equipo — lectura', () => {
       ;(resolveStaffEmail as jest.Mock).mockImplementation(async (_svc, staff) =>
         staff.user_id === 'u2' ? 'beto.login@correo.com' : null)
 
-      setup('admin', {
+      const { supabase } = setup('admin', {
         staff: [{
           data: [
-            { id: 's1', full_name: 'Ana', specialty_role: 'Barbero', is_active: true, user_id: null, email: 'carlos@gmail.com' },
-            { id: 's2', full_name: 'Beto', specialty_role: 'Barbero', is_active: true, user_id: 'u2', email: null },
-            { id: 's3', full_name: 'Cami', specialty_role: 'Barbero', is_active: true, user_id: null, email: null },
+            { id: 's1', full_name: 'Ana', specialty_role: 'Barbero', is_active: true, user_id: null },
+            { id: 's2', full_name: 'Beto', specialty_role: 'Barbero', is_active: true, user_id: 'u2' },
+            { id: 's3', full_name: 'Cami', specialty_role: 'Barbero', is_active: true, user_id: null },
           ],
           error: null,
         }],
@@ -528,15 +530,44 @@ describe('Pagos al equipo — lectura', () => {
           error: null,
         }],
       })
+      // Correo y celular salen de get_staff_contacts, no de la tabla staff
+      supabase.rpc.mockResolvedValueOnce({
+        data: [
+          { id: 's1', email: 'carlos@gmail.com', phone: '+573001112233' },
+          { id: 's2', email: null, phone: null },
+        ],
+        error: null,
+      })
       const r = await getTeamPaymentsOverview()
       if ('error' in r) throw new Error(r.error)
 
+      expect(supabase.rpc).toHaveBeenCalledWith('get_staff_contacts', { p_business_id: 'biz1' })
+      expect(r.members[0].phone).toBe('+573001112233')
       expect(r.members.map(m => m.receipt_email_masked)).toEqual(['c***s@gmail.com', 'b***n@correo.com', null])
       // El profesional con correo propio no consulta Auth; el resto solo por su usuario vinculado
       expect(resolveStaffEmail).toHaveBeenCalledTimes(1)
       // Nunca viaja un correo completo al cliente
       expect(JSON.stringify(r)).not.toContain('carlos@gmail.com')
       expect(JSON.stringify(r)).not.toContain('beto.login@correo.com')
+    })
+
+    it('la tabla staff no pide correo ni celular y, si get_staff_contacts falla, la página sigue sin contactos', async () => {
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      const { supabase, calls } = setup('admin', {
+        staff: [{ data: [{ id: 's1', full_name: 'Ana', specialty_role: 'Barbero', is_active: true, user_id: null }], error: null }],
+        staff_ledger_balances: [{ data: [{ staff_id: 's1', total_earned: 1, total_advances: 0, total_paid_out: 0, current_balance: 1 }], error: null }],
+      })
+      supabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'function get_staff_contacts does not exist' } })
+      const r = await getTeamPaymentsOverview()
+      if ('error' in r) throw new Error(r.error)
+
+      const selects = opsOf(calls, 'staff', 'select').map(o => String(o.args[0]))
+      expect(selects).toHaveLength(1)
+      expect(selects[0]).not.toMatch(/email|phone|\*/)
+      expect(r.members).toHaveLength(1)
+      expect(r.members[0].phone).toBeNull()
+      expect(r.members[0].receipt_email_masked).toBeNull()
+      spy.mockRestore()
     })
 
     it('incluye a un inactivo con saldo distinto de cero', async () => {

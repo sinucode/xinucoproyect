@@ -24,6 +24,7 @@ import {
   type TeamReceiptResult,
 } from '@/lib/team-payments'
 import { maskEmail } from '@/lib/team-utils'
+import { loadStaffContacts } from '@/lib/staff-contacts'
 import { paymentMethodForAccount } from '@/lib/money-accounts'
 import { resolveAccount } from '@/lib/account-resolve'
 import { createServiceClient, resolveStaffEmail, sendTeamPaymentReceipt } from '@/lib/email/notifications'
@@ -281,9 +282,10 @@ export async function getTeamPaymentsOverview(): Promise<TeamPaymentsOverview | 
   if ('error' in auth) return auth
   const { supabase, businessId } = auth
 
-  const [staffRes, balancesRes, businessRes, shiftRes, paymentsRes] = await Promise.all([
+  const [staffRes, balancesRes, businessRes, shiftRes, paymentsRes, contacts] = await Promise.all([
+    // email/phone no se leen aquí (privilegios por columna): vienen de get_staff_contacts
     supabase.from('staff')
-      .select(`${STAFF_COLS}, email, phone`)
+      .select(STAFF_COLS)
       .eq('business_id', businessId)
       .order('full_name', { ascending: true }),
     supabase.from('staff_ledger_balances')
@@ -305,6 +307,8 @@ export async function getTeamPaymentsOverview(): Promise<TeamPaymentsOverview | 
       .eq('entry_type', 'payment')
       .order('created_at', { ascending: false })
       .limit(5000),
+    // Si la función falla (p. ej. aún no desplegada) la página sigue, sin correo ni celular
+    loadStaffContacts(supabase, businessId),
   ])
 
   if (staffRes.error)    return { error: staffRes.error.message }
@@ -322,7 +326,11 @@ export async function getTeamPaymentsOverview(): Promise<TeamPaymentsOverview | 
     if (!lastPaymentById.has(p.staff_id)) lastPaymentById.set(p.staff_id, p.created_at)
   }
 
-  const staffRows = (staffRes.data ?? []) as Record<string, unknown>[]
+  const staffRows = ((staffRes.data ?? []) as Record<string, unknown>[]).map(row => ({
+    ...row,
+    email: contacts.get(String(row.id))?.email ?? null,
+    phone: contacts.get(String(row.id))?.phone ?? null,
+  }))
 
   // Correo de los recibos: el del profesional o, si no tiene, el del usuario vinculado (Auth).
   // Solo se resuelve (con service role) para quienes aparecen en la lista; al cliente va enmascarado.

@@ -11,6 +11,7 @@ import { revalidatePath } from 'next/cache'
 import type { Staff, StaffSchedule, ServiceAudienceOrAll, Json } from '@xinuco/types'
 import { logAction } from '@/lib/audit'
 import { businessNowHHMM, businessTodayISODate } from '@/lib/agenda-time'
+import { loadStaffContacts } from '@/lib/staff-contacts'
 import { normalizeStaffEmail, normalizeStaffPhone, validateWeeklySchedule } from '@/lib/team-utils'
 import type { StaffStatusNow } from '@/lib/walk-in-wait'
 
@@ -271,9 +272,10 @@ export async function getTeamOverview(): Promise<TeamOverview | { error: string 
   const nowIso = `${todayKey}T${businessNowHHMM()}:00Z`
   const { from, to } = currentMonthRange()
 
-  const [staffRes, schedRes, ssRes, servicesRes, statusRes, completedRes, upcomingRes, usersRes] = await Promise.all([
+  const [staffRes, schedRes, ssRes, servicesRes, statusRes, completedRes, upcomingRes, usersRes, contacts] = await Promise.all([
     supabase.from('staff')
-      .select('id, full_name, specialty_role, is_active, created_at, user_id, email, phone')
+      // email/phone no se leen aquí (privilegios por columna): vienen de get_staff_contacts
+      .select('id, full_name, specialty_role, is_active, created_at, user_id')
       .eq('business_id', businessId)
       .order('is_active', { ascending: false })
       .order('full_name', { ascending: true }),
@@ -315,6 +317,8 @@ export async function getTeamOverview(): Promise<TeamOverview | { error: string 
       .eq('business_id', businessId)
       .in('role', LINKABLE_ROLES)
       .order('full_name', { ascending: true }),
+    // Correo y celular: solo los entrega la función de admin; si falla, el equipo se ve sin ellos
+    loadStaffContacts(supabase, businessId),
   ])
 
   const firstError = [staffRes, schedRes, ssRes, servicesRes, usersRes].find(r => r.error)?.error?.message
@@ -322,7 +326,7 @@ export async function getTeamOverview(): Promise<TeamOverview | { error: string 
   if (firstError) return { error: firstError }
 
   const staffRows = (staffRes.data ?? []) as
-    { id: string; full_name: string; specialty_role: string; is_active: boolean; created_at: string; user_id: string | null; email: string | null; phone: string | null }[]
+    { id: string; full_name: string; specialty_role: string; is_active: boolean; created_at: string; user_id: string | null }[]
   const schedRows = (schedRes.data ?? []) as
     { staff_id: string; day_of_week: number; start_time: string; end_time: string }[]
   const ssRows = (ssRes.data ?? []) as { staff_id: string; service_id: string }[]
@@ -375,8 +379,8 @@ export async function getTeamOverview(): Promise<TeamOverview | { error: string 
       is_active:        s.is_active,
       created_at:       s.created_at,
       user_id:          s.user_id ?? null,
-      email:            s.email ?? null,
-      phone:            s.phone ?? null,
+      email:            contacts.get(s.id)?.email ?? null,
+      phone:            contacts.get(s.id)?.phone ?? null,
       schedules:        schedulesByStaff.get(s.id) ?? [],
       does_all_services: explicit.length === 0,
       service_ids:      explicit,
@@ -454,7 +458,8 @@ export async function createStaffMember(
       ...(contact.email ? { email: contact.email } : {}),
       ...(contact.phone ? { phone: contact.phone } : {}),
     })
-    .select()
+    // Columnas explícitas: email/phone no son legibles con el cliente del usuario (RETURNING las pediría)
+    .select('id, business_id, user_id, full_name, specialty_role, is_active, created_at')
     .single()
 
   if (error) {
