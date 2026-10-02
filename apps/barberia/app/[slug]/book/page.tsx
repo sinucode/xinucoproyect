@@ -29,7 +29,8 @@ export default async function BookPage({ params }: BookPageProps) {
   // Fetch de los servicios y el staff para el BookingWizard
   const [servicesRes, staffRes] = await Promise.all([
     supabase.from('services').select('*').eq('business_id', business.id).eq('is_active', true).order('name'),
-    supabase.from('staff').select('id, full_name, specialty_role, is_active').eq('business_id', business.id).eq('is_active', true).order('full_name'),
+    // Equipo público vía RPC (sin correo, teléfono ni user_id): `staff` ya no se lee con el cliente anónimo
+    supabase.rpc('get_public_staff', { p_business_id: business.id }),
   ])
 
   // 3. Productos que el cliente puede apartar al reservar (error → deshabilitado)

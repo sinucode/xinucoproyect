@@ -214,3 +214,77 @@ export function getInitials(name: string): string {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
   return (parts[0][0] + parts[1][0]).toUpperCase()
 }
+
+// ── Resumen de compras del cliente (RPC get_customer_sales_summary) ──────────
+
+export interface SalesSummaryProduct {
+  description: string
+  quantity:    number
+  /** null = el rol no ve montos (barbero/manicurista). */
+  total_price: number | null
+  created_at:  string
+}
+
+export interface SalesSummary {
+  /** Los montos son null cuando el usuario no es admin (o el RPC falló): la UI los oculta. */
+  total_spent:         number | null
+  paid_sales:          number | null
+  avg_ticket:          number | null
+  paid_by_appointment: Map<string, number> | null
+  purchased_products:  SalesSummaryProduct[]
+  /** Productos apartados, por id de cita. */
+  upcoming_products:   Map<string, { name: string; quantity: number }[]>
+}
+
+const toNum = (v: unknown): number => {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
+}
+
+/**
+ * Normaliza el JSON del RPC get_customer_sales_summary. Solo el admin recibe montos: si
+ * `total_spent` viene null (barbero, o respuesta vacía por error) TODO el dinero queda null y
+ * la UI no muestra ningún monto; nombres, cantidades y fechas se conservan.
+ */
+export function parseSalesSummary(raw: unknown): SalesSummary {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const hasMoney = r.total_spent !== null && r.total_spent !== undefined
+
+  const totalSpent = hasMoney ? toNum(r.total_spent) : null
+  const paidSales  = hasMoney ? toNum(r.paid_sales) : null
+
+  let paidByAppointment: Map<string, number> | null = null
+  if (hasMoney) {
+    paidByAppointment = new Map()
+    for (const row of Array.isArray(r.paid_by_appointment) ? (r.paid_by_appointment as Record<string, unknown>[]) : []) {
+      if (typeof row.appointment_id === 'string') {
+        paidByAppointment.set(row.appointment_id, (paidByAppointment.get(row.appointment_id) ?? 0) + toNum(row.amount))
+      }
+    }
+  }
+
+  const purchased: SalesSummaryProduct[] = (Array.isArray(r.purchased_products) ? (r.purchased_products as Record<string, unknown>[]) : [])
+    .map((p) => ({
+      description: String(p.description ?? ''),
+      quantity:    toNum(p.quantity),
+      total_price: hasMoney && p.total_price !== null && p.total_price !== undefined ? toNum(p.total_price) : null,
+      created_at:  String(p.created_at ?? ''),
+    }))
+
+  const upcoming = new Map<string, { name: string; quantity: number }[]>()
+  for (const row of Array.isArray(r.upcoming_products) ? (r.upcoming_products as Record<string, unknown>[]) : []) {
+    if (typeof row.appointment_id !== 'string') continue
+    const list = upcoming.get(row.appointment_id) ?? []
+    list.push({ name: String(row.name ?? 'Producto'), quantity: toNum(row.quantity) })
+    upcoming.set(row.appointment_id, list)
+  }
+
+  return {
+    total_spent:         totalSpent,
+    paid_sales:          paidSales,
+    avg_ticket:          totalSpent !== null && paidSales !== null ? (paidSales > 0 ? Math.round(totalSpent / paidSales) : 0) : null,
+    paid_by_appointment: paidByAppointment,
+    purchased_products:  purchased,
+    upcoming_products:   upcoming,
+  }
+}

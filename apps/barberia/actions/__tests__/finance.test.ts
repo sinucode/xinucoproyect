@@ -16,15 +16,22 @@ jest.mock('@/lib/audit', () => ({
 
 describe('Finance Server Actions', () => {
   let mockSupabase: any
+  // Perfil de la sesión (lo lee requireAdmin): por defecto, admin del negocio b1
+  let profile: { role: string; business_id: string | null } | null
+
+  const profileChain = () => ({
+    select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: profile, error: null }) }) }),
+  })
 
   beforeEach(() => {
     jest.clearAllMocks()
+    profile = { role: 'admin', business_id: 'b1' }
 
     mockSupabase = {
       auth: {
         getUser: jest.fn().mockResolvedValue({ data: { user: { id: 'u1' } } }),
       },
-      from: jest.fn().mockReturnThis(),
+      from: jest.fn((table: string) => (table === 'profiles' ? profileChain() : mockSupabase)),
       select: jest.fn().mockReturnThis(),
       insert: jest.fn().mockReturnThis(),
       in: jest.fn().mockReturnThis(),
@@ -173,6 +180,63 @@ describe('Finance Server Actions', () => {
     })
   })
 
+  describe('solo el administrador maneja la caja y los cobros', () => {
+    const checkoutParams = {
+      appointmentId: 'apt1', businessId: 'b1', shiftId: 'sh1',
+      paymentMethod: 'cash' as const, receivedAmount: 100, tipAmount: 0, discountAmount: 0,
+      items: [{ description: 'Corte', quantity: 1, unitPrice: 100, itemType: 'service' as const }],
+    }
+
+    const asBarber = () => { profile = { role: 'barber', business_id: 'b1' } }
+
+    it('el barbero no puede abrir ni cerrar la caja', async () => {
+      asBarber()
+      expect((await openShift('b1', 1000)).error).toMatch(/administrador/)
+      expect((await closeShift('b1', 'shift1', 1000)).error).toMatch(/administrador/)
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+      expect(mockSupabase.update).not.toHaveBeenCalled()
+    })
+
+    it('el barbero no puede cobrar: no se llama al RPC de cobro', async () => {
+      asBarber()
+      const result = await checkoutAppointment(checkoutParams)
+      expect(result).toEqual(expect.objectContaining({ error: 'forbidden' }))
+      expect(mockSupabase.rpc).not.toHaveBeenCalled()
+    })
+
+    it('el barbero no ve el turno abierto ni su resumen', async () => {
+      asBarber()
+      expect(await getActiveShiftDetails('b1')).toBeNull()
+      expect(await getShiftPaymentsByMethod('shift1')).toEqual([])
+      expect((await getShiftSummary('shift1')).totalSales).toBe(0)
+      expect(mockSupabase.rpc).not.toHaveBeenCalled()
+      expect(mockSupabase.maybeSingle).not.toHaveBeenCalled()
+    })
+
+    it('sin sesión se rechaza igual', async () => {
+      mockSupabase.auth.getUser.mockResolvedValue({ data: { user: null } })
+      expect((await openShift('b1', 1000)).error).toMatch(/administrador/)
+      expect(await getActiveShiftDetails('b1')).toBeNull()
+    })
+
+    it('un admin no puede operar la caja de OTRO negocio (businessId distinto al del perfil)', async () => {
+      expect((await openShift('otro-negocio', 1000)).error).toBe('Acceso denegado.')
+      expect((await closeShift('otro-negocio', 'shift1', 1000)).error).toBe('Acceso denegado.')
+      expect(await getActiveShiftDetails('otro-negocio')).toBeNull()
+      expect(await checkoutAppointment({ ...checkoutParams, businessId: 'otro-negocio' }))
+        .toEqual(expect.objectContaining({ error: 'forbidden' }))
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+      expect(mockSupabase.rpc).not.toHaveBeenCalled()
+    })
+
+    it('traduce admin_required del RPC como forbidden', async () => {
+      const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'admin_required' } })
+      expect(await checkoutAppointment(checkoutParams)).toEqual(expect.objectContaining({ error: 'forbidden' }))
+      errSpy.mockRestore()
+    })
+  })
+
   describe('openShift', () => {
     it('prevents opening if one already exists', async () => {
       mockSupabase.maybeSingle.mockResolvedValueOnce({ data: { id: 'shift1' }, error: null })
@@ -202,7 +266,9 @@ describe('Finance Server Actions', () => {
 
     it('closes shift successfully', async () => {
       mockSupabase.eq.mockReturnValueOnce({ eq: jest.fn().mockResolvedValueOnce({ count: 0, error: null }) })
-      mockSupabase.update.mockReturnValueOnce({ eq: jest.fn().mockResolvedValueOnce({ error: null }) })
+      mockSupabase.update.mockReturnValueOnce({
+        eq: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValueOnce({ error: null }) }),
+      })
 
       const result = await closeShift('b1', 'shift1', 200000)
       expect(result.success).toBe(true)

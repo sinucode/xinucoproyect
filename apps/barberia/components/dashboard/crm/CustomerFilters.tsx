@@ -11,6 +11,7 @@ import {
   parseCustomerFilter,
   parseCustomerSort,
 } from '@/lib/crm-utils'
+import { useIsAdmin } from '@/lib/features/role-context'
 
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-color)]'
@@ -34,7 +35,11 @@ export function CustomerFilters() {
 
   const urlQuery = searchParams.get('q') ?? ''
   const filter = parseCustomerFilter(searchParams.get('filter'))
-  const sort = parseCustomerSort(searchParams.get('sort'))
+  // "Mayor gasto" es dinero: solo el admin lo ve (el servidor además lo ignora para otros roles)
+  const isAdmin = useIsAdmin()
+  const parsedSort = parseCustomerSort(searchParams.get('sort'))
+  const sort = !isAdmin && parsedSort === 'spent' ? 'recent' : parsedSort
+  const sortOptions = CUSTOMER_SORTS.filter((s) => isAdmin || s !== 'spent')
 
   const [text, setText] = useState(urlQuery)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -124,7 +129,7 @@ export function CustomerFilters() {
         onChange={(e) => update({ q: text, sort: e.target.value })}
         className={selectClass(sort !== 'recent')}
       >
-        {CUSTOMER_SORTS.map((s) => (
+        {sortOptions.map((s) => (
           <option key={s} value={s}>
             Ordenar: {CUSTOMER_SORT_LABELS[s]}
           </option>

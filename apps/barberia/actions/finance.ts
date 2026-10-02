@@ -10,11 +10,41 @@ import { businessTodayISODate, apptDateKey, dayLabel, formatApptTime } from '@/l
 import { parseReservations, type InventoryReservation } from '@/lib/inventory-reservations'
 import { mapAccountError } from '@/lib/money-accounts'
 
+const NOT_ADMIN_FINANCE = 'Solo un administrador puede manejar la caja y los cobros.'
+
+type FinanceClient = Awaited<ReturnType<typeof createClient>>
+
 /**
- * getActiveShift — Obtiene el turno de caja abierto actualmente para un negocio.
+ * requireAdmin — Sesión + perfil admin/super_admin. El negocio sale SIEMPRE del perfil; si el
+ * `businessId` recibido del cliente no coincide, se rechaza. El barbero nunca cobra ni ve el turno.
  */
-export async function getActiveShift(businessId: string) {
+async function requireAdmin(
+  businessId?: string,
+): Promise<{ supabase: FinanceClient; userId: string; businessId: string } | { error: string }> {
   const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: NOT_ADMIN_FINANCE }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, business_id')
+    .eq('id', user.id)
+    .single()
+
+  const role = (profile as { role?: string } | null)?.role
+  const profileBusinessId = (profile as { business_id?: string | null } | null)?.business_id
+  if ((role !== 'admin' && role !== 'super_admin') || !profileBusinessId) {
+    return { error: NOT_ADMIN_FINANCE }
+  }
+  if (businessId !== undefined && businessId !== profileBusinessId) {
+    return { error: 'Acceso denegado.' }
+  }
+
+  return { supabase, userId: user.id, businessId: profileBusinessId }
+}
+
+async function loadActiveShift(supabase: FinanceClient, businessId: string) {
   const { data, error } = await supabase
     .from('cash_register_shifts')
     .select('*')
@@ -30,15 +60,42 @@ export async function getActiveShift(businessId: string) {
 }
 
 /**
+ * getActiveShift — Obtiene el turno de caja abierto actualmente para un negocio.
+ * Solo administradores: para cualquier otro rol devuelve null (el barbero nunca ve la caja).
+ */
+export async function getActiveShift(businessId: string) {
+  const auth = await requireAdmin(businessId)
+  if ('error' in auth) return null
+  return loadActiveShift(auth.supabase, auth.businessId)
+}
+
+/**
  * getShiftSummary — Consolidados financieros de ventas y efectivo del turno.
  *
  * Se calcula en el servidor de la base (RPC get_shift_cash_summary, tenant-checked): la RLS de
  * staff_ledger solo deja leer al administrador, así que sumar los pagos al equipo desde aquí
  * daría un efectivo esperado incorrecto para el resto de roles.
  */
-export async function getShiftSummary(shiftId: string) {
-  const supabase = await createClient()
+const EMPTY_SHIFT_SUMMARY = {
+  totalSales: 0,
+  totalCashCollected: 0,
+  totalCashExpenses: 0,
+  totalCashTeamPayments: 0,
+  totalCashInventoryPurchases: 0,
+  totalCashAssetPurchases: 0,
+  totalCashAssetSales: 0,
+  totalCashMovementsIn: 0,
+  totalCashMovementsOut: 0,
+}
 
+/** Solo administradores (el RPC también lo exige): para otro rol devuelve todo en cero. */
+export async function getShiftSummary(shiftId: string) {
+  const auth = await requireAdmin()
+  if ('error' in auth) return { ...EMPTY_SHIFT_SUMMARY }
+  return loadShiftSummary(auth.supabase, shiftId)
+}
+
+async function loadShiftSummary(supabase: FinanceClient, shiftId: string) {
   const { data, error } = await supabase.rpc('get_shift_cash_summary', { p_shift_id: shiftId })
 
   if (error) {
@@ -94,10 +151,21 @@ const SHIFT_METHOD_LABEL: Record<string, string> = {
  * Nunca tumba el dashboard: ante un error devuelve una lista vacía.
  */
 export async function getShiftPaymentsByMethod(shiftId: string): Promise<ShiftMethodTotal[]> {
+  // Solo administradores: para otro rol, lista vacía. Nunca lanza (ni si falla la sesión).
+  try {
+    const auth = await requireAdmin()
+    if ('error' in auth) return []
+    return await loadShiftPaymentsByMethod(auth.supabase, shiftId)
+  } catch (e) {
+    console.error('Error fetching shift payments by method:', e)
+    return []
+  }
+}
+
+async function loadShiftPaymentsByMethod(supabase: FinanceClient, shiftId: string): Promise<ShiftMethodTotal[]> {
   let data: unknown = null
   let error: unknown = null
   try {
-    const supabase = await createClient()
     const res = await supabase
       .from('payments')
       .select('amount, payment_method, account_id, money_accounts(name, is_cash_drawer), sales!inner(status)')
@@ -160,12 +228,16 @@ export async function getShiftPaymentsByMethod(shiftId: string): Promise<ShiftMe
  * getActiveShiftDetails — Retorna el turno activo junto con su resumen financiero.
  */
 export async function getActiveShiftDetails(businessId: string) {
-  const shift = await getActiveShift(businessId)
+  // Solo administradores: el barbero nunca ve el turno abierto (devuelve null como "sin turno")
+  const auth = await requireAdmin(businessId)
+  if ('error' in auth) return null
+
+  const shift = await loadActiveShift(auth.supabase, auth.businessId)
   if (!shift) return null
 
   const [summary, byMethod] = await Promise.all([
-    getShiftSummary(shift.id),
-    getShiftPaymentsByMethod(shift.id),
+    loadShiftSummary(auth.supabase, shift.id),
+    loadShiftPaymentsByMethod(auth.supabase, shift.id),
   ])
 
   return {
@@ -203,14 +275,13 @@ export async function getActiveShiftDetails(businessId: string) {
  * openShift — Abre un nuevo turno de caja registrando la base inicial.
  */
 export async function openShift(businessId: string, startingCash: number) {
-  const supabase = await createClient()
-  
-  // Seguridad: obtener usuario autenticado
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'No autorizado. Por favor inicia sesión.' }
+  // Seguridad: solo el administrador del negocio abre la caja
+  const auth = await requireAdmin(businessId)
+  if ('error' in auth) return { error: auth.error }
+  const { supabase, userId } = auth
 
   // Validar si ya hay un turno abierto
-  const existing = await getActiveShift(businessId)
+  const existing = await loadActiveShift(supabase, businessId)
   if (existing) {
     return { error: 'Ya existe un turno de caja abierto para este negocio.' }
   }
@@ -219,7 +290,7 @@ export async function openShift(businessId: string, startingCash: number) {
     .from('cash_register_shifts')
     .insert({
       business_id:            businessId,
-      opened_by:              user.id,
+      opened_by:              userId,
       opened_at:              new Date().toISOString(),
       status:                 'open',
       opening_balance:        startingCash,
@@ -239,11 +310,10 @@ export async function openShift(businessId: string, startingCash: number) {
  * closeShift — Cierra el turno activo validando integridad operativa (citas en curso).
  */
 export async function closeShift(businessId: string, shiftId: string, actualClosingBalance: number) {
-  const supabase = await createClient()
-  
-  // Seguridad
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'No autorizado. Por favor inicia sesión.' }
+  // Seguridad: solo el administrador del negocio cierra la caja
+  const auth = await requireAdmin(businessId)
+  if ('error' in auth) return { error: auth.error }
+  const { supabase, userId } = auth
 
   // 1. Integridad: Verificar si hay citas en estado 'in_progress'
   const { count, error: countError } = await supabase
@@ -265,12 +335,13 @@ export async function closeShift(businessId: string, shiftId: string, actualClos
   const { error } = await supabase
     .from('cash_register_shifts')
     .update({
-      closed_by:              user.id,
+      closed_by:              userId,
       closed_at:              new Date().toISOString(),
       status:                 'closed',
       actual_closing_balance: actualClosingBalance,
     })
     .eq('id', shiftId)
+    .eq('business_id', businessId)
 
   if (error) {
     console.error('Error closing shift:', error)
@@ -394,14 +465,15 @@ export interface AppointmentProductLine {
 export async function getAppointmentProducts(
   appointmentId: string
 ): Promise<{ data: AppointmentProductLine[]; error: string | null }> {
-  const supabase = await createClient()
-
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: [], error: 'No autenticado.' }
+  // Solo administradores (cobro): el nombre del producto viene de inventory_items, que es admin-only
+  const auth = await requireAdmin()
+  if ('error' in auth) return { data: [], error: auth.error }
+  const { supabase, businessId } = auth
 
   const { data, error } = await supabase
     .from('appointment_products')
     .select('item_id, quantity, unit_price, inventory_items(name)')
+    .eq('business_id', businessId)
     .eq('appointment_id', appointmentId)
 
   if (error) return { data: [], error: error.message }
@@ -437,7 +509,10 @@ export async function getAppointmentProducts(
  * Migración requerida: supabase/migrations/20260523_checkout_atomic_rpc.sql
  */
 export async function checkoutAppointment(params: CheckoutAppointmentParams) {
-  const supabase = await createClient()
+  // Solo el administrador cobra (el barbero no ve el turno ni el cobro). El negocio debe ser el suyo.
+  const auth = await requireAdmin(params.businessId)
+  if ('error' in auth) return { error: 'forbidden', message: auth.error }
+  const { supabase } = auth
 
   const {
     appointmentId,
@@ -573,6 +648,9 @@ export async function checkoutAppointment(params: CheckoutAppointmentParams) {
 
   if (error) {
     console.error('[checkout_appointment RPC]', error)
+    if (error.message?.includes('admin_required')) {
+      return { error: 'forbidden', message: NOT_ADMIN_FINANCE }
+    }
     if (error.message?.includes('shift_not_open')) {
       return { error: 'shift_not_open', message: 'No hay una caja abierta.' }
     }

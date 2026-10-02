@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@xinuco/supabase/server'
+import { createClient, createAdminClient } from '@xinuco/supabase/server'
 import { addMinutes, format, parseISO, isBefore, isAfter, getDay } from 'date-fns'
 import { revalidatePath } from 'next/cache'
 import type { AppointmentStatus } from '@xinuco/types'
@@ -156,8 +156,11 @@ export async function updateAppointmentStatus(appointmentId: string, status: App
   // ── Notificación de cancelación por correo (best-effort — nunca bloquea) ────
   if (status === 'cancelled' && existing?.business_id) {
     try {
+      // Service role: notification_log solo admite inserts de servidor. La cita ya se validó arriba
+      // con el cliente del usuario (RLS) y el aviso solo lee/escribe filas de ESE negocio.
+      const admin = await createAdminClient()
       await sendCancellationNotice({
-        supabase,
+        supabase:      admin,
         businessId:    existing.business_id,
         appointmentId,
       })

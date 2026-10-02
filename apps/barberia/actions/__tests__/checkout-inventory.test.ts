@@ -58,6 +58,12 @@ describe('checkoutAppointment — inventario', () => {
     mockSupabase = {
       auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: 'u1' } } }) },
       from: jest.fn().mockImplementation((table: string) => {
+        if (table === 'profiles') {
+          // requireAdmin: la sesión es admin del negocio b1
+          return {
+            select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { role: 'admin', business_id: 'b1' }, error: null }) }) }),
+          }
+        }
         if (table === 'inventory_items') {
           return { select: jest.fn().mockReturnValue({ in: inBuilder }) }
         }

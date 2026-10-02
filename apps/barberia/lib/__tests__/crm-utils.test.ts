@@ -10,6 +10,7 @@ import {
   relativeVisitLabel,
   businessNowWallISO,
   formatApptDateTime,
+  parseSalesSummary,
 } from '../crm-utils'
 
 describe('teléfono', () => {
@@ -85,5 +86,74 @@ describe('fechas', () => {
 
   it('formatApptDateTime', () => {
     expect(formatApptDateTime('2026-10-01T10:00:00Z')).toMatch(/^jue 1 oct 10:00/)
+  })
+})
+
+describe('parseSalesSummary (RPC get_customer_sales_summary)', () => {
+  const adminPayload = {
+    total_spent: '90000.00',
+    paid_sales: 3,
+    paid_by_appointment: [
+      { appointment_id: 'a1', amount: 30000 },
+      { appointment_id: 'a2', amount: '20000' },
+    ],
+    purchased_products: [{ description: 'Cera', quantity: 2, total_price: 40000, created_at: '2026-09-01T10:00:00Z' }],
+    upcoming_products: [
+      { appointment_id: 'a9', name: 'Cera', quantity: 1 },
+      { appointment_id: 'a9', name: 'Shampoo', quantity: 2 },
+    ],
+  }
+
+  it('admin: totales, ticket promedio y monto por cita', () => {
+    const s = parseSalesSummary(adminPayload)
+    expect(s.total_spent).toBe(90000)
+    expect(s.paid_sales).toBe(3)
+    expect(s.avg_ticket).toBe(30000)
+    expect(s.paid_by_appointment?.get('a2')).toBe(20000)
+    expect(s.purchased_products[0].total_price).toBe(40000)
+  })
+
+  it('barbero (montos NULL): ningún monto, pero sí productos y apartados', () => {
+    const s = parseSalesSummary({
+      total_spent: null,
+      paid_sales: null,
+      paid_by_appointment: null,
+      purchased_products: [{ description: 'Cera', quantity: 2, total_price: null, created_at: '2026-09-01T10:00:00Z' }],
+      upcoming_products: adminPayload.upcoming_products,
+    })
+    expect(s.total_spent).toBeNull()
+    expect(s.paid_sales).toBeNull()
+    expect(s.avg_ticket).toBeNull()
+    expect(s.paid_by_appointment).toBeNull()
+    expect(s.purchased_products).toEqual([
+      { description: 'Cera', quantity: 2, total_price: null, created_at: '2026-09-01T10:00:00Z' },
+    ])
+    expect(s.upcoming_products.get('a9')).toEqual([
+      { name: 'Cera', quantity: 1 },
+      { name: 'Shampoo', quantity: 2 },
+    ])
+  })
+
+  it('aunque llegue un total_price, sin total_spent no se muestra ningún monto', () => {
+    const s = parseSalesSummary({
+      total_spent: null,
+      purchased_products: [{ description: 'Cera', quantity: 1, total_price: 20000, created_at: 'x' }],
+    })
+    expect(s.purchased_products[0].total_price).toBeNull()
+  })
+
+  it('respuesta vacía o con error: todo en null y listas vacías', () => {
+    for (const raw of [null, undefined, {}, 'x']) {
+      const s = parseSalesSummary(raw)
+      expect(s.total_spent).toBeNull()
+      expect(s.purchased_products).toEqual([])
+      expect(s.upcoming_products.size).toBe(0)
+    }
+  })
+
+  it('admin sin ventas: ticket promedio 0', () => {
+    const s = parseSalesSummary({ total_spent: 0, paid_sales: 0, paid_by_appointment: [], purchased_products: [] })
+    expect(s.total_spent).toBe(0)
+    expect(s.avg_ticket).toBe(0)
   })
 })

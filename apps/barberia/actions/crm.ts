@@ -8,6 +8,7 @@ import {
   businessNowWallISO,
   parseCustomerFilter,
   parseCustomerSort,
+  parseSalesSummary,
   validateCustomerInput,
   type CustomerInput,
 } from '@/lib/crm-utils'
@@ -31,7 +32,7 @@ export interface CustomerListItem {
   visits:             number          // citas completadas
   last_visit:         string | null   // start_time (hora local como UTC)
   next_appointment:   string | null   // start_time (hora local como UTC)
-  total_spent:        number          // COP, ventas pagadas
+  total_spent:        number | null   // COP, ventas pagadas. null = el rol no ve montos (barbero)
   tags:               string[]
 }
 
@@ -58,7 +59,7 @@ export interface CustomerVisit {
   status:       string
   service_name: string
   staff_name:   string | null
-  amount_paid:  number | null     // venta pagada de esta cita (sales.appointment_id), si existe
+  amount_paid:  number | null     // venta pagada de esta cita (sales.appointment_id); null si no hay o el rol no ve montos
 }
 
 // Próxima cita abierta
@@ -75,7 +76,7 @@ export interface CustomerUpcomingAppointment {
 export interface CustomerPurchasedProduct {
   description: string
   quantity:    number
-  total_price: number
+  total_price: number | null      // null = el rol no ve montos
   created_at:  string             // instante real
 }
 
@@ -101,9 +102,10 @@ export interface CustomerNoteWithAuthor extends CustomerNote {
 export interface CustomerExpediente {
   customer:           CustomerRecord
   total_visits:       number      // citas completadas
-  total_spent:        number      // COP INTEGER — ventas pagadas
-  paid_sales:         number
-  avg_ticket:         number      // COP INTEGER
+  // Montos: null cuando el usuario no es admin (el barbero ve visitas e historial, nunca plata)
+  total_spent:        number | null   // COP — ventas pagadas
+  paid_sales:         number | null
+  avg_ticket:         number | null   // COP
   last_visit:         string | null
   tags:               string[]
   notes:              CustomerNoteWithAuthor[]
@@ -165,7 +167,8 @@ const num = (v: unknown): number => {
 // ════════════════════════════════════════════════════════════════════════════
 // listCustomers
 // Lista paginada (30) vía RPC list_customers: búsqueda, filtro y orden con
-// métricas REALES (gasto = ventas pagadas). SECURITY INVOKER → RLS de tenant.
+// métricas REALES (gasto = ventas pagadas). SECURITY DEFINER con chequeo de negocio;
+// el gasto (total_spent) llega NULL si el usuario no es admin.
 // ════════════════════════════════════════════════════════════════════════════
 
 export async function listCustomers(params: ListCustomersParams = {}): Promise<CustomerListResult> {
@@ -203,7 +206,7 @@ export async function listCustomers(params: ListCustomersParams = {}): Promise<C
     visits:             num(r.visits),
     last_visit:         (r.last_visit as string | null) ?? null,
     next_appointment:   (r.next_appointment as string | null) ?? null,
-    total_spent:        num(r.total_spent),
+    total_spent:        r.total_spent === null || r.total_spent === undefined ? null : num(r.total_spent),
     tags:               Array.isArray(r.tags) ? (r.tags as string[]) : [],
   }))
 
@@ -214,7 +217,8 @@ export async function listCustomers(params: ListCustomersParams = {}): Promise<C
 // getCustomerExpediente
 // Perfil completo: datos, historial (últimas 30 por start_time), próximas citas
 // con productos apartados, notas, etiquetas, staff activo y dinero REAL
-// (sales pagadas + productos comprados).
+// (sales pagadas + productos comprados). El dinero y los productos vienen del RPC
+// get_customer_sales_summary (DEFINER): montos solo para el admin, NULL para el resto.
 // ════════════════════════════════════════════════════════════════════════════
 
 export async function getCustomerExpediente(customerId: string): Promise<CustomerExpediente | null> {
@@ -230,8 +234,7 @@ export async function getCustomerExpediente(customerId: string): Promise<Custome
     appointmentsResult,
     upcomingResult,
     completedResult,
-    salesResult,
-    productsResult,
+    salesSummaryResult,
     notesResult,
     tagsResult,
     staffResult,
@@ -252,14 +255,14 @@ export async function getCustomerExpediente(customerId: string): Promise<Custome
       .order('start_time', { ascending: false })
       .limit(30),
 
-    // Próximas citas abiertas (start_time >= ahora del negocio) + productos apartados
+    // Próximas citas abiertas (start_time >= ahora del negocio); los productos apartados
+    // vienen del RPC de resumen (inventory_items es solo admin)
     supabase
       .from('appointments')
       .select(`
         id, start_time, status,
         services ( name ),
-        staff:staff_id ( full_name ),
-        appointment_products ( quantity, inventory_items ( name ) )
+        staff:staff_id ( full_name )
       `)
       .eq('business_id', businessId)
       .eq('customer_id', customerId)
@@ -278,24 +281,9 @@ export async function getCustomerExpediente(customerId: string): Promise<Custome
       .order('start_time', { ascending: false })
       .limit(1),
 
-    // Dinero real: ventas pagadas
-    supabase
-      .from('sales')
-      .select('appointment_id, total_amount')
-      .eq('business_id', businessId)
-      .eq('customer_id', customerId)
-      .eq('status', 'paid'),
-
-    // Productos comprados (últimos 10)
-    supabase
-      .from('sale_items')
-      .select('description, quantity, total_price, created_at, sales!inner ( customer_id, status )')
-      .eq('business_id', businessId)
-      .eq('item_type', 'product')
-      .eq('sales.customer_id', customerId)
-      .eq('sales.status', 'paid')
-      .order('created_at', { ascending: false })
-      .limit(10),
+    // Dinero real + productos comprados + productos apartados (RPC: valida el negocio y
+    // devuelve los montos solo al admin)
+    supabase.rpc('get_customer_sales_summary', { p_customer_id: customerId }),
 
     supabase
       .from('customer_notes')
@@ -325,15 +313,11 @@ export async function getCustomerExpediente(customerId: string): Promise<Custome
   if (customerResult.error || !customerResult.data) return null
   const customer = customerResult.data as unknown as CustomerRecord
 
-  // ── Ventas pagadas → totales y monto por cita ───────────────────────────────
-  type SaleRow = { appointment_id: string | null; total_amount: number }
-  const sales = (salesResult.data ?? []) as unknown as SaleRow[]
-  const totalSpent = sales.reduce((sum, s) => sum + num(s.total_amount), 0)
-  const paidByAppt = new Map<string, number>()
-  for (const s of sales) {
-    if (!s.appointment_id) continue
-    paidByAppt.set(s.appointment_id, (paidByAppt.get(s.appointment_id) ?? 0) + num(s.total_amount))
+  // ── Resumen de compras (montos null para quien no es admin) ─────────────────
+  if (salesSummaryResult.error) {
+    console.error('[crm] get_customer_sales_summary', salesSummaryResult.error)
   }
+  const summary = parseSalesSummary(salesSummaryResult.error ? null : salesSummaryResult.data)
 
   // ── Próximas citas ──────────────────────────────────────────────────────────
   type One<T> = T | T[] | null
@@ -343,7 +327,6 @@ export async function getCustomerExpediente(customerId: string): Promise<Custome
     status: string
     services: One<{ name: string }>
     staff: One<{ full_name: string }>
-    appointment_products: { quantity: number; inventory_items: One<{ name: string }> }[] | null
   }
   const first = <T,>(v: One<T>): T | null => (Array.isArray(v) ? (v[0] ?? null) : v)
 
@@ -353,10 +336,7 @@ export async function getCustomerExpediente(customerId: string): Promise<Custome
     status:       a.status,
     service_name: first(a.services)?.name ?? 'Servicio',
     staff_name:   first(a.staff)?.full_name ?? null,
-    products: (a.appointment_products ?? []).map((p) => ({
-      name:     first(p.inventory_items)?.name ?? 'Producto',
-      quantity: num(p.quantity),
-    })),
+    products:     summary.upcoming_products.get(a.id) ?? [],
   }))
   const upcomingIds = new Set(upcoming.map((u) => u.id))
 
@@ -376,17 +356,11 @@ export async function getCustomerExpediente(customerId: string): Promise<Custome
       status:       a.status,
       service_name: first(a.services)?.name ?? 'Servicio desconocido',
       staff_name:   first(a.staff)?.full_name ?? null,
-      amount_paid:  paidByAppt.has(a.id) ? (paidByAppt.get(a.id) as number) : null,
+      amount_paid:  summary.paid_by_appointment?.get(a.id) ?? null,
     }))
 
   // ── Productos comprados ─────────────────────────────────────────────────────
-  type ProductRow = { description: string; quantity: number; total_price: number; created_at: string }
-  const purchased_products: CustomerPurchasedProduct[] = ((productsResult.data ?? []) as unknown as ProductRow[]).map((p) => ({
-    description: p.description,
-    quantity:    num(p.quantity),
-    total_price: num(p.total_price),
-    created_at:  p.created_at,
-  }))
+  const purchased_products: CustomerPurchasedProduct[] = summary.purchased_products
 
   // ── Notas ───────────────────────────────────────────────────────────────────
   type NoteRow = CustomerNote & {
@@ -409,14 +383,13 @@ export async function getCustomerExpediente(customerId: string): Promise<Custome
 
   const completedRows = (completedResult.data ?? []) as unknown as { start_time: string }[]
   const totalVisits = completedResult.count ?? completedRows.length
-  const paidSales = sales.length
 
   return {
     customer,
     total_visits:       totalVisits,
-    total_spent:        totalSpent,
-    paid_sales:         paidSales,
-    avg_ticket:         paidSales > 0 ? Math.round(totalSpent / paidSales) : 0,
+    total_spent:        summary.total_spent,
+    paid_sales:         summary.paid_sales,
+    avg_ticket:         summary.avg_ticket,
     last_visit:         completedRows[0]?.start_time ?? null,
     tags:               (tagsResult.data ?? []).map((t) => (t as { tag: string }).tag),
     notes,

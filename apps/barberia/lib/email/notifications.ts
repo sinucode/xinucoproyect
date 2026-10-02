@@ -50,7 +50,7 @@ async function isEmailEnabled(
 /**
  * Carga los datos de la cita junto con cliente, servicio y staff en un solo join.
  */
-async function loadAppointmentData(supabase: XinucoSupabase, appointmentId: string) {
+async function loadAppointmentData(supabase: XinucoSupabase, appointmentId: string, businessId: string) {
   const { data } = await supabase
     .from('appointments')
     .select(`
@@ -66,6 +66,7 @@ async function loadAppointmentData(supabase: XinucoSupabase, appointmentId: stri
       staff            ( full_name )
     `)
     .eq('id', appointmentId)
+    .eq('business_id', businessId)   // con service role: nunca leer una cita de otro negocio
     .returns<any[]>()
     .single()
 
@@ -123,12 +124,14 @@ async function loadBusinessBrand(
 async function loadReservedProducts(
   supabase: XinucoSupabase,
   appointmentId: string,
+  businessId: string,
 ): Promise<{ name: string; quantity: number; unitPrice: number }[]> {
   try {
     const { data } = await (supabase as any)
       .from('appointment_products')
       .select('quantity, unit_price, inventory_items(name)')
-      .eq('appointment_id', appointmentId) as {
+      .eq('appointment_id', appointmentId)
+      .eq('business_id', businessId) as {
         data: { quantity: number; unit_price: number; inventory_items: { name: string } | { name: string }[] | null }[] | null
       }
     return (data ?? []).map((row) => {
@@ -183,7 +186,7 @@ export async function sendBookingConfirmation(params: {
   if (!(await isEmailEnabled(supabase, businessId))) return
 
   // 2. Cargar datos de la cita
-  const appt = await loadAppointmentData(supabase, appointmentId)
+  const appt = await loadAppointmentData(supabase, appointmentId, businessId)
   if (!appt) return
 
   // La relación puede venir como array o como objeto dependiendo del join
@@ -197,7 +200,7 @@ export async function sendBookingConfirmation(params: {
   const { business, brand, cancelUrl } = await loadBusinessBrand(supabase, businessId, appt.public_token)
 
   // 3b. Productos apartados al reservar
-  const reservedProducts = await loadReservedProducts(supabase, appointmentId)
+  const reservedProducts = await loadReservedProducts(supabase, appointmentId, businessId)
 
   // 4. Construir y enviar el correo
   const html = appointmentConfirmationEmail({
@@ -243,7 +246,7 @@ export async function sendBookingReminder(params: {
   if (!(await isEmailEnabled(supabase, businessId))) return
 
   // 2. Cargar datos de la cita
-  const appt = await loadAppointmentData(supabase, appointmentId)
+  const appt = await loadAppointmentData(supabase, appointmentId, businessId)
   if (!appt) return
 
   const customer = Array.isArray(appt.customers) ? appt.customers[0] : appt.customers
@@ -262,7 +265,7 @@ export async function sendBookingReminder(params: {
     serviceName:   service.name,
     staffName:     staff?.full_name ?? null,
     startTime:     appt.start_time ?? new Date().toISOString(),
-    reservedProducts: await loadReservedProducts(supabase, appointmentId),
+    reservedProducts: await loadReservedProducts(supabase, appointmentId, businessId),
     brand,
     cancelUrl,
   })
@@ -298,7 +301,7 @@ export async function sendCancellationNotice(params: {
   if (!(await isEmailEnabled(supabase, businessId))) return
 
   // 2. Cargar datos de la cita
-  const appt = await loadAppointmentData(supabase, appointmentId)
+  const appt = await loadAppointmentData(supabase, appointmentId, businessId)
   if (!appt) return
 
   const customer = Array.isArray(appt.customers) ? appt.customers[0] : appt.customers

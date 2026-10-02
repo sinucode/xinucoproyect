@@ -157,10 +157,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Cuando el pago es aprobado, actualizar el appointment a 'scheduled'
     if (externalRef.startsWith('booking_') && mpStatus === 'approved') {
       const appointmentId = externalRef.replace('booking_', '')
+      // [SEC] Confirmar solo si el pago registrado por el servidor es de esta misma cita y de
+      // su negocio: así una referencia ajena no puede confirmar citas de otra barbería.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: payRows } = await (supabase.from('mp_payments' as any) as any)
+        .select('business_id')
+        .eq('external_reference', externalRef)
+        .eq('appointment_id', appointmentId) as { data: { business_id: string }[] | null }
+      const payBusinesses = new Set((payRows ?? []).map(r => r.business_id))
+      if (payBusinesses.size !== 1) {
+        console.error('[MP webhook] Pago de reserva sin registro único del negocio; no se confirma la cita', appointmentId)
+        return NextResponse.json({ status: 'ok', mp_status: mpStatus })
+      }
+      const [payBusiness] = [...payBusinesses]
+
       const { error: apptError } = await supabase
         .from('appointments')
         .update({ status: 'scheduled', updated_at: new Date().toISOString() })
         .eq('id', appointmentId)
+        .eq('business_id', payBusiness)
         .eq('status', 'payment_pending')   // solo si sigue pendiente (idempotente)
 
       if (apptError) {

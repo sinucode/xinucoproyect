@@ -1,5 +1,6 @@
 import {
   listCustomers,
+  getCustomerExpediente,
   createCustomer,
   updateCustomer,
   addCustomerNote,
@@ -116,6 +117,97 @@ describe('CRM Server Actions', () => {
       const result = await listCustomers({})
       expect(result.error).toBeDefined()
       expect(rpc).not.toHaveBeenCalled()
+    })
+
+    it('barbero: total_spent llega NULL y se conserva como null (no 0)', async () => {
+      rpc.mockResolvedValueOnce({
+        data: {
+          total: 1,
+          items: [{
+            id: 'c1', full_name: 'Juan', phone: '300', email: null, birthday: null,
+            preferred_staff_id: null, created_at: '2026-01-01T00:00:00Z', visits: 3,
+            last_visit: null, next_appointment: null, total_spent: null, tags: [],
+          }],
+        },
+        error: null,
+      })
+      const result = await listCustomers({})
+      expect(result.items[0].total_spent).toBeNull()
+      expect(result.items[0].visits).toBe(3)
+    })
+  })
+
+  // ── getCustomerExpediente ───────────────────────────────────────────────────
+
+  describe('getCustomerExpediente', () => {
+    const queueBase = () => {
+      queue('customers', { data: { id: 'c1', business_id: 'b1', full_name: 'Juan', created_at: '2026-01-01T00:00:00Z' }, error: null })
+      queue('appointments',
+        { data: [{ id: 'a1', start_time: '2026-09-20T10:00:00Z', status: 'completed', services: { name: 'Corte' }, staff: { full_name: 'Luis' } }], error: null },
+        { data: [{ id: 'a9', start_time: '2999-01-01T10:00:00Z', status: 'scheduled', services: { name: 'Barba' }, staff: null }], error: null },
+        { data: [{ start_time: '2026-09-20T10:00:00Z' }], count: 1, error: null },
+      )
+      queue('customer_notes', { data: [], error: null })
+      queue('customer_tags', { data: [], error: null })
+      queue('staff', { data: [], error: null })
+    }
+
+    it('lee el dinero del RPC y NO consulta sales ni sale_items directamente', async () => {
+      queueBase()
+      rpc.mockResolvedValueOnce({
+        data: {
+          total_spent: 60000, paid_sales: 2,
+          paid_by_appointment: [{ appointment_id: 'a1', amount: 60000 }],
+          purchased_products: [{ description: 'Cera', quantity: 1, total_price: 20000, created_at: '2026-09-01T00:00:00Z' }],
+          upcoming_products: [{ appointment_id: 'a9', name: 'Cera', quantity: 2 }],
+        },
+        error: null,
+      })
+
+      const exp = await getCustomerExpediente('c1')
+
+      expect(rpc).toHaveBeenCalledWith('get_customer_sales_summary', { p_customer_id: 'c1' })
+      expect(calls.sales).toBeUndefined()
+      expect(calls.sale_items).toBeUndefined()
+      expect(exp?.total_spent).toBe(60000)
+      expect(exp?.avg_ticket).toBe(30000)
+      expect(exp?.visits[0].amount_paid).toBe(60000)
+      expect(exp?.purchased_products[0].total_price).toBe(20000)
+      expect(exp?.upcoming[0].products).toEqual([{ name: 'Cera', quantity: 2 }])
+    })
+
+    it('barbero: montos NULL → sin dinero en el expediente, pero con visitas y productos', async () => {
+      queueBase()
+      rpc.mockResolvedValueOnce({
+        data: {
+          total_spent: null, paid_sales: null, paid_by_appointment: null,
+          purchased_products: [{ description: 'Cera', quantity: 1, total_price: null, created_at: '2026-09-01T00:00:00Z' }],
+          upcoming_products: [{ appointment_id: 'a9', name: 'Cera', quantity: 2 }],
+        },
+        error: null,
+      })
+
+      const exp = await getCustomerExpediente('c1')
+
+      expect(exp?.total_spent).toBeNull()
+      expect(exp?.paid_sales).toBeNull()
+      expect(exp?.avg_ticket).toBeNull()
+      expect(exp?.visits).toHaveLength(1)
+      expect(exp?.visits[0].amount_paid).toBeNull()
+      expect(exp?.total_visits).toBe(1)
+      expect(exp?.purchased_products).toEqual([
+        { description: 'Cera', quantity: 1, total_price: null, created_at: '2026-09-01T00:00:00Z' },
+      ])
+      expect(exp?.upcoming[0].products).toEqual([{ name: 'Cera', quantity: 2 }])
+    })
+
+    it('si el RPC falla, no se muestra dinero (null) en vez de ceros falsos', async () => {
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      queueBase()
+      rpc.mockResolvedValueOnce({ data: null, error: { message: 'forbidden' } })
+      const exp = await getCustomerExpediente('c1')
+      expect(exp?.total_spent).toBeNull()
+      spy.mockRestore()
     })
   })
 

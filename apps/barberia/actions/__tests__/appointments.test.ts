@@ -1,10 +1,11 @@
 import { updateAppointmentStatus } from '../appointments'
-import { createClient } from '@xinuco/supabase/server'
+import { createClient, createAdminClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { sendCancellationNotice } from '@/lib/email/notifications'
 
 jest.mock('@xinuco/supabase/server', () => ({
   createClient: jest.fn(),
+  createAdminClient: jest.fn(),
 }))
 
 jest.mock('next/cache', () => ({
@@ -17,6 +18,8 @@ jest.mock('@/lib/email/notifications', () => ({
 
 describe('Appointments Server Actions', () => {
   let mockSupabase: any
+  // Cliente service role: el aviso de cancelación escribe notification_log, que no admite usuarios
+  const mockAdmin: any = { __admin: true }
 
   beforeEach(() => {
     jest.clearAllMocks()
@@ -33,6 +36,7 @@ describe('Appointments Server Actions', () => {
     }
 
     ;(createClient as jest.Mock).mockResolvedValue(mockSupabase)
+    ;(createAdminClient as jest.Mock).mockResolvedValue(mockAdmin)
   })
 
   describe('updateAppointmentStatus', () => {
@@ -72,8 +76,9 @@ describe('Appointments Server Actions', () => {
         updated_at: expect.any(String),
         cancelled_by: 'business',
       })
+      // Con el cliente service role y el negocio de la cita (no con el cliente del usuario)
       expect(sendCancellationNotice).toHaveBeenCalledWith({
-        supabase: mockSupabase,
+        supabase: mockAdmin,
         businessId: 'b1',
         appointmentId: 'apt1'
       })

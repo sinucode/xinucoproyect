@@ -20,7 +20,7 @@ import { Preference, PreApproval } from 'mercadopago'
 import { getMPClient } from '@/lib/mercadopago/client'
 import { calculateMPFee } from '@/lib/mercadopago/fees'
 import type { MPFeeBreakdown, MPPaymentMethod } from '@/lib/mercadopago/types'
-import { createClient } from '@xinuco/supabase/server'
+import { createClient, createAdminClient } from '@xinuco/supabase/server'
 import { PLAN_PRICES_COP, PLAN_BUNDLES, type PlanName } from '@xinuco/billing-catalog'
 import type { BusinessFeatures } from '@xinuco/types'
 
@@ -49,6 +49,28 @@ export interface MPPreferenceResponse {
   qr_url:             string   // URL de imagen QR lista para <img src>
   mp_payment_db_id:   string   // ID del registro en mp_payments (para polling)
   is_test_mode:       boolean  // true cuando MP_ACCESS_TOKEN empieza con TEST-
+}
+
+// ── Autorización ─────────────────────────────────────────────────────────────
+
+const NOT_ADMIN_MP = 'Solo un administrador puede gestionar los pagos en línea del negocio.'
+
+/**
+ * ¿El usuario es admin (o super_admin) del negocio? Se lee del perfil de la sesión.
+ * Las tablas mp_* solo las lee el admin y solo se escriben con service role.
+ */
+async function isAdminOfBusiness(
+  supabase:   Awaited<ReturnType<typeof createClient>>,
+  userId:     string,
+  businessId: string,
+): Promise<boolean> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, business_id')
+    .eq('id', userId)
+    .single()
+  const p = profile as { role?: string; business_id?: string | null } | null
+  return !!p && p.business_id === businessId && (p.role === 'admin' || p.role === 'super_admin')
 }
 
 // ── 1. calculateFeePreview ───────────────────────────────────────────────────
@@ -93,6 +115,27 @@ export async function createMPPreference(
   if (!jwtBusinessId || jwtBusinessId !== businessId) {
     console.error(`[MP createPreference] SEGURIDAD: businessId del cliente (${businessId}) no coincide con JWT (${jwtBusinessId ?? 'none'}). user_id: ${user.id}`)
     return { error: 'Acceso denegado.' }
+  }
+
+  // Solo el administrador cobra (el barbero no ve ni abre la caja)
+  if (!(await isAdminOfBusiness(supabaseAuth, user.id, businessId))) {
+    return { error: NOT_ADMIN_MP }
+  }
+
+  // [SEC] 'booking_' y 'saas_' son referencias que crea solo el servidor (reserva en línea y
+  // suscripción): el webhook actúa sobre ellas, así que no se aceptan desde el cliente.
+  if (typeof externalRef !== 'string' || !externalRef || /^(booking_|saas_)/i.test(externalRef)) {
+    return { error: 'Referencia de pago inválida.' }
+  }
+  // [SEC] La cita (si viene) debe ser de este negocio
+  if (appointmentId) {
+    const { data: appt } = await supabaseAuth
+      .from('appointments')
+      .select('id')
+      .eq('id', appointmentId)
+      .eq('business_id', businessId)
+      .maybeSingle()
+    if (!appt) return { error: 'Cita no encontrada.' }
   }
 
   // ── Validar que MP está configurado ────────────────────────────────────────
@@ -152,7 +195,9 @@ export async function createMPPreference(
 
     // ── Guardar registro pendiente en mp_payments ─────────────────────────────
     // mp_payments no está en el tipo generado → cast completo para evitar TS2353
-    const supabase = await createClient()
+    // Service role: mp_payments no admite escrituras de usuarios (RLS). El negocio ya se
+    // validó arriba contra el JWT y el perfil admin; el insert va siempre con ese business_id.
+    const supabase = await createAdminClient()
     const mpInsertPayload = {
       business_id:        businessId,
       appointment_id:     appointmentId ?? null,
@@ -172,8 +217,10 @@ export async function createMPPreference(
       .select('id')
       .single() as { data: { id: string } | null; error: { message: string } | null }
 
-    if (dbError) {
-      console.error('[MP createPreference] DB error:', dbError.message)
+    if (dbError || !dbRow) {
+      // Sin el registro, el webhook no encontraría el pago y la caja nunca lo vería: no mostrar el QR.
+      console.error('[MP createPreference] DB error:', dbError?.message ?? 'sin fila')
+      return { error: 'No se pudo registrar el pago. Inténtalo de nuevo.' }
     }
 
     // En modo test (token empieza con TEST-) usar sandbox_init_point
@@ -203,6 +250,9 @@ export async function createMPPreference(
 /**
  * Polling endpoint: el UI consulta cada 3s para saber si el pago fue aprobado.
  * Devuelve el estado actual del registro en `mp_payments`.
+ *
+ * Nota: la RLS de mp_payments solo deja leer al admin del negocio; el polling anónimo
+ * del flujo de reserva pública (BookingPaymentStep) queda bloqueado por la RLS (preexistente).
  */
 export async function getMPPaymentStatus(
   mpPaymentDbId: string,
@@ -266,6 +316,11 @@ export async function createMPSaaSSubscription(params: {
     return { error: 'Acceso denegado.' }
   }
 
+  // Solo el administrador contrata el plan del negocio
+  if (!(await isAdminOfBusiness(supabaseAuth, user.id, businessId))) {
+    return { error: 'Solo un administrador puede contratar o cambiar el plan.' }
+  }
+
   if (planId === 'esencial') {
     return { error: 'El plan Esencial es de entrada — no requiere suscripción MP.' }
   }
@@ -312,7 +367,8 @@ export async function createMPSaaSSubscription(params: {
     const initPoint     = result.init_point!
 
     // ── Upsert mp_subscriptions (pending hasta que el webhook confirme) ────────
-    const supabase = await createClient()
+    // Service role: mp_subscriptions no admite escrituras de usuarios (RLS); businessId ya validado.
+    const supabase = await createAdminClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (supabase as any)
       .from('mp_subscriptions')
@@ -348,6 +404,12 @@ export async function getMPSubscriptionStatus(businessId: string): Promise<{
   next_billing_date:  string | null
 } | null> {
   const supabase = await createClient()
+
+  // Solo un usuario autenticado del propio negocio (la RLS además limita la lectura al admin)
+  const { data: { user } } = await supabase.auth.getUser()
+  const jwtBusinessId = user?.app_metadata?.business_id as string | undefined
+  if (!user || !jwtBusinessId || jwtBusinessId !== businessId) return null
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from('mp_subscriptions')
@@ -430,9 +492,11 @@ export async function cancelMPSaaSSubscription(
       body: { status: 'cancelled' },
     })
 
-    // Actualizar estado local
+    // Actualizar estado local (service role: mp_subscriptions no admite escrituras de usuarios;
+    // el admin y el negocio ya se validaron arriba)
+    const adminDb = await createAdminClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase as any)
+    await (adminDb as any)
       .from('mp_subscriptions')
       .update({ status: 'cancelled', updated_at: new Date().toISOString() })
       .eq('business_id', businessId)

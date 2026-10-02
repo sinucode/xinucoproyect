@@ -38,6 +38,7 @@ import type {
 } from '@/actions/crm'
 import { getCustomerLoyalty } from '@/actions/loyalty'
 import { useFeature } from '@/lib/features/context'
+import { useIsAdmin } from '@/lib/features/role-context'
 import { formatMoney, formatUnits, type CustomerLoyalty } from '@/lib/loyalty-utils'
 import { StampDots } from '@/components/dashboard/loyalty/StampDots'
 import { formatCOP } from '@xinuco/utils'
@@ -389,9 +390,12 @@ function CustomerCard({
 
       {/* Estadística derecha */}
       <div className="text-right flex-shrink-0">
-        <div className="text-sm font-bold tabular-nums" style={{ color: 'var(--primary-color)' }}>
-          {formatCOP(customer.total_spent)}
-        </div>
+        {/* El gasto llega null para el barbero: solo se muestra el número de visitas */}
+        {customer.total_spent !== null && (
+          <div className="text-sm font-bold tabular-nums" style={{ color: 'var(--primary-color)' }}>
+            {formatCOP(customer.total_spent)}
+          </div>
+        )}
         <div className="text-[10px] text-xinuco-muted tabular-nums">
           {customer.visits} {customer.visits === 1 ? 'visita' : 'visitas'}
         </div>
@@ -474,6 +478,7 @@ function ExpedienteView({
 
 function LoyaltyLine({ customerId }: { customerId: string }) {
   const enabled = useFeature('loyalty')
+  const isAdmin = useIsAdmin()
   const [loyalty, setLoyalty] = useState<CustomerLoyalty | null>(null)
 
   useEffect(() => {
@@ -497,9 +502,12 @@ function LoyaltyLine({ customerId }: { customerId: string }) {
         <span>
           Lealtad: <span className="font-semibold tabular-nums">{formatUnits(loyalty.balance)}</span>{' '}
           {loyalty.balance === 1 ? 'punto' : 'puntos'}{' '}
-          <span className="text-xinuco-muted">
-            ({formatMoney(loyalty.value_cop ?? loyalty.balance * loyalty.point_value_cop)})
-          </span>
+          {/* El valor en pesos de los puntos es dinero: solo el admin lo ve */}
+          {isAdmin && (
+            <span className="text-xinuco-muted">
+              ({formatMoney(loyalty.value_cop ?? loyalty.balance * loyalty.point_value_cop)})
+            </span>
+          )}
         </span>
       ) : (
         <>
@@ -743,10 +751,17 @@ function CustomerHeader({
 function StatsRow({ expediente }: { expediente: CustomerExpediente }) {
   const since = customerSince(expediente.customer.created_at)
 
+  // Los montos llegan null para el barbero: esas tarjetas no se muestran
+  const showMoney = expediente.total_spent !== null
+
   const stats: { label: string; value: string; sub?: string }[] = [
     { label: 'Visitas',         value: String(expediente.total_visits) },
-    { label: 'Total gastado',   value: formatCOP(expediente.total_spent) },
-    { label: 'Ticket promedio', value: expediente.paid_sales > 0 ? formatCOP(expediente.avg_ticket) : '—' },
+    ...(showMoney
+      ? [
+          { label: 'Total gastado',   value: formatCOP(expediente.total_spent ?? 0) },
+          { label: 'Ticket promedio', value: (expediente.paid_sales ?? 0) > 0 ? formatCOP(expediente.avg_ticket ?? 0) : '—' },
+        ]
+      : []),
     { label: 'Última visita',   value: formatApptDay(expediente.last_visit) },
     {
       label: 'Cliente desde',
@@ -757,7 +772,7 @@ function StatsRow({ expediente }: { expediente: CustomerExpediente }) {
 
   return (
     <div
-      className="grid grid-cols-2 sm:grid-cols-5 gap-px rounded-xl overflow-hidden"
+      className={`grid grid-cols-2 gap-px rounded-xl overflow-hidden ${showMoney ? 'sm:grid-cols-5' : 'sm:grid-cols-3'}`}
       style={{ border: '1px solid var(--border-color)', background: 'var(--border-color)' }}
     >
       {stats.map((s, i) => (
@@ -1029,9 +1044,11 @@ function PurchasedProducts({ expediente }: { expediente: CustomerExpediente }) {
               </p>
               <p className="text-[10px] text-xinuco-muted tabular-nums">{formatInstantDay(p.created_at)}</p>
             </div>
-            <span className="text-sm font-semibold tabular-nums flex-shrink-0" style={{ color: 'var(--primary-color)' }}>
-              {formatCOP(p.total_price)}
-            </span>
+            {p.total_price !== null && (
+              <span className="text-sm font-semibold tabular-nums flex-shrink-0" style={{ color: 'var(--primary-color)' }}>
+                {formatCOP(p.total_price)}
+              </span>
+            )}
           </div>
         ))}
       </div>
@@ -1044,6 +1061,8 @@ function PurchasedProducts({ expediente }: { expediente: CustomerExpediente }) {
 function VisitHistory({ expediente }: { expediente: CustomerExpediente }) {
   const [expanded, setExpanded] = useState(true)
   const [showAll, setShowAll] = useState(false)
+  // Sin montos (barbero): el historial muestra solo fecha, servicio y barbero
+  const showMoney = expediente.total_spent !== null
 
   const visitsToShow = showAll
     ? expediente.visits
@@ -1123,12 +1142,14 @@ function VisitHistory({ expediente }: { expediente: CustomerExpediente }) {
 
                   {/* Fecha (start_time) + monto pagado real */}
                   <div className="text-right flex-shrink-0">
-                    <div
-                      className="text-sm font-bold tabular-nums"
-                      style={{ color: v.amount_paid != null ? 'var(--primary-color)' : 'var(--text-muted)' }}
-                    >
-                      {v.amount_paid != null ? formatCOP(v.amount_paid) : '—'}
-                    </div>
+                    {showMoney && (
+                      <div
+                        className="text-sm font-bold tabular-nums"
+                        style={{ color: v.amount_paid != null ? 'var(--primary-color)' : 'var(--text-muted)' }}
+                      >
+                        {v.amount_paid != null ? formatCOP(v.amount_paid) : '—'}
+                      </div>
+                    )}
                     <div className="text-[10px] text-xinuco-muted tabular-nums">
                       {formatApptDay(v.start_time)}
                     </div>
