@@ -50,7 +50,12 @@ describe('business-users Server Actions', () => {
       order:  jest.fn().mockReturnThis(),
       update: jest.fn().mockReturnThis(),
       upsert: jest.fn().mockReturnThis(),
+      insert: jest.fn().mockReturnThis(),
+      neq:    jest.fn().mockReturnThis(),
+      not:    jest.fn().mockReturnThis(),
+      in:     jest.fn().mockReturnThis(),
       single: jest.fn(),
+      maybeSingle: jest.fn(),
       auth: {
         admin: {
           getUserById:    jest.fn().mockResolvedValue({
@@ -212,6 +217,72 @@ describe('business-users Server Actions', () => {
       expect(result.success).toBe(false)
       expect(result.error).toContain(expected)
       expect(result.error).not.toContain('Clave12345')
+    })
+  })
+
+  describe('vínculo con profesional (staffLink)', () => {
+    const STAFF_ID = '11111111-1111-4111-8111-111111111111'
+
+    it('createBusinessUser: a staff from another business is not linked (warning, user kept)', async () => {
+      asSuperAdmin()
+      mockAdminClient.single.mockResolvedValueOnce({ data: { slug: 'demo' }, error: null })
+      mockAdminClient.auth.admin.createUser.mockResolvedValueOnce({ data: { user: { id: 'newuser' } }, error: null })
+      // la consulta filtrada por business_id no encuentra al profesional (es de otro negocio)
+      mockAdminClient.maybeSingle.mockResolvedValueOnce({ data: null, error: null })
+
+      const result = await createBusinessUser({
+        businessId: 'biz1', email: 'nuevo@test.com', password: 'Clave12345', fullName: 'Nuevo', role: 'barber',
+        staffLink: { mode: 'existing', staffId: STAFF_ID },
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.userId).toBe('newuser')
+      expect(result.warning).toContain('no se pudo vincular al profesional')
+      expect(mockAdminClient.eq).toHaveBeenCalledWith('business_id', 'biz1')
+      expect(mockAdminClient.update).not.toHaveBeenCalled()
+      expect(mockAdminClient.auth.admin.deleteUser).not.toHaveBeenCalled()
+    })
+
+    it('updateBusinessUser: rejects a staff already linked to a different user', async () => {
+      asSuperAdmin()
+      mockProfile({ id: 'user1', role: 'barber', business_id: 'biz1' })
+      mockAdminClient.auth.admin.updateUserById.mockResolvedValueOnce({ error: null })
+      mockAdminClient.maybeSingle.mockResolvedValueOnce({ data: { id: STAFF_ID, user_id: 'otro-user' }, error: null })
+
+      const result = await updateBusinessUser('biz1', 'user1', {
+        fullName: 'Juan', email: 'user1@test.com', role: 'barber',
+        staffLink: { mode: 'existing', staffId: STAFF_ID },
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('Ese profesional ya tiene otra cuenta vinculada.')
+    })
+
+    it('rejects an invalid staffLink shape', async () => {
+      asSuperAdmin()
+      mockProfile({ id: 'user1', role: 'barber', business_id: 'biz1' })
+
+      const result = await updateBusinessUser('biz1', 'user1', {
+        fullName: 'Juan', email: 'user1@test.com', role: 'barber',
+        staffLink: { mode: 'hack' } as any,
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('Vínculo con profesional inválido.')
+      expect(mockAdminClient.auth.admin.updateUserById).not.toHaveBeenCalled()
+    })
+
+    it('createBusinessUser: rejects an invalid staffLink before creating the auth user', async () => {
+      asSuperAdmin()
+
+      const result = await createBusinessUser({
+        businessId: 'biz1', email: 'nuevo@test.com', password: 'Clave12345', fullName: 'Nuevo', role: 'barber',
+        staffLink: { mode: 'existing' } as any,
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('Vínculo con profesional inválido.')
+      expect(mockAdminClient.auth.admin.createUser).not.toHaveBeenCalled()
     })
   })
 })

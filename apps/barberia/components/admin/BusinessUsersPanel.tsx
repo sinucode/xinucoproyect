@@ -7,8 +7,8 @@ import {
 } from 'lucide-react'
 import {
   listBusinessUsers, createBusinessUser, updateBusinessUser,
-  setBusinessUserActive, setBusinessUserPassword,
-  type BusinessUser,
+  setBusinessUserActive, setBusinessUserPassword, listBusinessStaffForLinking,
+  type BusinessUser, type StaffLink,
 } from '@/actions/business-users'
 import { roleLabel } from '@/lib/roles'
 
@@ -108,6 +108,77 @@ function RoleSelect({ value, onChange }: { value: AssignableRole; onChange: (v: 
   )
 }
 
+// ────────────────────────────────────────────────────────────
+// Vínculo con un profesional del equipo (solo barbero/manicurista)
+// ────────────────────────────────────────────────────────────
+type StaffOption = { id: string; full_name: string; is_active: boolean; user_id: string | null }
+
+const isLinkableRole = (role: AssignableRole) => role === 'barber' || role === 'manicurist'
+
+/** Carga los profesionales del negocio al abrir el modal. Si falla, queda vacío (solo none/new). */
+function useBusinessStaff(businessId: string) {
+  const [staff, setStaff] = useState<StaffOption[]>([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    let cancelled = false
+    listBusinessStaffForLinking(businessId)
+      .then((res) => { if (!cancelled) setStaff(res.data ?? []) })
+      .catch(() => { if (!cancelled) setStaff([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [businessId])
+  return { staff, loading }
+}
+
+/** Valor del select → vínculo para el servidor */
+function selectionToLink(value: string): StaffLink {
+  if (value === 'new') return { mode: 'new' }
+  if (value.startsWith('staff:')) return { mode: 'existing', staffId: value.slice(6) }
+  return { mode: 'none' }
+}
+
+function normalizeName(s: string) {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+}
+
+function StaffLinkSelect({ value, onChange, staff, loading, currentUserId }: {
+  value: string
+  onChange: (v: string) => void
+  staff: StaffOption[]
+  loading: boolean
+  /** Usuario que se edita (su profesional vinculado sigue seleccionable) */
+  currentUserId?: string
+}) {
+  return (
+    <Field label="Profesional del equipo">
+      <select
+        value={loading ? '' : value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={loading}
+        className="w-full bg-xinuco-surface border border-xinuco-border rounded-lg px-3 py-2 text-xs text-xinuco-text outline-none focus:border-xinuco-primary cursor-pointer disabled:opacity-60"
+      >
+        {loading ? (
+          <option value="">Cargando profesionales…</option>
+        ) : (
+          <>
+            <option value="none">Sin vincular</option>
+            <option value="new">Crear profesional nuevo con este nombre</option>
+            {staff.map((m) => {
+              const takenByOther = !!m.user_id && m.user_id !== currentUserId
+              return (
+                <option key={m.id} value={`staff:${m.id}`} disabled={takenByOther}>
+                  {m.full_name}{m.is_active ? '' : ' (inactivo)'}{takenByOther ? ' — ya tiene cuenta' : ''}
+                </option>
+              )
+            })}
+          </>
+        )}
+      </select>
+      <p className="text-[10px] text-xinuco-muted">Así el barbero ve su propia agenda y sus pagos al entrar.</p>
+    </Field>
+  )
+}
+
 function ErrorBox({ msg }: { msg: string }) {
   return (
     <p className="flex items-center gap-1.5 text-[11px] px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400">
@@ -163,23 +234,32 @@ function SubmitButton({ isPending, label }: { isPending: boolean; label: string 
 // Modal: Agregar usuario
 // ────────────────────────────────────────────────────────────
 function CreateUserModal({ businessId, onClose, onSuccess }: {
-  businessId: string; onClose: () => void; onSuccess: () => void
+  businessId: string; onClose: () => void; onSuccess: (warning?: string) => void
 }) {
   const [fullName, setFullName] = useState('')
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
   const [role,     setRole]     = useState<AssignableRole>('barber')
+  // null = el usuario aún no eligió: se usa el valor por defecto (profesional con el mismo nombre o 'new')
+  const [staffChoice, setStaffChoice] = useState<string | null>(null)
   const [error,    setError]    = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  const { staff, loading: staffLoading } = useBusinessStaff(businessId)
+
+  const nameMatch = staff.find(
+    (m) => !m.user_id && fullName.trim() !== '' && normalizeName(m.full_name) === normalizeName(fullName),
+  )
+  const staffValue = staffChoice ?? (nameMatch ? `staff:${nameMatch.id}` : 'new')
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     if (password.length < 8) { setError('La contraseña debe tener al menos 8 caracteres.'); return }
     startTransition(async () => {
-      const result = await createBusinessUser({ businessId, email, password, fullName, role })
-      if (result.success) onSuccess()
-      else setError(result.error ?? 'Error desconocido.')
+      const staffLink = isLinkableRole(role) ? selectionToLink(staffValue) : undefined
+      const result = await createBusinessUser({ businessId, email, password, fullName, role, staffLink })
+      if (!result.success) { setError(result.error ?? 'Error desconocido.'); return }
+      onSuccess(result.warning)
     })
   }
 
@@ -198,6 +278,9 @@ function CreateUserModal({ businessId, onClose, onSuccess }: {
         <Field label="Rol">
           <RoleSelect value={role} onChange={setRole} />
         </Field>
+        {isLinkableRole(role) && (
+          <StaffLinkSelect value={staffValue} onChange={setStaffChoice} staff={staff} loading={staffLoading} />
+        )}
         {error && <ErrorBox msg={error} />}
         <SubmitButton isPending={isPending} label="Crear usuario" />
       </form>
@@ -216,14 +299,23 @@ function EditUserModal({ businessId, user, onClose, onSuccess }: {
   const [role,     setRole]     = useState<AssignableRole>(
     (['admin', 'barber', 'manicurist'].includes(user.role) ? user.role : 'barber') as AssignableRole
   )
+  const initialRole = (['admin', 'barber', 'manicurist'].includes(user.role) ? user.role : 'barber') as AssignableRole
+  const initialStaff = user.linked_staff ? `staff:${user.linked_staff.id}` : 'none'
+  const [staffValue, setStaffValue] = useState(initialStaff)
   const [error,    setError]    = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  const { staff, loading: staffLoading } = useBusinessStaff(businessId)
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     startTransition(async () => {
-      const result = await updateBusinessUser(businessId, user.id, { fullName, email, role })
+      // Solo se envía el vínculo si cambió la selección o el rol; si no, el servidor lo deja intacto
+      const sendLink = isLinkableRole(role) && !staffLoading && (staffValue !== initialStaff || role !== initialRole)
+      const result = await updateBusinessUser(businessId, user.id, {
+        fullName, email, role,
+        ...(sendLink ? { staffLink: selectionToLink(staffValue) } : {}),
+      })
       if (result.success) onSuccess()
       else setError(result.error ?? 'Error desconocido.')
     })
@@ -241,6 +333,15 @@ function EditUserModal({ businessId, user, onClose, onSuccess }: {
         <Field label="Rol">
           <RoleSelect value={role} onChange={setRole} />
         </Field>
+        {isLinkableRole(role) && (
+          <StaffLinkSelect
+            value={staffValue}
+            onChange={setStaffValue}
+            staff={staff}
+            loading={staffLoading}
+            currentUserId={user.id}
+          />
+        )}
         {error && <ErrorBox msg={error} />}
         <SubmitButton isPending={isPending} label="Guardar cambios" />
       </form>
@@ -353,6 +454,13 @@ function UserCard({ user, onEdit, onChangePassword, onToggleActive, isTogglePend
         <div className="min-w-0">
           <p className="text-xs font-semibold text-xinuco-text truncate">{user.full_name}</p>
           <p className="text-[11px] text-xinuco-muted truncate">{user.email ?? '—'}</p>
+          {(user.role === 'barber' || user.role === 'manicurist') && (
+            user.linked_staff ? (
+              <p className="text-[10px] text-xinuco-muted truncate">Profesional: {user.linked_staff.full_name}</p>
+            ) : (
+              <p className="text-[10px] text-amber-400">Sin vincular a un profesional — no verá su agenda</p>
+            )
+          )}
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
           <RoleBadge role={user.role} />
@@ -406,6 +514,7 @@ export function BusinessUsersPanel({ businessId }: { businessId: string }) {
   const [isPending, startTransition] = useTransition()
   const [activatingId, setActivatingId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)
 
   const [showCreate, setShowCreate] = useState(false)
   const [editTarget, setEditTarget] = useState<BusinessUser | null>(null)
@@ -428,14 +537,16 @@ export function BusinessUsersPanel({ businessId }: { businessId: string }) {
     fetchUsers()
   }, [fetchUsers])
 
-  function handleSuccess(message: string) {
+  function handleSuccess(message: string, warn?: string) {
+    setWarning(warn ?? null)
     setShowCreate(false)
     setEditTarget(null)
     setPasswordTarget(null)
     setDeactivateTarget(null)
-    setNotice(message)
+    setNotice(warn ? null : message)
     fetchUsers()
-    setTimeout(() => setNotice(null), 2500)
+    // El aviso de vínculo fallido se queda hasta que se cierre: el usuario debe verlo
+    if (!warn) setTimeout(() => setNotice(null), 2500)
   }
 
   function handleActivate(user: BusinessUser) {
@@ -501,6 +612,16 @@ export function BusinessUsersPanel({ businessId }: { businessId: string }) {
         </div>
       )}
 
+      {warning && (
+        <div className="flex items-start gap-2 rounded-xl px-3 py-2 text-[11px] bg-amber-500/10 border border-amber-500/30 text-amber-400">
+          <AlertCircle size={12} className="shrink-0 mt-0.5" />
+          <span className="flex-1">{warning}</span>
+          <button type="button" onClick={() => setWarning(null)} aria-label="Cerrar aviso" className="shrink-0 hover:opacity-80">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {error && (
         <ErrorBox msg={error} />
       )}
@@ -539,7 +660,7 @@ export function BusinessUsersPanel({ businessId }: { businessId: string }) {
         <CreateUserModal
           businessId={businessId}
           onClose={() => setShowCreate(false)}
-          onSuccess={() => handleSuccess('Usuario creado.')}
+          onSuccess={(warn) => handleSuccess('Usuario creado.', warn)}
         />
       )}
       {editTarget && (
