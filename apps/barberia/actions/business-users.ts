@@ -63,12 +63,33 @@ async function assertUserInBusiness(
 }
 
 function mapAuthError(message: string | undefined): string {
-  const msg = (message ?? '').toLowerCase()
+  const raw = (message ?? '').trim()
+  const msg = raw.toLowerCase()
   if (msg.includes('already') || msg.includes('registered') || msg.includes('duplicate')) {
     return 'Ese correo ya está en uso.'
   }
-  console.error('[business-users] error de auth:', message)
-  return 'No se pudo completar la operación. Inténtalo de nuevo.'
+  // Supabase rechaza contraseñas filtradas en internet (Have I Been Pwned) o muy comunes
+  if (msg.includes('weak') || msg.includes('pwned') || msg.includes('easy to guess')) {
+    return 'Esa contraseña es muy común o apareció en filtraciones de internet. Usa una más segura (mezcla mayúsculas, minúsculas, números y símbolos).'
+  }
+  if (msg.includes('should contain')) {
+    return 'La contraseña debe tener mayúsculas, minúsculas, números y símbolos.'
+  }
+  if (msg.includes('password should be at least') || msg.includes('password is too short')) {
+    return 'La contraseña es demasiado corta.'
+  }
+  if (msg.includes('email') && (msg.includes('invalid') || msg.includes('validate'))) {
+    return 'El correo no es válido.'
+  }
+  if (msg.includes('rate limit') || msg.includes('too many')) {
+    return 'Demasiados intentos seguidos. Espera un minuto e inténtalo de nuevo.'
+  }
+  console.error('[business-users] error de auth:', raw)
+  if (msg.includes('database error')) {
+    return 'La base de datos rechazó el registro del usuario. Revisa el log de Auth en Supabase.'
+  }
+  // Pantalla solo de super_admin: mostrar la causa real ayuda a resolverla (nunca incluye la contraseña)
+  return raw ? `No se pudo completar la operación: ${raw}` : 'No se pudo completar la operación. Inténtalo de nuevo.'
 }
 
 // ── listBusinessUsers ─────────────────────────────────────────────────────────

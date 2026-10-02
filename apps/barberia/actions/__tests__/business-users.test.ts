@@ -1,4 +1,5 @@
 import {
+  createBusinessUser,
   setBusinessUserActive,
   setBusinessUserPassword,
   updateBusinessUser,
@@ -187,5 +188,30 @@ describe('business-users Server Actions', () => {
     expect(result.success).toBe(false)
     expect(result.error).toBe('Ese correo ya está en uso.')
     expect(mockAdminClient.update).not.toHaveBeenCalled()
+  })
+  describe('createBusinessUser shows the real reason when Supabase rejects the user', () => {
+    const create = () => createBusinessUser({
+      businessId: 'biz1', email: 'nuevo@test.com', password: 'Clave12345', fullName: 'Nuevo', role: 'barber',
+    })
+
+    beforeEach(() => {
+      jest.spyOn(console, 'error').mockImplementation(() => {})
+      asSuperAdmin()
+      mockAdminClient.single.mockResolvedValueOnce({ data: { slug: 'demo' }, error: null })
+    })
+
+    it.each([
+      ['Password is known to be weak and easy to guess, please choose a different one.', 'Esa contraseña es muy común'],
+      ['Password should contain at least one character of each: abc, ABC, 123', 'La contraseña debe tener mayúsculas'],
+      ['Unable to validate email address: invalid format', 'El correo no es válido.'],
+      ['Database error creating new user', 'La base de datos rechazó el registro'],
+      ['Something unexpected', 'No se pudo completar la operación: Something unexpected'],
+    ])('maps "%s"', async (message, expected) => {
+      mockAdminClient.auth.admin.createUser.mockResolvedValueOnce({ data: { user: null }, error: { message } })
+      const result = await create()
+      expect(result.success).toBe(false)
+      expect(result.error).toContain(expected)
+      expect(result.error).not.toContain('Clave12345')
+    })
   })
 })
