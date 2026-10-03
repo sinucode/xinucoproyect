@@ -369,7 +369,7 @@ BEGIN
   IF NOT FOUND OR r.business_id <> NEW.business_id THEN RAISE EXCEPTION 'payout_request_invalid'; END IF;
   IF r.status <> 'pending' THEN RAISE EXCEPTION 'payout_request_not_pending'; END IF;
   IF r.staff_id <> NEW.staff_id
-     OR NEW.entry_type IS DISTINCT FROM CASE r.kind WHEN 'payout' THEN 'payment' ELSE 'advance' END THEN
+     OR NEW.entry_type IS DISTINCT FROM (CASE r.kind WHEN 'payout' THEN 'payment' ELSE 'advance' END) THEN
     RAISE EXCEPTION 'payout_request_mismatch';
   END IF;
   RETURN NEW;
