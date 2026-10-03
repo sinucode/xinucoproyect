@@ -1,4 +1,7 @@
-import { buildTimelineLayout, freeMinutes, formatMinutes, isoToDayMin, minToLabel, type TimelineAppt } from '../staff-day-utils'
+import {
+  buildTimelineLayout, freeMinutes, formatMinutes, isoToDayMin, minToLabel, nowOffsetRem, remainingFreeMinutes,
+  type TimelineAppt,
+} from '../staff-day-utils'
 
 const DATE = '2026-09-30'
 const appt = (id: string, hhmm: string, total: number): TimelineAppt => ({
@@ -56,5 +59,49 @@ describe('staff-day-utils', () => {
     expect(free).toBe(600 - 120)
     expect(formatMinutes(480)).toBe('8 h')
     expect(formatMinutes(90)).toBe('1 h 30 min')
+  })
+})
+
+describe('remainingFreeMinutes (contador de tiempo libre de hoy)', () => {
+  const schedule = { startMin: 540, endMin: 1080 } // 9:00–18:00
+  const busy = [{ startMin: 600, endMin: 660 }, { startMin: 900, endMin: 960 }] // 10–11 y 15–16
+
+  it('otro día (nowMin null): todo el horario', () => {
+    expect(remainingFreeMinutes(schedule, busy, null)).toBe(freeMinutes(schedule, busy))
+    expect(remainingFreeMinutes(schedule, busy, null)).toBe(540 - 120)
+  })
+
+  it('hoy: solo cuenta desde ahora (no el tiempo que ya pasó)', () => {
+    // 12:00 → quedan 12–18 menos 15–16
+    expect(remainingFreeMinutes(schedule, busy, 720)).toBe(360 - 60)
+  })
+
+  it('antes de abrir cuenta todo el horario', () => {
+    expect(remainingFreeMinutes(schedule, busy, 300)).toBe(540 - 120)
+  })
+
+  it('una cita en curso ahora ya no cuenta como libre', () => {
+    // 10:30 → quedan 11–18 menos 15–16
+    expect(remainingFreeMinutes(schedule, busy, 630)).toBe(420 - 60)
+  })
+
+  it('después del cierre no queda nada', () => {
+    expect(remainingFreeMinutes(schedule, busy, 1080)).toBe(0)
+    expect(remainingFreeMinutes(schedule, busy, 1300)).toBe(0)
+  })
+})
+
+describe('nowOffsetRem (línea "Ahora")', () => {
+  it('al inicio del rango está arriba', () => {
+    expect(nowOffsetRem(540, 540, 30)).toBe(0)
+  })
+
+  it('una fila completa más abajo suma alto de fila + separación', () => {
+    expect(nowOffsetRem(570, 540, 30)).toBeCloseTo(2.75 + 0.125)
+  })
+
+  it('a mitad de fila avanza media altura de fila', () => {
+    expect(nowOffsetRem(555, 540, 30)).toBeCloseTo(2.75 / 2)
+    expect(nowOffsetRem(585, 540, 30)).toBeCloseTo(2.75 + 0.125 + 2.75 / 2)
   })
 })

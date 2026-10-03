@@ -1,18 +1,22 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { CalendarClock, Coffee, Trash2, UserX } from 'lucide-react'
+import { useEffect, useState, useTransition } from 'react'
+import { CalendarClock, Coffee, Plus, Trash2, UserX } from 'lucide-react'
 import { deleteStaffBreak, deleteStaffTimeOff } from '@/actions/staff-availability'
-import { dayLabel } from '@/lib/agenda-time'
+import { QuickBookingSheet } from '@/components/agenda/QuickBookingSheet'
+import { businessNowHHMM, dayLabel } from '@/lib/agenda-time'
 import { BreakForm, TimeOffForm } from './StaffAvailabilityForms'
+import { focusAppointmentCard } from './focus-appointment'
 import {
+  ROW_HEIGHT_REM,
   TIME_OFF_KIND_LABEL,
   apptRange,
   buildTimelineLayout,
   formatMinutes,
-  freeMinutes,
   minToHHMM,
   minToLabel,
+  nowOffsetRem,
+  remainingFreeMinutes,
   timeOffRange,
   timeToMin,
   type BreakRow,
@@ -49,7 +53,7 @@ const STATUS_LABEL: Record<string, string> = {
   completed: 'Completada',
 }
 
-const ROW_HEIGHT = '2.75rem'
+const ROW_HEIGHT = `${ROW_HEIGHT_REM}rem`
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
 const DAY_SHORT = ['D', 'L', 'M', 'X', 'J', 'V', 'S']
 
@@ -75,7 +79,7 @@ export function StaffDayTimeline({
   staffName,
   dateKey,
   todayKey,
-  nowHHMM,
+  nowHHMM: nowHHMMProp,
   intervalMinutes,
   schedule,
   breaks,
@@ -85,6 +89,17 @@ export function StaffDayTimeline({
   const [panel, setPanel] = useState<'break' | 'timeoff' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  // "Agendar aquí": hora libre elegida (abre la reserva interna con día y hora prellenados)
+  const [bookingTime, setBookingTime] = useState<string | null>(null)
+
+  // Hora actual del negocio: parte de la del servidor y se refresca cada minuto (solo importa hoy)
+  const [nowHHMM, setNowHHMM] = useState(nowHHMMProp)
+  useEffect(() => setNowHHMM(nowHHMMProp), [nowHHMMProp])
+  useEffect(() => {
+    if (dateKey !== todayKey) return
+    const t = setInterval(() => setNowHHMM(businessNowHHMM()), 60_000)
+    return () => clearInterval(t)
+  }, [dateKey, todayKey])
 
   const dow = new Date(`${dateKey}T00:00:00Z`).getUTCDay()
   const scheduleRange = schedule ? { startMin: timeToMin(schedule.start), endMin: timeToMin(schedule.end) } : null
@@ -101,9 +116,13 @@ export function StaffDayTimeline({
 
   const apptRanges = appointments.map((a) => apptRange(a, dateKey))
 
-  // Resumen
+  // Hoy: minutos desde 00:00 de la hora actual del negocio (otro día = null → se cuenta todo el horario)
+  const isToday = dateKey === todayKey
+  const nowMin = timeToMin(nowHHMM)
+
+  // Resumen (hoy solo cuenta el tiempo libre que QUEDA)
   const freeMin = scheduleRange
-    ? freeMinutes(scheduleRange, [...apptRanges, ...dayBreaks, ...dayTimeOff])
+    ? remainingFreeMinutes(scheduleRange, [...apptRanges, ...dayBreaks, ...dayTimeOff], isToday ? nowMin : null)
     : 0
 
   const layout = scheduleRange
@@ -118,7 +137,6 @@ export function StaffDayTimeline({
     : null
 
   // Filas pasadas (hoy: antes de ahora; días anteriores: todas)
-  const nowMin = timeToMin(nowHHMM)
   const isRowPast = (rowEndMin: number) =>
     dateKey < todayKey || (dateKey === todayKey && rowEndMin <= nowMin)
 
@@ -203,7 +221,9 @@ export function StaffDayTimeline({
               <span className={chipCls('primary')}>
                 {appointments.length} {appointments.length === 1 ? 'cita' : 'citas'}
               </span>
-              <span className={chipCls('emerald')}>{formatMinutes(freeMin)} libres</span>
+              <span className={chipCls('emerald')}>
+                {formatMinutes(freeMin)} {isToday ? 'libres hoy' : 'libres'}
+              </span>
             </>
           ) : (
             <span className={chipCls('zinc')}>No trabaja este día</span>
@@ -249,9 +269,22 @@ export function StaffDayTimeline({
       {/* Línea de tiempo */}
       {layout && layout.rowCount > 0 && (
         <div
-          className="grid gap-x-3 gap-y-0.5"
+          className="relative grid gap-x-3 gap-y-0.5"
           style={{ gridTemplateColumns: '3rem minmax(0, 1fr)', gridAutoRows: ROW_HEIGHT }}
         >
+          {/* Línea "Ahora" (solo hoy, dentro del rango mostrado) */}
+          {isToday && nowMin >= layout.rangeStart && nowMin < layout.rangeStart + layout.rowCount * layout.interval && (
+            <div
+              aria-label={`Ahora, ${nowHHMM}`}
+              className="pointer-events-none absolute inset-x-0 z-20 flex items-center"
+              style={{ top: `${nowOffsetRem(nowMin, layout.rangeStart, layout.interval)}rem` }}
+            >
+              <span className="w-12 shrink-0 rounded-full bg-rose-500 px-1.5 py-0.5 text-center text-[10px] font-bold uppercase leading-none text-white">
+                Ahora
+              </span>
+              <span className="h-px flex-1 bg-rose-500" />
+            </div>
+          )}
           {/* Etiquetas de hora */}
           {Array.from({ length: layout.rowCount }, (_, i) => {
             const startMin = layout.rangeStart + i * layout.interval
@@ -275,23 +308,34 @@ export function StaffDayTimeline({
             const dim = past ? 'opacity-50' : ''
 
             if (seg.kind === 'free') {
-              const cls = `rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-emerald-400 text-xs font-medium px-3 flex items-center ${dim}`
-              return isAdmin ? (
-                <a
+              // Hora que ya pasó: apagada (no es "Libre" ni se puede agendar)
+              if (dateKey < todayKey || (isToday && seg.startMin <= nowMin)) {
+                return (
+                  <div
+                    key={`s-${seg.row}`}
+                    className="rounded-lg border border-zinc-900 bg-zinc-950/40 text-zinc-600 text-xs px-3 flex items-center opacity-60"
+                    style={pos}
+                  >
+                    Pasó
+                  </div>
+                )
+              }
+              // Hora libre futura: botón que abre la reserva interna con día y hora prellenados
+              return (
+                <button
                   key={`s-${seg.row}`}
-                  href={`/${slug}/book`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Reservar en este horario"
-                  className={`${cls} hover:bg-emerald-500/20 transition-colors`}
+                  type="button"
+                  onClick={() => setBookingTime(minToHHMM(seg.startMin))}
+                  aria-label={`Agendar a las ${minToHHMM(seg.startMin)}`}
+                  className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-emerald-400 text-xs font-medium px-3 flex items-center justify-between gap-2 hover:bg-emerald-500/20 transition-colors text-left"
                   style={pos}
                 >
-                  Libre
-                </a>
-              ) : (
-                <div key={`s-${seg.row}`} className={cls} style={pos}>
-                  Libre
-                </div>
+                  <span>Libre</span>
+                  <span className="flex items-center gap-1 font-semibold">
+                    <Plus size={12} aria-hidden="true" />
+                    Agendar aquí
+                  </span>
+                </button>
               )
             }
 
@@ -341,9 +385,12 @@ export function StaffDayTimeline({
           {layout.appts.map(({ appt, row, span, endMin }) => {
             const dim = isRowPast(endMin) ? 'opacity-60' : ''
             return (
-              <div
+              <button
                 key={appt.id}
-                className={`rounded-lg border px-3 py-1.5 min-w-0 flex flex-col justify-center overflow-hidden z-10 ${dim}`}
+                type="button"
+                onClick={() => focusAppointmentCard(appt.id)}
+                title="Ver la tarjeta de esta cita"
+                className={`rounded-lg border px-3 py-1.5 min-w-0 flex flex-col justify-center overflow-hidden z-10 text-left ${dim}`}
                 style={{
                   gridColumn: 2,
                   gridRow: `${row + 1} / span ${span}`,
@@ -365,7 +412,7 @@ export function StaffDayTimeline({
                     {STATUS_LABEL[appt.status] ?? appt.status}
                   </span>
                 </div>
-              </div>
+              </button>
             )
           })}
         </div>
@@ -436,6 +483,15 @@ export function StaffDayTimeline({
         </div>
       )}
 
+      {/* Reserva interna: día y hora prellenados; el profesional es el de esta vista */}
+      <QuickBookingSheet
+        slug={slug}
+        open={bookingTime !== null}
+        onClose={() => setBookingTime(null)}
+        initialDate={dateKey}
+        initialTime={bookingTime ?? undefined}
+        staffId={staffId}
+      />
     </section>
   )
 }

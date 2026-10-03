@@ -11,8 +11,18 @@ import { CashShiftManager } from '@/components/finance/CashShiftManager'
 import { MoneyAccountsCard } from '@/components/finance/MoneyAccountsCard'
 import { RetailSaleButton } from '@/components/finance/RetailSaleButton'
 import { NewAppointmentButton } from '@/components/dashboard/NewAppointmentButton'
+import { TuDiaSummary, type TuDiaData } from '@/components/dashboard/TuDiaSummary'
 import { InteractiveAgenda } from './InteractiveAgenda'
 import { businessTodayISODate, addDaysToDateKey, businessHour } from '@/lib/agenda-time'
+import { businessWallNowMs } from '@/lib/agenda-status'
+import {
+  EARNED_ENTRY_TYPES,
+  businessDayInstants,
+  computeDaySummary,
+  sumEarned,
+  summarizeQueue,
+  type SummaryAppt,
+} from '@/lib/day-summary'
 import { roleLabel } from '@/lib/roles'
 
 interface DashboardContentProps {
@@ -79,9 +89,11 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
     .lt('start_time', `${tomorrowStr}T00:00:00Z`)
     .order('start_time', { ascending: true })
 
-  // Si es barbero, filtrar solo sus propias citas via staff.user_id
+  // Si es barbero o manicurista, filtrar solo sus propias citas via staff.user_id
   // barber_id no existe en el schema — se usa staff_id (FK a tabla staff)
-  if (profile?.role === 'barber') {
+  const isStaffMember = profile?.role === 'barber' || profile?.role === 'manicurist'
+  let linkedStaffId: string | null = null
+  if (isStaffMember) {
     const { data: linkedStaff } = await supabase
       .from('staff')
       .select('id')
@@ -90,13 +102,64 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
       .returns<{ id: string }[]>()
       .maybeSingle()
 
+    linkedStaffId = linkedStaff?.id ?? null
     // Si no tiene staff vinculado, retornar 0 citas (seguridad: nunca mostrar todo)
-    const staffId = linkedStaff?.id ?? 'no-linked-staff'
-    query = query.eq('staff_id', staffId)
+    query = query.eq('staff_id', linkedStaffId ?? 'no-linked-staff')
   }
 
   const { data: todayAppointments } = await query
   const appointments = (todayAppointments ?? []) as Record<string, unknown>[]
+  const nowWallMs = businessWallNowMs()
+
+  // 4b. "Tu día" (solo el barbero): próxima cita, citas de hoy, lo ganado y la fila de espera.
+  //     Si algo falla se muestra "—" en esa tarjeta; el resto del Inicio sigue funcionando.
+  let tuDia: TuDiaData | null = null
+  if (isStaffMember && linkedStaffId) {
+    const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null))
+    const summary = computeDaySummary(
+      appointments.map((a): SummaryAppt => {
+        const customer = one<{ full_name?: string }>(a.customers as { full_name?: string } | null)
+        const service = one<{ name?: string; duration_minutes?: number }>(a.services as { name?: string; duration_minutes?: number } | null)
+        return {
+          id: String(a.id),
+          status: String(a.status),
+          start_time: (a.start_time as string | null) ?? null,
+          customer_name: customer?.full_name || 'Cliente sin nombre',
+          service_name: service?.name || 'Servicio',
+          duration_minutes: service?.duration_minutes ?? 30,
+        }
+      }),
+      nowWallMs,
+    )
+
+    // created_at / arrived_at son instantes reales: el día del negocio se delimita en America/Bogota
+    const { from, to } = businessDayInstants(todayStr)
+    let earned: number | null = null
+    let queue: { waiting: number; mine: number } | null = null
+    try {
+      const [ledgerRes, queueRes] = await Promise.all([
+        supabase
+          .from('staff_ledger')
+          .select('entry_type, amount')
+          .eq('business_id', businessId)
+          .eq('staff_id', linkedStaffId)
+          .in('entry_type', [...EARNED_ENTRY_TYPES])
+          .gte('created_at', from)
+          .lt('created_at', to),
+        supabase
+          .from('walk_ins')
+          .select('status, staff_id')
+          .eq('business_id', businessId)
+          .eq('status', 'waiting')
+          .gte('arrived_at', from),
+      ])
+      if (!ledgerRes.error) earned = sumEarned((ledgerRes.data ?? []) as { entry_type: string; amount: number }[])
+      if (!queueRes.error) queue = summarizeQueue((queueRes.data ?? []) as { status: string; staff_id: string | null }[], linkedStaffId)
+    } catch {
+      // degradar: tarjetas con "—"
+    }
+    tuDia = { summary, earned, queue }
+  }
 
   // 5. Validar integridad de cierre: hay citas En Curso?
   const hasInProgressAppointments = appointments.some((a) => a.status === 'in_progress')
@@ -172,7 +235,13 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
       </div>
       )}
 
-      {/* Widget 2 — Agenda del día */}
+      {/* Widget 2 — Agenda del día (el barbero ve arriba su resumen "Tu día") */}
+      <div className="flex flex-col gap-6 min-w-0">
+      {tuDia && (
+        <section aria-label="Tu día">
+          <TuDiaSummary data={tuDia} nowWallMs={nowWallMs} />
+        </section>
+      )}
       <section aria-label="Agenda del día" className="space-y-4 min-w-0">
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-semibold text-xinuco-text">
@@ -197,7 +266,7 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
             >
               Ver todas →
             </a>
-            {/* Abre la reserva pública en otra pestaña */}
+            {/* Reserva interna (hoja): el equipo agenda sin salir del panel */}
             <NewAppointmentButton slug={slug} />
           </div>
         </div>
@@ -209,8 +278,10 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
           businessId={businessId}
           slug={slug}
           wide={!isAdmin}
+          nowWallMs={nowWallMs}
         />
       </section>
+      </div>
       </div>
     </>
   )

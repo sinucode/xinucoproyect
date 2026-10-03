@@ -1,10 +1,14 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { Play, Clock, CheckCircle2, XCircle, AlertCircle, CalendarX, Loader2, ArrowRight } from 'lucide-react'
+import { useEffect, useState, useTransition } from 'react'
+import { Play, Clock, CheckCircle2, XCircle, AlertCircle, AlertTriangle, CalendarX, Loader2, ArrowRight } from 'lucide-react'
 import { updateAppointmentStatus } from '@/actions/appointments'
 import { CheckoutModal } from '../finance/CheckoutModal'
+import { FinishNoteSheet, type FinishNoteTarget } from './agenda/FinishNoteSheet'
+import { apptCardId } from './agenda/focus-appointment'
 import { apptDateKey, businessTodayISODate, dayLabel, formatApptTime } from '@/lib/agenda-time'
+import { businessWallNowMs, isApptOverdue, splitUnresolvedPast } from '@/lib/agenda-status'
+import { useIsAdmin } from '@/lib/features/role-context'
 import type { AppointmentStatus } from '@xinuco/types'
 
 interface InteractiveAgendaProps {
@@ -16,6 +20,10 @@ interface InteractiveAgendaProps {
   hasFilters?: boolean
   /** Ocupa todo el ancho: en PC muestra las citas en dos columnas */
   wide?: boolean
+  /** Separa en un bloque "Sin cerrar" las citas de días anteriores que siguen abiertas (vista "Próximas") */
+  separateUnresolved?: boolean
+  /** "Ahora" del negocio (hora local como UTC, en ms) calculado en el servidor: evita desajustes de hidratación */
+  nowWallMs?: number
 }
 
 interface StatusConfig {
@@ -86,10 +94,23 @@ export function InteractiveAgenda({
   slug,
   hasFilters = false,
   wide = false,
+  separateUnresolved = false,
+  nowWallMs,
 }: InteractiveAgendaProps) {
+  const isAdmin = useIsAdmin()
   const [appointments, setAppointments] = useState(initialAppointments)
   const [isPending, startTransition] = useTransition()
-  
+
+  // "Ahora" del negocio: parte del valor del servidor y se refresca cada minuto (citas atrasadas)
+  const [nowMs, setNowMs] = useState(() => nowWallMs ?? businessWallNowMs())
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(businessWallNowMs()), 60_000)
+    return () => clearInterval(t)
+  }, [])
+
+  // "¿Dejar nota del corte?" tras terminar una cita
+  const [noteTarget, setNoteTarget] = useState<FinishNoteTarget | null>(null)
+
   // Fila que se está actualizando actualmente (para mostrar loader individual)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   
@@ -111,6 +132,17 @@ export function InteractiveAgenda({
         setAppointments((prev) =>
           prev.map((app) => (app.id === appointmentId ? { ...app, status: nextStatus } : app))
         )
+        // Terminada: ofrecer dejar una nota en el expediente del cliente (opcional)
+        if (nextStatus === 'ready_to_pay') {
+          const appt = appointments.find((a) => a.id === appointmentId)
+          if (appt?.customer_id) {
+            setNoteTarget({
+              customerId: appt.customer_id,
+              customerName: appt.customers?.full_name || appt.customer_name || 'el cliente',
+              appointmentId,
+            })
+          }
+        }
       }
       setUpdatingId(null)
     })
@@ -140,72 +172,47 @@ export function InteractiveAgenda({
 
   // Agrupar por día (start_time en UTC = hora local del negocio). Sin fecha → al final.
   const todayKey = businessTodayISODate()
-  const groups: { key: string; label: string; items: any[] }[] = []
-  const noDate: any[] = []
-  for (const appt of appointments) {
-    if (!appt.start_time) {
-      noDate.push(appt)
-      continue
+  const groupByDay = (list: any[]) => {
+    const groups: { key: string; label: string; items: any[] }[] = []
+    const noDate: any[] = []
+    for (const appt of list) {
+      if (!appt.start_time) {
+        noDate.push(appt)
+        continue
+      }
+      const key = apptDateKey(appt.start_time)
+      let group = groups.find((g) => g.key === key)
+      if (!group) {
+        group = { key, label: dayLabel(key, todayKey), items: [] }
+        groups.push(group)
+      }
+      group.items.push(appt)
     }
-    const key = apptDateKey(appt.start_time)
-    let group = groups.find((g) => g.key === key)
-    if (!group) {
-      group = { key, label: dayLabel(key, todayKey), items: [] }
-      groups.push(group)
-    }
-    group.items.push(appt)
+    if (noDate.length > 0) groups.push({ key: 'sin-fecha', label: 'Sin fecha', items: noDate })
+    return groups
   }
-  if (noDate.length > 0) groups.push({ key: 'sin-fecha', label: 'Sin fecha', items: noDate })
 
-  return (
-    <div className="space-y-6">
-      {/* Advertencia de Caja Cerrada al intentar cobrar */}
-      {checkoutWarning && (
-        <div className="p-3 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-400 text-xs flex gap-2 animate-fade-in shrink-0">
-          <span>{checkoutWarning}</span>
-        </div>
-      )}
+  // Vista "Próximas": lo que quedó abierto en días anteriores va aparte, no mezclado con lo futuro
+  const { unresolved, rest } = separateUnresolved
+    ? splitUnresolvedPast(appointments, todayKey)
+    : { unresolved: [] as any[], rest: appointments }
+  const groups = groupByDay(rest)
+  const unresolvedGroups = groupByDay(unresolved)
 
-      {/* Error al cambiar estado */}
-      {statusError && (
-        <div className="p-3 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-400 text-xs flex gap-2 animate-fade-in shrink-0">
-          <span className="flex-1">{statusError}</span>
-          <button
-            type="button"
-            onClick={() => setStatusError(null)}
-            aria-label="Cerrar aviso"
-            className="shrink-0 font-bold hover:opacity-80"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {appointments.length === 0 ? (
-        <div className="card flex flex-col items-center justify-center py-10 gap-3 text-center bg-zinc-950/50 border border-zinc-900">
-          <div
-            className="w-14 h-14 rounded-2xl flex items-center justify-center"
-            style={{ background: 'color-mix(in srgb, var(--primary-color) 12%, transparent)' }}
-          >
-            <CalendarX size={24} style={{ color: 'var(--primary-color)' }} />
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-xinuco-text">
-              {hasFilters ? 'No hay citas con estos filtros' : 'No hay citas próximas'}
-            </p>
-            <p className="text-xs text-xinuco-muted mt-1">
-              {hasFilters ? 'Prueba con otra fecha, staff o estado.' : 'Cuando alguien reserve, aparecerá aquí.'}
-            </p>
-          </div>
-        </div>
-      ) : (
-        groups.map((group) => (
-        <div key={group.key} className="flex flex-col gap-2">
+  // Lista de citas de un día (misma tarjeta para "Sin cerrar" y para el resto)
+  const renderGroups = (list: { key: string; label: string; items: any[] }[]) =>
+    list.map((group) => (
+      <div key={group.key} className="flex flex-col gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-widest text-xinuco-muted mt-2">
           {group.label}
         </h3>
         <ul className={wide ? 'grid grid-cols-1 gap-2 xl:grid-cols-2' : 'flex flex-col gap-2'} aria-label={`Citas: ${group.label}`}>
-          {group.items.map((appt) => {
+          {group.items.map((appt) => renderAppointment(appt))}
+        </ul>
+      </div>
+    ))
+
+  const renderAppointment = (appt: any) => {
             const customerName = appt.customers?.full_name || appt.customer_name || 'Cliente sin nombre'
             const customerPhone = appt.customers?.phone || appt.customer_phone
             const serviceName = appt.services?.name || appt.service_name || 'Servicio'
@@ -226,6 +233,10 @@ export function InteractiveAgenda({
                   ? 'Cancelada por el negocio'
                   : null
             const isActive = appt.status === 'scheduled' || appt.status === 'in_progress' || appt.status === 'ready_to_pay'
+            // Atrasada: sigue "programada" y su hora ya pasó → hay que cerrarla (Iniciar / No asistió)
+            const overdue = isApptOverdue({ status: appt.status, start_time: appt.start_time, duration_minutes: duration }, nowMs)
+            // Quien no es admin no cobra: la cita lista para pagar pasa por caja
+            const statusLabel = appt.status === 'ready_to_pay' && !isAdmin ? 'Lista para pagar · pasa por caja' : cfg.label
 
             return (
               <li key={appt.id} className="flex items-stretch gap-3 animate-fade-in">
@@ -248,8 +259,8 @@ export function InteractiveAgenda({
                   <div
                     className="w-2.5 h-2.5 rounded-full border-2 shrink-0 transition-colors duration-300"
                     style={{
-                      borderColor: isActive ? 'var(--primary-color)' : 'var(--border-color)',
-                      background: isActive ? 'var(--primary-color)' : 'transparent',
+                      borderColor: overdue ? '#fbbf24' : isActive ? 'var(--primary-color)' : 'var(--border-color)',
+                      background: overdue ? '#fbbf24' : isActive ? 'var(--primary-color)' : 'transparent',
                     }}
                   />
                   <div
@@ -260,8 +271,13 @@ export function InteractiveAgenda({
 
                 {/* Card de la cita */}
                 <div
-                  className={`card flex-1 min-w-0 flex flex-col ${wide ? '' : '2xl:flex-row 2xl:items-center'} justify-between gap-4 p-4 border border-zinc-900 bg-zinc-950/40 hover:bg-zinc-950/70 transition-colors`}
-                  style={isActive ? { borderColor: 'color-mix(in srgb, var(--primary-color) 25%, transparent)' } : {}}
+                  id={apptCardId(appt.id)}
+                  className={`card flex-1 min-w-0 flex flex-col ${wide ? '' : '2xl:flex-row 2xl:items-center'} justify-between gap-4 p-4 border scroll-mt-24 ${
+                    overdue
+                      ? 'border-amber-500/40 bg-amber-500/[0.06] hover:bg-amber-500/10'
+                      : 'border-zinc-900 bg-zinc-950/40 hover:bg-zinc-950/70'
+                  } transition-colors`}
+                  style={isActive && !overdue ? { borderColor: 'color-mix(in srgb, var(--primary-color) 25%, transparent)' } : {}}
                 >
                   {/* Detalles principales */}
                   <div className="flex items-center gap-3 min-w-0">
@@ -304,10 +320,15 @@ export function InteractiveAgenda({
                             <span className="shrink-0">{COP.format(servicePrice)}</span>
                           </>
                         )}
-                        <span>•</span>
-                        <span className="truncate">
-                          {appt.staff?.full_name ? `con ${barberName}` : barberName}
-                        </span>
+                        {/* El barbero no necesita ver su propio nombre en cada cita */}
+                        {isAdmin && (
+                          <>
+                            <span>•</span>
+                            <span className="truncate">
+                              {appt.staff?.full_name ? `con ${barberName}` : barberName}
+                            </span>
+                          </>
+                        )}
                       </div>
                       {appt.status === 'cancelled' && cancelNote && (
                         <p
@@ -327,8 +348,16 @@ export function InteractiveAgenda({
                       className={`badge col-span-2 md:col-span-1 justify-self-start shrink-0 text-xs font-bold uppercase tracking-wider ${cfg.textClass}`}
                       style={{ background: 'color-mix(in srgb, currentColor 10%, transparent)' }}
                     >
-                      {cfg.label}
+                      {statusLabel}
                     </span>
+                    {overdue && (
+                      <span
+                        className="badge col-span-2 md:col-span-1 justify-self-start shrink-0 text-xs font-bold uppercase tracking-wider text-amber-400"
+                        style={{ background: 'color-mix(in srgb, currentColor 14%, transparent)' }}
+                      >
+                        Atrasada
+                      </span>
+                    )}
 
                     {/* Botón de acción interactivo */}
                     {!isUpdating && (
@@ -383,7 +412,8 @@ export function InteractiveAgenda({
                           </button>
                         )}
 
-                        {appt.status === 'ready_to_pay' && (
+                        {/* Cobrar solo lo hace el administrador (el cobro también se valida en la BD) */}
+                        {appt.status === 'ready_to_pay' && isAdmin && (
                           <button
                             onClick={() => handleOpenCheckout(appt)}
                             disabled={isPending}
@@ -399,10 +429,66 @@ export function InteractiveAgenda({
                 </div>
               </li>
             )
-          })}
-        </ul>
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Advertencia de Caja Cerrada al intentar cobrar */}
+      {checkoutWarning && (
+        <div className="p-3 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-400 text-xs flex gap-2 animate-fade-in shrink-0">
+          <span>{checkoutWarning}</span>
         </div>
-        ))
+      )}
+
+      {/* Error al cambiar estado */}
+      {statusError && (
+        <div className="p-3 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-400 text-xs flex gap-2 animate-fade-in shrink-0">
+          <span className="flex-1">{statusError}</span>
+          <button
+            type="button"
+            onClick={() => setStatusError(null)}
+            aria-label="Cerrar aviso"
+            className="shrink-0 font-bold hover:opacity-80"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {appointments.length === 0 ? (
+        <div className="card flex flex-col items-center justify-center py-10 gap-3 text-center bg-zinc-950/50 border border-zinc-900">
+          <div
+            className="w-14 h-14 rounded-2xl flex items-center justify-center"
+            style={{ background: 'color-mix(in srgb, var(--primary-color) 12%, transparent)' }}
+          >
+            <CalendarX size={24} style={{ color: 'var(--primary-color)' }} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-xinuco-text">
+              {hasFilters ? 'No hay citas con estos filtros' : 'No hay citas próximas'}
+            </p>
+            <p className="text-xs text-xinuco-muted mt-1">
+              {hasFilters ? 'Prueba con otra fecha, staff o estado.' : 'Cuando alguien reserve, aparecerá aquí.'}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Sin cerrar: citas de días anteriores que siguen abiertas */}
+          {unresolved.length > 0 && (
+            <section aria-label="Citas sin cerrar" className="flex flex-col gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-widest text-amber-400">
+                Sin cerrar ({unresolved.length})
+              </h3>
+              <p className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <span>Márcalas como atendidas o &lsquo;No asistió&rsquo;.</span>
+              </p>
+              {renderGroups(unresolvedGroups)}
+            </section>
+          )}
+          {renderGroups(groups)}
+        </>
       )}
 
       {/* Checkout Modal */}
@@ -422,6 +508,9 @@ export function InteractiveAgenda({
           onSuccess={handleCheckoutSuccess}
         />
       )}
+
+      {/* ¿Dejar nota del corte? (tras "Terminar cita") */}
+      <FinishNoteSheet target={noteTarget} onClose={() => setNoteTarget(null)} />
     </div>
   )
 }

@@ -89,6 +89,30 @@ export function freeMinutes(schedule: MinuteRange, busy: MinuteRange[]): number 
   return free
 }
 
+/**
+ * Minutos libres que QUEDAN: como `freeMinutes` pero, si el día es hoy, solo cuenta desde
+ * `nowMin` (minutos desde 00:00, hora local del negocio). `nowMin = null` = otro día (todo el horario).
+ */
+export function remainingFreeMinutes(
+  schedule: MinuteRange,
+  busy: MinuteRange[],
+  nowMin: number | null,
+): number {
+  if (nowMin === null) return freeMinutes(schedule, busy)
+  if (nowMin >= schedule.endMin) return 0
+  return freeMinutes({ startMin: Math.max(schedule.startMin, nowMin), endMin: schedule.endMin }, busy)
+}
+
+export const ROW_HEIGHT_REM = 2.75
+export const ROW_GAP_REM = 0.125
+
+/** Posición vertical (rem) de la hora actual dentro de la grilla (filas de `interval` min + separación entre filas). */
+export function nowOffsetRem(nowMin: number, rangeStart: number, interval: number): number {
+  const rows = (nowMin - rangeStart) / interval
+  const whole = Math.floor(rows)
+  return whole * (ROW_HEIGHT_REM + ROW_GAP_REM) + (rows - whole) * ROW_HEIGHT_REM
+}
+
 /** 210 → "3 h 30 min"; 300 → "5 h"; 45 → "45 min". */
 export function formatMinutes(min: number): string {
   const h = Math.floor(min / 60)

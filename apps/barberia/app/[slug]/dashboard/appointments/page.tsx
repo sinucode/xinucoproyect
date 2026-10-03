@@ -8,6 +8,7 @@ import { AgendaFilters } from '@/components/dashboard/agenda/AgendaFilters'
 import { StaffDayTimeline } from '@/components/dashboard/agenda/StaffDayTimeline'
 import type { BreakRow, TimeOffRow, TimelineAppt } from '@/components/dashboard/agenda/staff-day-utils'
 import { businessTodayISODate, addDaysToDateKey, businessNowHHMM } from '@/lib/agenda-time'
+import { businessWallNowMs } from '@/lib/agenda-status'
 
 interface AppointmentsPageProps {
   params: Promise<{ slug: string }>
@@ -72,8 +73,10 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
   // 4a. Si es barbero, obtener su staff.id vinculado al user.id
   //     La relación es: auth.users.id → staff.user_id → staff.id → appointments.staff_id
   //     NO usar barber_id (campo eliminado) ni user.id directo (no es staff.id)
+  // Barbero y manicurista solo ven sus propias citas
+  const isBarber = profile?.role === 'barber' || profile?.role === 'manicurist'
   let linkedStaffId: string | null = null
-  if (profile?.role === 'barber') {
+  if (isBarber) {
     const { data: staffRecord } = await supabase
       .from('staff')
       .select('id')
@@ -91,7 +94,6 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
   const statusFilter = rawStatus in STATUS_FILTERS ? rawStatus : 'all'
 
   // Staff activo del negocio (opciones del filtro + validación del id recibido)
-  const isBarber = profile?.role === 'barber'
   let staffOptions: { id: string; full_name: string }[] = []
   if (!isBarber) {
     const { data: staffRows } = await supabase
@@ -239,7 +241,11 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
             <h1 className="text-2xl font-bold text-xinuco-text">
               Agenda
             </h1>
-            <NewAppointmentButton slug={slug} />
+            <NewAppointmentButton
+              slug={slug}
+              staffId={staffFilter || undefined}
+              initialDate={dateFilter !== 'upcoming' ? dateFilter : undefined}
+            />
           </div>
         </section>
 
@@ -281,6 +287,8 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
             slug={slug}
             hasFilters={hasFilters}
             wide={!(timeline && timelineStaffId)}
+            separateUnresolved={dateFilter === 'upcoming'}
+            nowWallMs={businessWallNowMs()}
           />
         </section>
         </div>
