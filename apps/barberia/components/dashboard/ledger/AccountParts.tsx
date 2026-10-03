@@ -31,6 +31,15 @@ import {
   formatLedgerDateTime,
   shortDateLabel,
 } from '@/lib/team-payments'
+import {
+  QUICK_RANGE_IDS,
+  QUICK_RANGE_LABELS,
+  activeQuickRange,
+  dayHeaderLabel,
+  groupEntriesByDay,
+  quickRange,
+  signedMoney,
+} from '@/lib/my-account'
 
 // ── Filtros (vienen de la URL, ya validados en la página) ─────────────────────
 
@@ -223,7 +232,14 @@ export function BalanceSummary({ account }: { account: StaffAccount }) {
 // Historial con filtros y "Ver más"
 // ════════════════════════════════════════════════════════════════════════════
 
-function EntryRow({ entry }: { entry: AccountEntry }) {
+/** '3:45 p. m.' — la hora de un instante real en Colombia (historial agrupado por día). */
+function formatLedgerTime(iso: string): string {
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(new Date(iso))
+}
+
+function EntryRow({ entry, timeOnly = false }: { entry: AccountEntry; timeOnly?: boolean }) {
   const signed = ENTRY_SIGN[entry.entry_type] * entry.amount
   const period = entry.entry_type === 'payment' && entry.period_from && entry.period_to
     ? `Período: ${shortDateLabel(entry.period_from)} – ${shortDateLabel(entry.period_to)}`
@@ -243,7 +259,7 @@ function EntryRow({ entry }: { entry: AccountEntry }) {
 
   const meta = (
     <span className="text-[11px] text-xinuco-muted flex flex-wrap items-center gap-x-3 gap-y-1">
-      <span>{formatLedgerDateTime(entry.created_at)}</span>
+      <span>{timeOnly ? formatLedgerTime(entry.created_at) : formatLedgerDateTime(entry.created_at)}</span>
       {period && <span>{period}</span>}
       {entry.payment_method && <MethodTag method={entry.payment_method} />}
     </span>
@@ -280,12 +296,18 @@ export function AccountHistory({
   onFiltersChange,
   onLoadMore,
   pending,
+  today,
+  groupByDay = false,
 }: {
   account: StaffAccount
   filters: AccountViewFilters
   onFiltersChange: (next: Partial<AccountViewFilters>) => void
   onLoadMore: () => void
   pending: boolean
+  /** Hoy (día local 'YYYY-MM-DD'): con él se muestran los rangos rápidos Hoy / Semana / Mes / Mes pasado. */
+  today?: string
+  /** Agrupa los movimientos por día local con el total de cada día en el encabezado. */
+  groupByDay?: boolean
 }) {
   const hasFilters = filters.type !== 'all' || !!filters.from || !!filters.to
 
@@ -332,6 +354,27 @@ export function AccountHistory({
           </button>
         ))}
       </div>
+
+      {/* Filtros: rangos rápidos (ponen desde/hasta; las fechas se pueden seguir ajustando) */}
+      {today && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Rango rápido">
+          {QUICK_RANGE_IDS.map(id => {
+            const active = activeQuickRange(filters.from, filters.to, today) === id
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onFiltersChange(active ? { from: '', to: '' } : quickRange(id, today))}
+                aria-pressed={active}
+                className={`${chip(active)} min-h-9`}
+                style={chipStyle(active)}
+              >
+                {QUICK_RANGE_LABELS[id]}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {/* Filtros: fechas */}
       <div className="flex flex-wrap items-end gap-3">
@@ -387,9 +430,38 @@ export function AccountHistory({
             <span>Detalle</span>
             <span className="text-right">Monto</span>
           </div>
-          <ul>
-            {account.entries.map(entry => <EntryRow key={entry.id} entry={entry} />)}
-          </ul>
+          {groupByDay ? (
+            <div>
+              {groupEntriesByDay(account.entries).map(group => {
+                const total = account.dayTotals[group.dateKey]
+                return (
+                  <section key={group.dateKey} aria-label={dayHeaderLabel(group.dateKey)}>
+                    <h3
+                      className="flex items-center justify-between gap-3 px-4 py-2 text-xs font-semibold text-xinuco-text"
+                      style={{
+                        borderTop: '1px solid var(--border-color)',
+                        background: 'color-mix(in srgb, var(--primary-color) 6%, transparent)',
+                      }}
+                    >
+                      <span>{dayHeaderLabel(group.dateKey, today)}</span>
+                      {total !== undefined && (
+                        <span className={`tabular-nums ${total >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {signedMoney(total)}
+                        </span>
+                      )}
+                    </h3>
+                    <ul>
+                      {group.items.map(entry => <EntryRow key={entry.id} entry={entry} timeOnly />)}
+                    </ul>
+                  </section>
+                )
+              })}
+            </div>
+          ) : (
+            <ul>
+              {account.entries.map(entry => <EntryRow key={entry.id} entry={entry} />)}
+            </ul>
+          )}
         </div>
       )}
 

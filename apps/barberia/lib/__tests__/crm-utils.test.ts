@@ -4,6 +4,8 @@ import {
   isPlaceholderPhone,
   validateCustomerInput,
   parseCustomerFilter,
+  customerFiltersForRole,
+  joinParts,
   parseCustomerSort,
   formatBirthday,
   isBirthdayThisMonth,
@@ -58,8 +60,24 @@ describe('filtros y orden', () => {
   it('valida valores, con default', () => {
     expect(parseCustomerFilter('inactive')).toBe('inactive')
     expect(parseCustomerFilter('x; drop')).toBe('all')
+    expect(parseCustomerFilter('mine')).toBe('mine')
     expect(parseCustomerSort('spent')).toBe('spent')
     expect(parseCustomerSort(undefined)).toBe('recent')
+  })
+})
+
+describe('"Mis clientes" y separadores', () => {
+  it('solo el profesional ve el filtro "mine"', () => {
+    expect(customerFiltersForRole(false)).toContain('mine')
+    expect(customerFiltersForRole(true)).not.toContain('mine')
+    expect(customerFiltersForRole(true)).toEqual(['all', 'frequent', 'inactive', 'new', 'birthday'])
+  })
+
+  it('joinParts omite los valores faltantes (sin " · " colgando)', () => {
+    expect(joinParts(['Cliente desde sept 2025', '1 año'])).toBe('Cliente desde sept 2025 · 1 año')
+    expect(joinParts(['Cliente desde sept 2025', ''])).toBe('Cliente desde sept 2025')
+    expect(joinParts(['Nuevo este mes', null, undefined, false])).toBe('Nuevo este mes')
+    expect(joinParts([null, ''])).toBe('')
   })
 })
 

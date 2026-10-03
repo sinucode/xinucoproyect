@@ -36,6 +36,8 @@ export interface SavedMovement {
   periodTo:    string | null
   /** Resultado del recibo por correo (solo anticipo/pago con "Enviar recibo" marcado). */
   receipt:     TeamReceiptResult | null
+  /** El movimiento se registró pero la solicitud que atendía no se pudo cerrar (se cierra a mano). */
+  requestWarning: string | null
 }
 
 export function TeamMovementSheet({
@@ -48,6 +50,9 @@ export function TeamMovementSheet({
   hasActiveShift,
   today,
   suggestedPeriod,
+  initialAmount,
+  initialNotes,
+  payoutRequestId,
   onClose,
   onSaved,
 }: {
@@ -62,18 +67,27 @@ export function TeamMovementSheet({
   hasActiveShift:  boolean
   today:           string
   suggestedPeriod: { from: string; to: string }
+  /** Solicitud de pago/anticipo que se atiende: monto y nota precargados (el admin puede ajustarlos). */
+  initialAmount?:  number
+  initialNotes?:   string
+  /** Al registrarse el movimiento, el servidor marca esta solicitud como pagada. */
+  payoutRequestId?: string
   onClose:         () => void
   onSaved:         (saved: SavedMovement) => void
 }) {
   const backdropRef = useRef<HTMLDivElement>(null)
 
   const [adjustType, setAdjustType] = useState<'bonus' | 'deduction'>('bonus')
-  const [amountDigits, setAmountDigits] = useState(kind === 'settle' && balance > 0 ? String(Math.min(balance, MAX_AMOUNT)) : '')
+  const [amountDigits, setAmountDigits] = useState(
+    initialAmount && initialAmount > 0
+      ? String(Math.min(Math.round(initialAmount), MAX_AMOUNT))
+      : kind === 'settle' && balance > 0 ? String(Math.min(balance, MAX_AMOUNT)) : '',
+  )
   // Medio de pago: arranca en la caja si hay turno abierto; si no, en el primer medio digital
   const [accountChoice, setAccountChoice] = useState<string | null>(null)
   const [periodFrom, setPeriodFrom] = useState(suggestedPeriod.from)
   const [periodTo, setPeriodTo] = useState(suggestedPeriod.to)
-  const [notes, setNotes] = useState(kind === 'settle' ? 'Liquidación' : '')
+  const [notes, setNotes] = useState(initialNotes ?? (kind === 'settle' ? 'Liquidación' : ''))
   const [formError, setFormError] = useState<string | null>(null)
   /** Pago mayor al saldo: espera confirmación del administrador. */
   const [overpay, setOverpay] = useState<{ balance: number } | null>(null)
@@ -147,6 +161,7 @@ export function TeamMovementSheet({
       ...(kind === 'settle' ? { period_from: periodFrom, period_to: periodTo } : {}),
       ...(allowOverpay ? { allowOverpay: true } : {}),
       ...(needsMethod ? { sendReceipt: !!receiptEmailMasked && sendReceipt } : {}),
+      ...(payoutRequestId && needsMethod ? { payoutRequestId } : {}),
     }
 
     startTransition(async () => {
@@ -169,6 +184,7 @@ export function TeamMovementSheet({
           periodFrom: kind === 'settle' ? periodFrom : null,
           periodTo:   kind === 'settle' ? periodTo : null,
           receipt:    result.receipt ?? null,
+          requestWarning: result.requestWarning ?? null,
         })
       } catch {
         setOverpay(null)

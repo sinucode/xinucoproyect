@@ -1,15 +1,30 @@
 'use client'
 
-// MyAccount — "Mi cuenta" (vista de solo lectura del profesional): sus comisiones, propinas,
-// bonos, descuentos, anticipos y pagos. Sin botones de escritura.
+// MyAccount — "Mi cuenta" (vista del profesional): lo que ha ganado hoy / esta semana / este mes,
+// su saldo, su último pago, sus movimientos agrupados por día y sus solicitudes de pago o anticipo.
+// No registra movimientos: solo puede PEDIR (el administrador paga desde "Pagos al equipo").
 
 import { UserX } from 'lucide-react'
 import { AdminPageHeader } from '@xinuco/ui'
 import type { StaffAccount } from '@/actions/ledger'
+import type { PayoutRequestView } from '@/lib/payout-requests'
 import { AccountHistory, BalanceSummary, useAccountUrl, type AccountViewFilters } from './AccountParts'
+import { LastPayoutLine, PayoutRequestsPanel, PeriodSummary, RequestPayoutButton } from './MyAccountExtras'
 
-export function MyAccount({ account, filters }: { account: StaffAccount; filters: AccountViewFilters }) {
+export function MyAccount({
+  account,
+  filters,
+  today,
+  requests = [],
+}: {
+  account: StaffAccount
+  filters: AccountViewFilters
+  /** Hoy en la zona del negocio ('YYYY-MM-DD'), calculado en el servidor. */
+  today: string
+  requests?: PayoutRequestView[]
+}) {
   const { setParams, pending } = useAccountUrl()
+  const hasPendingRequest = requests.some(r => r.status === 'pending')
 
   function changeFilters(next: Partial<AccountViewFilters>) {
     const merged = { ...filters, ...next }
@@ -26,14 +41,20 @@ export function MyAccount({ account, filters }: { account: StaffAccount; filters
       <AdminPageHeader
         title="Mi cuenta"
         subtitle="Tus comisiones, propinas y pagos."
+        actionButton={<RequestPayoutButton balance={account.balance} hasPending={hasPendingRequest} />}
       />
+      <PeriodSummary earnings={account.periodEarnings} />
       <BalanceSummary account={account} />
+      <LastPayoutLine lastPayout={account.lastPayout} />
+      <PayoutRequestsPanel requests={requests} />
       <AccountHistory
         account={account}
         filters={filters}
         onFiltersChange={changeFilters}
         onLoadMore={() => setParams({ page: String(account.page + 1) })}
         pending={pending}
+        today={today}
+        groupByDay
       />
     </>
   )

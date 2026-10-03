@@ -55,6 +55,7 @@ import {
   getInitials,
   isBirthdayThisMonth,
   isPlaceholderPhone,
+  joinParts,
   relativeVisitLabel,
   whatsappUrl,
   type CustomerFilter,
@@ -118,6 +119,7 @@ function emptyMessage(filter: CustomerFilter, hasQuery: boolean): string {
     case 'inactive': return 'No hay clientes que no vengan hace más de 30 días 🎉'
     case 'new':      return 'Aún no hay clientes nuevos este mes.'
     case 'birthday': return 'Nadie cumple años este mes.'
+    case 'mine':     return 'Aún no tienes clientes con citas contigo.'
     default:         return 'No hay clientes aún. Crea el primero con «Nuevo cliente».'
   }
 }
@@ -318,6 +320,9 @@ function CustomerCard({
 }) {
   const since = customerSince(customer.created_at)
   const birthdayMonth = isBirthdayThisMonth(customer.birthday, todayKey)
+  const lastVisitText = customer.last_visit
+    ? `Última visita: ${relativeVisitLabel(customer.last_visit, todayKey)}`
+    : 'Sin visitas aún'
 
   return (
     <button
@@ -358,12 +363,13 @@ function CustomerCard({
           <span className={`text-xs tabular-nums ${isPlaceholderPhone(customer.phone) ? 'text-xinuco-muted/60 italic' : 'text-xinuco-muted'}`}>
             {displayPhone(customer.phone)}
           </span>
-          <span className="text-xinuco-muted/40">·</span>
-          <span className="text-xs text-xinuco-muted">
-            {customer.last_visit
-              ? `Última visita: ${relativeVisitLabel(customer.last_visit, todayKey)}`
-              : 'Sin visitas aún'}
-          </span>
+          {/* El separador solo aparece si hay un segundo valor (no queda un "·" colgando) */}
+          {lastVisitText && (
+            <>
+              <span className="text-xinuco-muted/40" aria-hidden="true">·</span>
+              <span className="text-xs text-xinuco-muted">{lastVisitText}</span>
+            </>
+          )}
         </div>
 
         {(since.label || customer.next_appointment || birthdayMonth) && (
@@ -381,7 +387,7 @@ function CustomerCard({
             )}
             {since.label && (
               <span className="text-[10px] text-xinuco-muted/70">
-                {since.label}{since.age ? ` · ${since.age}` : ''}
+                {joinParts([since.label, since.age])}
               </span>
             )}
           </div>
@@ -580,48 +586,50 @@ function CustomerHeader({
 
   return (
     <div className="p-5 rounded-2xl flex flex-col gap-4" style={CARD_STYLE}>
-      {/* Avatar + datos básicos + acciones */}
-      <div className="flex items-start gap-4 flex-wrap sm:flex-nowrap">
-        <div
-          className="w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center text-xl font-bold"
-          style={{ backgroundColor: 'rgba(197,160,89,0.2)', color: 'var(--primary-color)' }}
-        >
-          {getInitials(customer.full_name)}
-        </div>
+      {/* Avatar + datos básicos; las acciones van debajo en móvil y a la derecha desde sm */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+        <div className="flex items-start gap-3 sm:gap-4 min-w-0 sm:flex-1">
+          <div
+            className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl flex-shrink-0 flex items-center justify-center text-lg sm:text-xl font-bold"
+            style={{ backgroundColor: 'rgba(197,160,89,0.2)', color: 'var(--primary-color)' }}
+          >
+            {getInitials(customer.full_name)}
+          </div>
 
-        <div className="flex-1 min-w-0">
-          <h2 className="text-xl font-bold text-xinuco-text leading-tight">
-            {customer.full_name}
-          </h2>
-          <div className="flex flex-col gap-1 mt-1.5">
-            <span className="flex items-center gap-2 text-xs text-xinuco-muted">
-              <Phone size={12} className="text-xinuco-muted/60" />
-              <span className={noPhone ? 'italic text-xinuco-muted/60' : 'tabular-nums'}>
-                {displayPhone(customer.phone)}
-              </span>
-            </span>
-            {customer.email && (
+          <div className="flex-1 min-w-0">
+            <h2 className="text-xl font-bold text-xinuco-text leading-tight break-words">
+              {customer.full_name}
+            </h2>
+            <div className="flex flex-col gap-1 mt-1.5">
               <span className="flex items-center gap-2 text-xs text-xinuco-muted">
-                <Mail size={12} className="text-xinuco-muted/60" />
-                {customer.email}
+                <Phone size={12} className="text-xinuco-muted/60 shrink-0" />
+                <span className={noPhone ? 'italic text-xinuco-muted/60' : 'tabular-nums'}>
+                  {displayPhone(customer.phone)}
+                </span>
               </span>
-            )}
-            {birthday && (
-              <span className="flex items-center gap-2 text-xs text-xinuco-muted">
-                <Cake size={12} className="text-xinuco-muted/60" />
-                Cumpleaños: {birthday}
-              </span>
-            )}
+              {customer.email && (
+                <span className="flex items-center gap-2 text-xs text-xinuco-muted min-w-0">
+                  <Mail size={12} className="text-xinuco-muted/60 shrink-0" />
+                  <span className="break-all">{customer.email}</span>
+                </span>
+              )}
+              {birthday && (
+                <span className="flex items-center gap-2 text-xs text-xinuco-muted">
+                  <Cake size={12} className="text-xinuco-muted/60 shrink-0" />
+                  Cumpleaños: {birthday}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 sm:flex-shrink-0">
           {wa && (
             <a
               href={wa}
               target="_blank"
               rel="noopener noreferrer"
-              className="btn-ghost !py-2 !px-3 text-xs"
+              className="btn-ghost !py-2 !px-3 text-xs flex-1 sm:flex-none justify-center min-h-10"
               aria-label="Abrir WhatsApp en una pestaña nueva"
             >
               WhatsApp
@@ -630,7 +638,7 @@ function CustomerHeader({
           <button
             type="button"
             onClick={() => setShowEdit(true)}
-            className="btn-ghost !py-2 !px-3 text-xs"
+            className="btn-ghost !py-2 !px-3 text-xs flex-1 sm:flex-none justify-center min-h-10"
           >
             <Pencil size={13} />
             Editar
@@ -664,7 +672,7 @@ function CustomerHeader({
             <select
               value={newTag}
               onChange={e => setNewTag(e.target.value)}
-              className="h-7 text-xs rounded-lg border px-2 bg-transparent text-xinuco-text outline-none"
+              className="h-10 text-xs rounded-lg border px-2 bg-transparent text-xinuco-text outline-none"
               style={{ borderColor: 'var(--border-color)' }}
             >
               <option value="">Elegir…</option>
@@ -679,7 +687,7 @@ function CustomerHeader({
                 type="text"
                 placeholder="Nueva etiqueta"
                 maxLength={40}
-                className="h-7 text-xs rounded-lg border px-2 bg-transparent text-xinuco-text outline-none w-28"
+                className="h-10 text-xs rounded-lg border px-2 bg-transparent text-xinuco-text outline-none w-28"
                 style={{ borderColor: 'var(--border-color)' }}
                 onKeyDown={e => {
                   if (e.key === 'Enter') handleAddTag((e.target as HTMLInputElement).value)
@@ -695,7 +703,7 @@ function CustomerHeader({
                   : newTag
               )}
               disabled={!newTag}
-              className="h-7 px-2.5 text-xs rounded-lg font-medium transition-colors disabled:opacity-40"
+              className="h-10 px-3 text-xs rounded-lg font-medium transition-colors disabled:opacity-40"
               style={{ background: 'var(--primary-color)', color: '#080808' }}
             >
               OK
@@ -703,7 +711,7 @@ function CustomerHeader({
             <button
               type="button"
               onClick={() => { setShowTagInput(false); setNewTag('') }}
-              className="h-7 px-2 text-xs rounded-lg text-xinuco-muted hover:text-xinuco-text transition-colors"
+              className="h-10 px-3 text-xs rounded-lg text-xinuco-muted hover:text-xinuco-text transition-colors"
             >
               <X size={12} />
             </button>
@@ -713,7 +721,7 @@ function CustomerHeader({
             type="button"
             onClick={() => setShowTagInput(true)}
             disabled={isSavingTags}
-            className="inline-flex items-center gap-1 text-xs text-xinuco-muted hover:text-xinuco-text border border-dashed rounded-full px-2.5 py-1 transition-colors disabled:opacity-40"
+            className="inline-flex items-center gap-1 text-xs text-xinuco-muted hover:text-xinuco-text border border-dashed rounded-full px-3 min-h-10 transition-colors disabled:opacity-40"
             style={{ borderColor: 'var(--border-color)' }}
           >
             {isSavingTags ? (
@@ -846,25 +854,46 @@ function PreferredBarberSelector({
   expediente: CustomerExpediente
   onRefresh:  () => void
 }) {
+  const isAdmin = useIsAdmin()
   const [value, setValue] = useState(expediente.customer.preferred_staff_id ?? '')
   const [isSaving, startSave] = useTransition()
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     setValue(expediente.customer.preferred_staff_id ?? '')
   }, [expediente.customer.preferred_staff_id])
 
   function handleChange(staffId: string) {
+    const previous = value
     setValue(staffId)
+    setSaveError(null)
     startSave(async () => {
-      await updateCustomerPreferences(expediente.customer.id, {
+      const res = await updateCustomerPreferences(expediente.customer.id, {
         preferred_staff_id: staffId || null,
       })
+      if (res.error) {
+        setValue(previous)
+        setSaveError(res.error)
+      }
       onRefresh()
     })
   }
 
+  // Solo el administrador cambia el barbero preferido; el profesional lo ve en solo lectura
+  if (!isAdmin) {
+    const preferred = expediente.staff_list.find(s => s.id === expediente.customer.preferred_staff_id)
+    return (
+      <div className="p-4 rounded-xl" style={CARD_STYLE}>
+        <p className="text-sm text-xinuco-text">
+          <span className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">Barbero preferido</span>
+          <span className="block mt-1">{preferred ? preferred.full_name : 'Sin preferencia'}</span>
+        </p>
+      </div>
+    )
+  }
+
   return (
-    <div className="p-4 rounded-xl flex items-center gap-4" style={CARD_STYLE}>
+    <div className="p-4 rounded-xl flex flex-wrap items-center gap-4" style={CARD_STYLE}>
       <div className="flex-1">
         <label
           htmlFor="preferred-barber"
@@ -888,6 +917,9 @@ function PreferredBarberSelector({
         </select>
       </div>
       {isSaving && <Loader2 size={16} className="animate-spin text-xinuco-muted flex-shrink-0" />}
+      {saveError && (
+        <p role="alert" className="text-xs text-red-400 basis-full">{saveError}</p>
+      )}
     </div>
   )
 }
