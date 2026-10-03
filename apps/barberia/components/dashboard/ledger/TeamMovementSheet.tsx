@@ -36,8 +36,6 @@ export interface SavedMovement {
   periodTo:    string | null
   /** Resultado del recibo por correo (solo anticipo/pago con "Enviar recibo" marcado). */
   receipt:     TeamReceiptResult | null
-  /** El movimiento se registró pero la solicitud que atendía no se pudo cerrar (se cierra a mano). */
-  requestWarning: string | null
 }
 
 export function TeamMovementSheet({
@@ -70,7 +68,7 @@ export function TeamMovementSheet({
   /** Solicitud de pago/anticipo que se atiende: monto y nota precargados (el admin puede ajustarlos). */
   initialAmount?:  number
   initialNotes?:   string
-  /** Al registrarse el movimiento, el servidor marca esta solicitud como pagada. */
+  /** El movimiento se inserta con esta solicitud: la base la marca pagada en la misma transacción. */
   payoutRequestId?: string
   onClose:         () => void
   onSaved:         (saved: SavedMovement) => void
@@ -184,7 +182,6 @@ export function TeamMovementSheet({
           periodFrom: kind === 'settle' ? periodFrom : null,
           periodTo:   kind === 'settle' ? periodTo : null,
           receipt:    result.receipt ?? null,
-          requestWarning: result.requestWarning ?? null,
         })
       } catch {
         setOverpay(null)

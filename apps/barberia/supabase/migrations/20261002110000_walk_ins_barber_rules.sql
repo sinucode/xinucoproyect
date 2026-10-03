@@ -9,15 +9,18 @@
 --
 -- 2) Un barbero/manicurista (profiles.role no admin) solo opera SUS turnos:
 --    - start_walk_in:   a nombre propio, y turno suyo o sin barbero reservado/pedido.
---    - reserve_walk_in: para sí mismo un turno libre, o gestiona uno suyo.
+--    - reserve_walk_in: SIEMPRE a nombre propio (p_staff_id = un profesional del usuario) y solo un
+--                       turno libre o suyo. Un barbero NO puede pasarle el turno a un colega: eso es del admin.
 --    - release_walk_in: libera lo suyo o lo libre; el hueco de otro profesional es del admin.
 --    El admin (_is_business_admin) conserva todo. Se recrean las últimas definiciones
 --    (start: 20260930110000, reserve: 20260929170000, release: 20260929160000) agregando
 --    SOLO el guard (error 'walk_in_not_yours').
 --
--- 3) Trigger _guard_walk_in_staff_change: walk_ins admite UPDATE de cualquier miembro del
---    negocio por REST (RLS xin_update), así que sin esto un barbero podría reasignar el
---    turno de otro con un PATCH directo. Ver la nota sobre current_user abajo.
+-- 3) Triggers _guard_walk_in_staff_change (INSERT y UPDATE): walk_ins admite INSERT/UPDATE de
+--    cualquier miembro del negocio por REST (RLS xin_insert/xin_update), así que sin esto un
+--    barbero podría crear turnos para otro, reasignar o cerrar el turno de otro con un
+--    PATCH directo. Ver la nota sobre current_user abajo.
+--    _sync_walk_in_from_appointment pasa a SECURITY DEFINER para no depender de este guard.
 -- ============================================================
 
 -- ── 1. Cerrar turnos de días anteriores ──────────────────────────────────────
@@ -163,11 +166,13 @@ BEGIN
   PERFORM public._assert_business_access(w.business_id);
   IF w.status <> 'waiting' THEN RAISE EXCEPTION 'walk_in_not_waiting'; END IF;
 
-  -- Barbero/manicurista: solo aparta para sí mismo un turno libre, o gestiona uno suyo
-  -- (reservado o pedido con él). Un turno de otro profesional es del admin.
+  -- Barbero/manicurista: solo aparta A NOMBRE PROPIO (el profesional destino es uno suyo; sin
+  -- destino no hay "el mejor": eso decide el admin) y solo un turno libre o ya suyo. No puede
+  -- pasarle el turno a un colega ni quitárselo: un turno de otro profesional es del admin.
   IF NOT public._is_business_admin(w.business_id) THEN
-    IF NOT ( (w.staff_id IS NOT NULL AND public._is_my_staff(w.staff_id))
-          OR (w.staff_id IS NULL AND p_staff_id IS NOT NULL AND public._is_my_staff(p_staff_id)) ) THEN
+    IF p_staff_id IS NULL
+       OR NOT public._is_my_staff(p_staff_id)
+       OR (w.staff_id IS NOT NULL AND NOT public._is_my_staff(w.staff_id)) THEN
       RAISE EXCEPTION 'walk_in_not_yours';
     END IF;
   END IF;
@@ -260,32 +265,62 @@ REVOKE ALL ON FUNCTION public.release_walk_in(UUID, BOOLEAN) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.release_walk_in(UUID, BOOLEAN) TO authenticated;
 
 -- ── 3. Guard en walk_ins para escrituras directas (REST) ─────────────────────
--- SECURITY INVOKER a propósito: current_user es el rol que ejecuta el UPDATE.
+-- SECURITY INVOKER a propósito: current_user es el rol que ejecuta el INSERT/UPDATE.
 --   · Por REST (PostgREST) es 'authenticated' → se aplica la regla.
 --   · Dentro de un RPC SECURITY DEFINER (start/reserve/release/close_stale) es el
 --     dueño de la función ('postgres') → NO se aplica aquí; esos RPC ya validan
 --     la misma regla arriba. service_role y el SQL editor tampoco son 'authenticated'.
---   · El trigger _sync_walk_in_from_appointment es INVOKER: corre como el usuario,
---     pero solo cambia status ('completed'/'cancelled') y served_at, nunca staff_id
---     ni pasa a 'in_progress', así que este guard lo deja pasar.
--- Regla (solo no-admin): no puede cambiar staff_id salvo para tomar un turno libre
--- para sí mismo, o si el turno ya es suyo; tampoco pasar a 'in_progress' el turno
--- que tiene otro profesional asignado.
+--   · _sync_walk_in_from_appointment (cierra el turno cuando se cierra su cita): antes era INVOKER
+--     y corría como el usuario que actualiza la cita. Un barbero solo actualiza SUS citas y la cita
+--     de un turno es del mismo profesional que el turno, así que pasaba; pero si el admin movió la
+--     cita a otro barbero el turno conserva el profesional anterior y este guard habría bloqueado
+--     el cierre de la cita. Se recrea SECURITY DEFINER: solo toca los turnos ligados a la cita que
+--     el usuario ya pudo cambiar (RLS de appointments), no recibe parámetros del cliente y queda
+--     fuera de este guard (current_user = dueño).
+-- Regla (solo no-admin):
+--   INSERT: staff_id NULL o propio, status 'waiting', sin appointment_id (si no, release_walk_in
+--           podría cancelar la cita de otro).
+--   UPDATE: · staff_id solo puede pasar de propio a NULL, o de NULL/propio a propio; nunca a otro.
+--           · cualquier cambio de status exige que el turno NO tenga a OTRO profesional asignado
+--             (cubre completar, cancelar o revertir el turno en atención de un colega).
+--           · appointment_id no se toca por REST (solo lo manejan los RPC).
 CREATE OR REPLACE FUNCTION public._guard_walk_in_staff_change()
 RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
 BEGIN
   IF current_user <> 'authenticated' THEN RETURN NEW; END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    IF public._is_business_admin(NEW.business_id) THEN RETURN NEW; END IF;
+    IF NEW.status IS DISTINCT FROM 'waiting'
+       OR NEW.appointment_id IS NOT NULL
+       OR (NEW.staff_id IS NOT NULL AND NOT public._is_my_staff(NEW.staff_id)) THEN
+      RAISE EXCEPTION 'walk_in_not_yours';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- UPDATE
   IF public._is_business_admin(OLD.business_id) THEN RETURN NEW; END IF;
 
   IF NEW.staff_id IS DISTINCT FROM OLD.staff_id THEN
-    IF NOT ( (OLD.staff_id IS NOT NULL AND public._is_my_staff(OLD.staff_id))
-          OR (OLD.staff_id IS NULL AND NEW.staff_id IS NOT NULL AND public._is_my_staff(NEW.staff_id)) ) THEN
-      RAISE EXCEPTION 'walk_in_not_yours';
+    IF NEW.staff_id IS NULL THEN
+      -- liberar: solo lo propio
+      IF NOT public._is_my_staff(OLD.staff_id) THEN RAISE EXCEPTION 'walk_in_not_yours'; END IF;
+    ELSE
+      -- tomar para sí un turno libre (o ya propio); jamás asignarlo a otro profesional
+      IF NOT public._is_my_staff(NEW.staff_id)
+         OR (OLD.staff_id IS NOT NULL AND NOT public._is_my_staff(OLD.staff_id)) THEN
+        RAISE EXCEPTION 'walk_in_not_yours';
+      END IF;
     END IF;
   END IF;
 
-  IF NEW.status = 'in_progress' AND OLD.status IS DISTINCT FROM 'in_progress'
+  IF NEW.status IS DISTINCT FROM OLD.status
      AND OLD.staff_id IS NOT NULL AND NOT public._is_my_staff(OLD.staff_id) THEN
+    RAISE EXCEPTION 'walk_in_not_yours';
+  END IF;
+
+  IF NEW.appointment_id IS DISTINCT FROM OLD.appointment_id THEN
     RAISE EXCEPTION 'walk_in_not_yours';
   END IF;
 
@@ -296,7 +331,33 @@ REVOKE ALL ON FUNCTION public._guard_walk_in_staff_change() FROM PUBLIC, anon;
 
 DROP TRIGGER IF EXISTS trg_guard_walk_in_staff_change ON public.walk_ins;
 CREATE TRIGGER trg_guard_walk_in_staff_change
-  BEFORE UPDATE OF staff_id, status ON public.walk_ins
+  BEFORE UPDATE OF staff_id, status, appointment_id ON public.walk_ins
   FOR EACH ROW
-  WHEN (NEW.staff_id IS DISTINCT FROM OLD.staff_id OR NEW.status IS DISTINCT FROM OLD.status)
+  WHEN (NEW.staff_id IS DISTINCT FROM OLD.staff_id
+        OR NEW.status IS DISTINCT FROM OLD.status
+        OR NEW.appointment_id IS DISTINCT FROM OLD.appointment_id)
   EXECUTE FUNCTION public._guard_walk_in_staff_change();
+
+-- (un INSERT trigger no puede usar OLD en su WHEN: va aparte, misma función)
+DROP TRIGGER IF EXISTS trg_guard_walk_in_insert ON public.walk_ins;
+CREATE TRIGGER trg_guard_walk_in_insert
+  BEFORE INSERT ON public.walk_ins
+  FOR EACH ROW
+  EXECUTE FUNCTION public._guard_walk_in_staff_change();
+
+-- ── 4. Cierre del turno al cerrarse su cita: SECURITY DEFINER (ver nota arriba) ──
+CREATE OR REPLACE FUNCTION public._sync_walk_in_from_appointment()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NEW.status IS DISTINCT FROM OLD.status AND NEW.status IN ('completed', 'cancelled', 'no_show') THEN
+    UPDATE walk_ins
+       SET status    = CASE WHEN NEW.status = 'completed' THEN 'completed' ELSE 'cancelled' END,
+           served_at = CASE WHEN NEW.status = 'completed' THEN NOW() ELSE served_at END
+     WHERE appointment_id = NEW.id
+       AND business_id    = NEW.business_id
+       AND status IN ('waiting', 'in_progress');
+  END IF;
+  RETURN NEW;
+END;
+$$;
+REVOKE ALL ON FUNCTION public._sync_walk_in_from_appointment() FROM PUBLIC, anon, authenticated;

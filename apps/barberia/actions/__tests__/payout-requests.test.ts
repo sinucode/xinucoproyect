@@ -5,7 +5,7 @@ import {
   listPendingPayoutRequests,
   recordTeamMovement,
   requestPayout,
-  resolvePayoutRequest,
+  rejectPayoutRequest,
 } from '../ledger'
 import { createClient } from '@xinuco/supabase/server'
 
@@ -128,6 +128,7 @@ describe('getMyPayoutRequests', () => {
     const res = await getMyPayoutRequests()
     expect('requests' in res && res.requests.map(r => r.id)).toEqual(['r1', 'r2'])
     expect('requests' in res && res.requests[0].amount).toBe(50000)
+    expect('requests' in res && res.requests[0].paid_amount).toBeNull()
     const eqs = opsOf(calls, 'payout_requests', 'eq').map(o => `${o.args[0]}=${o.args[1]}`)
     expect(eqs).toEqual(expect.arrayContaining(['business_id=biz1', 'staff_id=s1']))
   })
@@ -144,7 +145,7 @@ describe('admin: listar, contar y resolver', () => {
   it.each(['barber', 'manicurist'])('el rol %s no lista ni rechaza solicitudes', async (role) => {
     const { rpc, calls } = setup(role)
     expect(await listPendingPayoutRequests()).toEqual({ error: NOT_ADMIN })
-    expect(await resolvePayoutRequest('r1', 'rejected', 'No hay caja')).toEqual({ error: NOT_ADMIN })
+    expect(await rejectPayoutRequest('r1', 'No hay caja')).toEqual({ error: NOT_ADMIN })
     expect(rpc).not.toHaveBeenCalled()
     expect(calls.filter(c => c.table === 'payout_requests')).toHaveLength(0)
   })
@@ -167,29 +168,26 @@ describe('admin: listar, contar y resolver', () => {
     expect(await getPendingPayoutRequestsCount()).toBe(0)
   })
 
-  it('rechazar exige motivo y lo manda a la base', async () => {
+  it('rechazar exige motivo y lo manda a la base (sin parámetro de movimiento)', async () => {
     const { rpc } = setup('admin')
-    expect(await resolvePayoutRequest('r1', 'rejected', '  ')).toHaveProperty('error')
+    expect(await rejectPayoutRequest('r1', '  ')).toHaveProperty('error')
     expect(rpc).not.toHaveBeenCalled()
 
-    expect(await resolvePayoutRequest('r1', 'rejected', ' Se paga el viernes ')).toEqual({ success: true })
+    expect(await rejectPayoutRequest('r1', ' Se paga el viernes ')).toEqual({ success: true })
     expect(rpc).toHaveBeenCalledWith('resolve_payout_request', {
-      p_id: 'r1', p_status: 'rejected', p_note: 'Se paga el viernes', p_ledger_entry_id: null,
+      p_id: 'r1', p_status: 'rejected', p_note: 'Se paga el viernes',
     })
   })
 
-  it('marcar pagada enlaza el movimiento', async () => {
+  it('sin id no llama a la base', async () => {
     const { rpc } = setup('admin')
-    expect(await resolvePayoutRequest('r1', 'paid', null, 'led-1')).toEqual({ success: true })
-    expect(rpc).toHaveBeenCalledWith('resolve_payout_request', {
-      p_id: 'r1', p_status: 'paid', p_note: null, p_ledger_entry_id: 'led-1',
-    })
+    expect(await rejectPayoutRequest('', 'Motivo')).toHaveProperty('error')
+    expect(rpc).not.toHaveBeenCalled()
   })
 
-  it('un estado inválido no llega a la base', async () => {
-    const { rpc } = setup('admin')
-    expect(await resolvePayoutRequest('r1', 'cancelled' as never, 'x')).toEqual({ error: 'Estado no válido.' })
-    expect(rpc).not.toHaveBeenCalled()
+  it('traduce el error use_payment_flow de la base', async () => {
+    setup('admin', {}, { data: null, error: { message: 'use_payment_flow' } })
+    expect((await rejectPayoutRequest('r1', 'Motivo')).error).toMatch(/Pagos al equipo/)
   })
 })
 
@@ -208,7 +206,7 @@ describe('recordTeamMovement atendiendo una solicitud', () => {
   it('si la solicitud ya no está pendiente NO mueve plata', async () => {
     const { calls, rpc } = setup('admin', { staff: [staffOk], payout_requests: [pendingReq({ status: 'cancelled' })] })
     const res = await recordTeamMovement(advance)
-    expect(res.error).toMatch(/ya no está pendiente/)
+    expect(res.error).toMatch(/ya fue pagada, cancelada o rechazada/)
     expect(opsOf(calls, 'staff_ledger', 'insert')).toHaveLength(0)
     expect(rpc).not.toHaveBeenCalled()
   })
@@ -229,7 +227,7 @@ describe('recordTeamMovement atendiendo una solicitud', () => {
     expect(opsOf(calls, 'staff_ledger', 'insert')).toHaveLength(0)
   })
 
-  it('registra el anticipo y luego marca la solicitud pagada con el id del nuevo movimiento', async () => {
+  it('registra el anticipo con payout_request_id y NO llama a resolve_payout_request (cierre atómico en la base)', async () => {
     const { calls, rpc } = setup('admin', {
       staff: [staffOk],
       payout_requests: [pendingReq()],
@@ -237,26 +235,43 @@ describe('recordTeamMovement atendiendo una solicitud', () => {
     })
     const res = await recordTeamMovement(advance)
     expect(res.success).toBe(true)
-    expect(res.requestResolved).toBe(true)
+    expect(res.entry?.id).toBe('led-9')
     expect(opsOf(calls, 'staff_ledger', 'insert')[0].args[0]).toMatchObject({
-      business_id: 'biz1', staff_id: 's1', entry_type: 'advance', amount: 50000,
+      business_id: 'biz1', staff_id: 's1', entry_type: 'advance', amount: 50000, payout_request_id: 'r1',
     })
-    expect(rpc).toHaveBeenCalledWith('resolve_payout_request', {
-      p_id: 'r1', p_status: 'paid', p_note: null, p_ledger_entry_id: 'led-9',
-    })
+    expect(rpc).not.toHaveBeenCalled()
   })
 
-  it('si cerrar la solicitud falla, el movimiento queda registrado y se avisa', async () => {
-    setup('admin', {
+  it.each([
+    ['payout_request_not_pending', /ya fue pagada, cancelada o rechazada/],
+    ['payout_request_invalid',     /ya fue pagada, cancelada o rechazada/],
+    ['payout_request_mismatch',    /no corresponde a este profesional o tipo de pago/],
+  ])('si el trigger de la base rechaza (%s) no queda movimiento y el error sale en español', async (code, pattern) => {
+    const { rpc } = setup('admin', {
       staff: [staffOk],
       payout_requests: [pendingReq()],
-      staff_ledger: [{ data: { id: 'led-9', amount: 50000, entry_type: 'advance' }, error: null }],
-    }, { data: null, error: { message: 'not_pending' } })
+      staff_ledger: [{ data: null, error: { message: code } }],
+    })
     const res = await recordTeamMovement(advance)
+    expect(res.success).toBeUndefined()
+    expect(res.entry).toBeUndefined()
+    expect(res.error).toMatch(pattern)
+    expect(rpc).not.toHaveBeenCalled()
+  })
+
+  it('un pago (settle) que atiende una solicitud de tipo payout manda payout_request_id', async () => {
+    const { calls } = setup('admin', {
+      staff: [staffOk],
+      payout_requests: [pendingReq({ kind: 'payout' })],
+      staff_ledger: [{ data: { id: 'led-3', amount: 20000, entry_type: 'payment' }, error: null }],
+      staff_ledger_balances: [{ data: { current_balance: 30000 }, error: null }],
+    })
+    const res = await recordTeamMovement({
+      staffId: 's1', type: 'payment', amount: 20000, notes: 'Pago solicitado',
+      payment_method: 'transfer', sendReceipt: false, payoutRequestId: 'r1',
+    })
     expect(res.success).toBe(true)
-    expect(res.entry?.id).toBe('led-9')
-    expect(res.requestResolved).toBeUndefined()
-    expect(res.requestWarning).toMatch(/Ciérrala manualmente/)
+    expect(opsOf(calls, 'staff_ledger', 'insert')[0].args[0]).toMatchObject({ payout_request_id: 'r1', amount: 20000 })
   })
 
   it('solo anticipos y pagos pueden atender una solicitud', async () => {
@@ -268,7 +283,7 @@ describe('recordTeamMovement atendiendo una solicitud', () => {
     expect(opsOf(calls, 'staff_ledger', 'insert')).toHaveLength(0)
   })
 
-  it('un movimiento sin solicitud no toca payout_requests ni la función', async () => {
+  it('un movimiento sin solicitud no toca payout_requests ni manda payout_request_id', async () => {
     const { calls, rpc } = setup('admin', {
       staff: [staffOk],
       staff_ledger: [{ data: { id: 'led-1' }, error: null }],
@@ -276,6 +291,7 @@ describe('recordTeamMovement atendiendo una solicitud', () => {
     const res = await recordTeamMovement({ staffId: 's1', type: 'bonus', amount: 1000, notes: 'Meta del mes' })
     expect(res.success).toBe(true)
     expect(calls.filter(c => c.table === 'payout_requests')).toHaveLength(0)
+    expect(opsOf(calls, 'staff_ledger', 'insert')[0].args[0]).not.toHaveProperty('payout_request_id')
     expect(rpc).not.toHaveBeenCalled()
   })
 })

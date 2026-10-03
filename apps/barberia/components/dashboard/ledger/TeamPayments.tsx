@@ -29,7 +29,7 @@ import {
   waLink,
   type TeamReceiptResult,
 } from '@/lib/team-payments'
-import type { PayoutRequestView } from '@/lib/payout-requests'
+import { suggestedPayAmount, type PayoutRequestView } from '@/lib/payout-requests'
 import { AccountHistory, BalanceSummary, useAccountUrl, type AccountViewFilters } from './AccountParts'
 import { PayoutRequestsAdmin } from './PayoutRequestsAdmin'
 import { TeamMovementSheet, type SavedMovement, type SheetKind } from './TeamMovementSheet'
@@ -82,7 +82,6 @@ export function TeamPayments({
   const [activeRequest, setActiveRequest] = useState<PayoutRequestView | null>(null)
   /** "Pagar" sobre una solicitud de otro profesional: se abre el panel cuando cargue su cuenta. */
   const [wantPay, setWantPay] = useState<PayoutRequestView | null>(null)
-  const [requestWarning, setRequestWarning] = useState<string | null>(null)
 
   const selected = overview.members.find(m => m.staff.id === selectedId) ?? null
   const { owed, advances_outstanding } = overview.totals
@@ -136,7 +135,6 @@ export function TeamPayments({
 
   function handleSaved(saved: SavedMovement) {
     closeSheet()
-    setRequestWarning(saved.requestWarning)
     if (saved.kind === 'settle' && account && selected) {
       const lines = settlementTextLines(account.settlement, saved.entry.amount)
 
@@ -196,16 +194,6 @@ export function TeamPayments({
         title="Pagos al equipo"
         subtitle="Lo que gana cada profesional, lo que se le adelantó y lo que se le pagó."
       />
-
-      {requestWarning && (
-        <p role="alert" className="flex items-start justify-between gap-3 text-xs rounded-lg px-4 py-3 border"
-          style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)' }}>
-          <span>{requestWarning}</span>
-          <button type="button" onClick={() => setRequestWarning(null)} aria-label="Cerrar aviso" className="shrink-0">
-            <X size={14} />
-          </button>
-        </p>
-      )}
 
       <PayoutRequestsAdmin
         requests={payoutRequests}
@@ -432,7 +420,7 @@ export function TeamPayments({
           hasActiveShift={overview.activeShift !== null}
           today={today}
           suggestedPeriod={account.suggestedPeriod}
-          initialAmount={activeRequest?.amount}
+          initialAmount={activeRequest ? suggestedPayAmount(activeRequest, account.balance) : undefined}
           initialNotes={activeRequest && activeRequest.kind === 'advance'
             ? (activeRequest.note && activeRequest.note.length >= 3 ? activeRequest.note : 'Anticipo solicitado')
             : undefined}

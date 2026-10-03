@@ -8,7 +8,10 @@
 -- 2. Clientes · barbero preferido: solo el admin lo cambia (trigger en customers).
 -- 3. Mi cuenta · solicitudes de pago / anticipo: tabla payout_requests + RPCs DEFINER.
 --    UNA solicitud NUNCA mueve plata: solo el flujo existente de "Pagos al equipo" (staff_ledger)
---    registra pagos y anticipos. La solicitud se marca como pagada apuntando a ese movimiento.
+--    registra pagos y anticipos. Pagar y cerrar la solicitud es ATÓMICO: el movimiento se inserta
+--    con staff_ledger.payout_request_id y dos triggers (BEFORE valida con bloqueo, AFTER cierra la
+--    solicitud) lo hacen en la MISMA transacción. Sin pagar a medias, sin doble pago, sin pagar una
+--    solicitud ya cancelada/rechazada. resolve_payout_request solo sirve para RECHAZAR.
 -- ============================================================
 
 -- ════════════════════════════════════════════════════════════
@@ -133,27 +136,44 @@ GRANT EXECUTE ON FUNCTION public.list_customers(UUID, TEXT, TEXT, TEXT, INTEGER,
 -- 2. Barbero preferido: solo el administrador del negocio
 --
 -- Se verificó en las migraciones que NINGUNA función SECURITY DEFINER escribe
--- customers.preferred_staff_id (create_public_booking y el resto no la tocan). Quien la cambia hoy
--- es la app con el cliente del usuario (updateCustomerPreferences). Por eso la regla es:
+-- customers.preferred_staff_id (create_public_booking y el resto no la tocan) y que ningún alta
+-- de cliente de la app la envía. Quien la cambia hoy es la app con el cliente del usuario
+-- (updateCustomerPreferences). Por eso la regla es, en INSERT y en UPDATE:
 --   · sin sesión de usuario (auth.uid() IS NULL: service role, reserva pública anónima,
 --     SQL Editor) → se permite;
 --   · cambios anidados (pg_trigger_depth() > 1: p. ej. el ON DELETE SET NULL de la FK cuando se
 --     borra un profesional) → se permite;
---   · cualquier otro cambio exige ser admin/super_admin del negocio del cliente.
+--   · cualquier otro valor distinto de NULL (INSERT) o cambio (UPDATE) exige ser admin/super_admin
+--     del negocio del cliente: un no-admin NO puede crear un cliente con barbero preferido;
+--   · para cualquier escritor, el profesional preferido debe ser del MISMO negocio del cliente
+--     (invalid_preferred_staff): la FK sola permitiría apuntar a un profesional de otro negocio.
 -- (current_setting('role') no sirve para distinguir: dentro de una función DEFINER sigue siendo
 -- 'authenticated'.)
--- Solo dispara si la columna cambia de verdad (BEFORE UPDATE OF + IS DISTINCT FROM).
+-- Solo dispara si la columna trae valor (INSERT) o cambia de verdad (UPDATE OF + IS DISTINCT FROM).
 -- ════════════════════════════════════════════════════════════
 CREATE OR REPLACE FUNCTION public._trg_customers_preferred_staff_guard()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-  IF NEW.preferred_staff_id IS DISTINCT FROM OLD.preferred_staff_id
-     AND auth.uid() IS NOT NULL
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.preferred_staff_id IS NOT DISTINCT FROM OLD.preferred_staff_id THEN RETURN NEW; END IF;
+  ELSIF NEW.preferred_staff_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  IF auth.uid() IS NOT NULL
      AND pg_trigger_depth() <= 1
      AND NOT public._is_business_admin(NEW.business_id) THEN
     RAISE EXCEPTION 'admin_required' USING ERRCODE = '42501',
       DETAIL = 'Solo un administrador puede cambiar el barbero preferido de un cliente.';
   END IF;
+
+  IF NEW.preferred_staff_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM staff s
+                      WHERE s.id = NEW.preferred_staff_id AND s.business_id = NEW.business_id) THEN
+    RAISE EXCEPTION 'invalid_preferred_staff' USING ERRCODE = '23514',
+      DETAIL = 'El barbero preferido debe ser un profesional del mismo negocio.';
+  END IF;
+
   RETURN NEW;
 END;
 $$;
@@ -161,7 +181,7 @@ REVOKE ALL ON FUNCTION public._trg_customers_preferred_staff_guard() FROM PUBLIC
 
 DROP TRIGGER IF EXISTS trg_customers_preferred_staff_guard ON public.customers;
 CREATE TRIGGER trg_customers_preferred_staff_guard
-  BEFORE UPDATE OF preferred_staff_id ON public.customers
+  BEFORE INSERT OR UPDATE OF preferred_staff_id ON public.customers
   FOR EACH ROW EXECUTE FUNCTION public._trg_customers_preferred_staff_guard();
 
 -- ════════════════════════════════════════════════════════════
@@ -170,7 +190,8 @@ CREATE TRIGGER trg_customers_preferred_staff_guard
 CREATE TABLE IF NOT EXISTS public.payout_requests (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id     UUID        NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
-  staff_id        UUID        NOT NULL REFERENCES public.staff(id)      ON DELETE CASCADE,
+  -- RESTRICT: un profesional con solicitudes no se borra (trazabilidad financiera; se desactiva)
+  staff_id        UUID        NOT NULL REFERENCES public.staff(id)      ON DELETE RESTRICT,
   kind            TEXT        NOT NULL CHECK (kind IN ('payout', 'advance')),
   -- NUMERIC: en producción hay columnas de dinero INTEGER; aquí no se asume nada
   amount          NUMERIC     NOT NULL CHECK (amount > 0 AND amount <= 50000000),
@@ -181,8 +202,10 @@ CREATE TABLE IF NOT EXISTS public.payout_requests (
   resolved_by     UUID        REFERENCES auth.users(id) ON DELETE SET NULL,
   resolved_at     TIMESTAMPTZ,
   resolution_note TEXT        CHECK (resolution_note IS NULL OR char_length(resolution_note) <= 200),
-  -- Movimiento de staff_ledger con el que se pagó (anticipo/pago registrado por el admin)
+  -- Movimiento de staff_ledger con el que se pagó (lo enlaza el trigger al insertarlo)
   ledger_entry_id UUID        REFERENCES public.staff_ledger(id) ON DELETE SET NULL,
+  -- Lo que realmente se pagó (el admin puede ajustar el monto pedido); NULL mientras no esté pagada
+  paid_amount     NUMERIC     CHECK (paid_amount IS NULL OR paid_amount > 0),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK ((status = 'pending') = (resolved_at IS NULL))
 );
@@ -324,19 +347,75 @@ $$;
 REVOKE ALL ON FUNCTION public.cancel_payout_request(UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.cancel_payout_request(UUID) TO authenticated;
 
--- ── resolve_payout_request: el admin la marca pagada o la rechaza ────────────
--- 'paid': NO mueve plata; el movimiento (anticipo/pago) ya lo registró el flujo de Pagos al equipo y
--- aquí solo se enlaza (p_ledger_entry_id, opcional) tras validar que es del mismo negocio y profesional,
--- del tipo que corresponde (payout → payment, advance → advance), posterior a la solicitud y no
--- usado por otra solicitud.
--- 'rejected': el motivo es obligatorio (3 a 200 caracteres).
--- Errores: forbidden, invalid_status, not_found, not_pending, note_required, note_too_long,
--- invalid_ledger_entry.
+-- ── Vínculo atómico staff_ledger ↔ payout_requests ────────────────────────────
+-- Un movimiento del equipo puede declarar la solicitud que atiende (payout_request_id). Se pagan
+-- y se cierran en la MISMA transacción; si la solicitud no es válida el INSERT falla y no se mueve
+-- plata. ON DELETE SET NULL: borrar la solicitud no borra el movimiento.
+ALTER TABLE public.staff_ledger
+  ADD COLUMN IF NOT EXISTS payout_request_id UUID NULL REFERENCES public.payout_requests(id) ON DELETE SET NULL;
+-- Un movimiento por solicitud (una solicitud no se paga dos veces)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_staff_ledger_payout_request
+  ON public.staff_ledger (payout_request_id) WHERE payout_request_id IS NOT NULL;
+
+-- BEFORE INSERT: bloquea la solicitud (FOR UPDATE: serializa con otro pago, con cancel_payout_request
+-- y con el rechazo) y exige que siga pendiente y sea de este negocio, este profesional y este tipo.
+-- Errores: payout_request_invalid (no existe o es de otro negocio), payout_request_not_pending,
+-- payout_request_mismatch (otro profesional, o tipo distinto: payout↔payment, advance↔advance).
+CREATE OR REPLACE FUNCTION public._trg_staff_ledger_payout_request_check()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE r payout_requests%ROWTYPE;
+BEGIN
+  SELECT * INTO r FROM payout_requests WHERE id = NEW.payout_request_id FOR UPDATE;
+  IF NOT FOUND OR r.business_id <> NEW.business_id THEN RAISE EXCEPTION 'payout_request_invalid'; END IF;
+  IF r.status <> 'pending' THEN RAISE EXCEPTION 'payout_request_not_pending'; END IF;
+  IF r.staff_id <> NEW.staff_id
+     OR NEW.entry_type IS DISTINCT FROM CASE r.kind WHEN 'payout' THEN 'payment' ELSE 'advance' END THEN
+    RAISE EXCEPTION 'payout_request_mismatch';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+REVOKE ALL ON FUNCTION public._trg_staff_ledger_payout_request_check() FROM PUBLIC, anon, authenticated;
+
+-- AFTER INSERT: cierra la solicitud (pagada, quién, cuándo, con qué movimiento y cuánto). Misma
+-- transacción que el INSERT. Respeta el CHECK (status = 'pending') = (resolved_at IS NULL).
+CREATE OR REPLACE FUNCTION public._trg_staff_ledger_payout_request_close()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  UPDATE payout_requests
+     SET status          = 'paid',
+         resolved_by     = auth.uid(),
+         resolved_at     = NOW(),
+         ledger_entry_id = NEW.id,
+         paid_amount     = NEW.amount::NUMERIC
+   WHERE id = NEW.payout_request_id AND status = 'pending';
+  IF NOT FOUND THEN RAISE EXCEPTION 'payout_request_not_pending'; END IF;
+  RETURN NEW;
+END;
+$$;
+REVOKE ALL ON FUNCTION public._trg_staff_ledger_payout_request_close() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS trg_staff_ledger_payout_request_check ON public.staff_ledger;
+CREATE TRIGGER trg_staff_ledger_payout_request_check BEFORE INSERT ON public.staff_ledger
+  FOR EACH ROW WHEN (NEW.payout_request_id IS NOT NULL)
+  EXECUTE FUNCTION public._trg_staff_ledger_payout_request_check();
+
+DROP TRIGGER IF EXISTS trg_staff_ledger_payout_request_close ON public.staff_ledger;
+CREATE TRIGGER trg_staff_ledger_payout_request_close AFTER INSERT ON public.staff_ledger
+  FOR EACH ROW WHEN (NEW.payout_request_id IS NOT NULL)
+  EXECUTE FUNCTION public._trg_staff_ledger_payout_request_close();
+
+-- ── resolve_payout_request: el admin RECHAZA una solicitud ───────────────────
+-- Pagar NO pasa por aquí (p_status = 'paid' → use_payment_flow): se paga registrando el movimiento
+-- en "Pagos al equipo", que cierra la solicitud solo (triggers de arriba).
+-- El motivo es obligatorio (3 a 200 caracteres).
+-- Errores: forbidden, invalid_status, use_payment_flow, not_found, not_pending, note_required, note_too_long.
+-- Se elimina la firma anterior de 4 parámetros (p_ledger_entry_id) si existiera.
+DROP FUNCTION IF EXISTS public.resolve_payout_request(UUID, TEXT, TEXT, UUID);
 CREATE OR REPLACE FUNCTION public.resolve_payout_request(
-  p_id              UUID,
-  p_status          TEXT,
-  p_note            TEXT DEFAULT NULL,
-  p_ledger_entry_id UUID DEFAULT NULL
+  p_id     UUID,
+  p_status TEXT,
+  p_note   TEXT DEFAULT NULL
 )
 RETURNS VOID
 LANGUAGE plpgsql
@@ -350,41 +429,25 @@ DECLARE
 BEGIN
   v_biz := public._my_admin_business();   -- 'forbidden' si no es admin del negocio del token
 
-  IF p_status IS NULL OR p_status NOT IN ('paid', 'rejected') THEN RAISE EXCEPTION 'invalid_status'; END IF;
+  IF p_status = 'paid' THEN RAISE EXCEPTION 'use_payment_flow'; END IF;
+  IF p_status IS NULL OR p_status <> 'rejected' THEN RAISE EXCEPTION 'invalid_status'; END IF;
   IF v_note IS NOT NULL AND char_length(v_note) > 200 THEN RAISE EXCEPTION 'note_too_long'; END IF;
-  IF p_status = 'rejected' AND (v_note IS NULL OR char_length(v_note) < 3) THEN
-    RAISE EXCEPTION 'note_required';
-  END IF;
+  IF v_note IS NULL OR char_length(v_note) < 3 THEN RAISE EXCEPTION 'note_required'; END IF;
 
   SELECT * INTO r FROM payout_requests WHERE id = p_id AND business_id = v_biz FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'not_found'; END IF;
   IF r.status <> 'pending' THEN RAISE EXCEPTION 'not_pending'; END IF;
 
-  IF p_status = 'paid' AND p_ledger_entry_id IS NOT NULL THEN
-    IF NOT EXISTS (
-      SELECT 1 FROM staff_ledger l
-       WHERE l.id = p_ledger_entry_id
-         AND l.business_id = v_biz
-         AND l.staff_id = r.staff_id
-         AND l.entry_type = CASE r.kind WHEN 'payout' THEN 'payment' ELSE 'advance' END
-         AND l.created_at >= r.created_at
-         AND NOT EXISTS (SELECT 1 FROM payout_requests o WHERE o.ledger_entry_id = l.id)
-    ) THEN
-      RAISE EXCEPTION 'invalid_ledger_entry';
-    END IF;
-  END IF;
-
   UPDATE payout_requests
-     SET status          = p_status,
+     SET status          = 'rejected',
          resolved_by     = auth.uid(),
          resolved_at     = NOW(),
-         resolution_note = v_note,
-         ledger_entry_id = CASE WHEN p_status = 'paid' THEN p_ledger_entry_id END
+         resolution_note = v_note
    WHERE id = r.id;
 END;
 $$;
-REVOKE ALL ON FUNCTION public.resolve_payout_request(UUID, TEXT, TEXT, UUID) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.resolve_payout_request(UUID, TEXT, TEXT, UUID) TO authenticated;
+REVOKE ALL ON FUNCTION public.resolve_payout_request(UUID, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.resolve_payout_request(UUID, TEXT, TEXT) TO authenticated;
 
 -- ── Auditoría (a prueba de fallos: nunca bloquea la operación) ───────────────
 -- El actor (quien pidió / resolvió) lo pone _audit desde la sesión; el resumen empieza con el verbo.
@@ -405,9 +468,11 @@ BEGIN
     IF NEW.status = 'paid' THEN
       PERFORM public._audit(NEW.business_id, 'money', 'payout_request.paid', 'payout_request', NEW.id,
         'marcó como pagada la solicitud de ' || CASE NEW.kind WHEN 'advance' THEN 'anticipo' ELSE 'pago' END
-          || ' de ' || public._m(NEW.amount) || ' de ' || COALESCE(v_staff, 'un profesional'),
-        'info', NEW.amount, jsonb_build_object('estado', OLD.status),
-        jsonb_build_object('estado', NEW.status, 'movimiento', NEW.ledger_entry_id));
+          || ' de ' || public._m(NEW.amount) || ' de ' || COALESCE(v_staff, 'un profesional')
+          || CASE WHEN NEW.paid_amount IS DISTINCT FROM NEW.amount
+                  THEN ' (se pagó ' || public._m(NEW.paid_amount) || ')' ELSE '' END,
+        'info', COALESCE(NEW.paid_amount, NEW.amount), jsonb_build_object('estado', OLD.status),
+        jsonb_build_object('estado', NEW.status, 'movimiento', NEW.ledger_entry_id, 'pagado', NEW.paid_amount));
     ELSIF NEW.status = 'rejected' THEN
       PERFORM public._audit(NEW.business_id, 'money', 'payout_request.rejected', 'payout_request', NEW.id,
         'rechazó la solicitud de ' || CASE NEW.kind WHEN 'advance' THEN 'anticipo' ELSE 'pago' END

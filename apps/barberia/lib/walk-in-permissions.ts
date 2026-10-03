@@ -35,20 +35,38 @@ export function canAttend(actor: WalkInActor, entry: WalkInOwnership): boolean {
   return !entry.staff_id || entry.staff_id === actor.staffId
 }
 
-/** "Apartar": para sí mismo un turno libre, o gestionar uno suyo. `targetStaffId` null = el DB elige. */
+/**
+ * "Apartar": el barbero solo aparta A NOMBRE PROPIO (`targetStaffId` debe ser él; null = "el mejor",
+ * que decide el admin) y solo un turno libre o ya suyo. No puede pasarle el turno a un colega.
+ */
 export function canReserve(
   actor: WalkInActor,
   entry: WalkInOwnership,
   targetStaffId: string | null,
 ): boolean {
   if (actor.isAdmin) return true
-  if (isMine(actor, entry.staff_id)) return true
-  return !entry.staff_id && !!targetStaffId && isMine(actor, targetStaffId)
+  if (!targetStaffId || !isMine(actor, targetStaffId)) return false
+  return !entry.staff_id || isMine(actor, entry.staff_id)
 }
 
-/** "Cambiar barbero": admin, o el turno ya es suyo (traspasarlo). */
-export function canChangeStaff(actor: WalkInActor, entry: WalkInOwnership): boolean {
-  return actor.isAdmin || isMine(actor, entry.staff_id)
+/** "Cambiar barbero" a otro profesional: solo el admin (el barbero únicamente libera o reaparta para sí). */
+export function canChangeStaff(actor: WalkInActor, _entry: WalkInOwnership): boolean {
+  return actor.isAdmin
+}
+
+/**
+ * Cambiar el estado del turno por escritura directa (completar / cancelar / revertir).
+ * El barbero nunca lo pasa a 'in_progress' (eso es "Atender") ni toca un turno que tiene a OTRO
+ * profesional asignado; sí uno suyo o uno sin asignar.
+ */
+export function canSetStatus(
+  actor: WalkInActor,
+  entry: WalkInOwnership,
+  status: string,
+): boolean {
+  if (actor.isAdmin) return true
+  if (status === 'in_progress') return false
+  return !entry.staff_id || isMine(actor, entry.staff_id)
 }
 
 /**

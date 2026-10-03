@@ -1395,7 +1395,8 @@ export function WalkInQueue({
       {showAddSheet && (
         <AddWalkInSheet
           businessId={businessId}
-          staffList={staffList}
+          // Barbero: solo puede pedir el turno sin profesional o con él mismo (la BD lo exige igual)
+          staffList={actor.isAdmin ? staffList : staffList.filter((s) => s.id === actor.staffId)}
           serviceList={serviceList}
           serviceAudiences={serviceAudiences}
           onClose={() => setShowAdd(false)}

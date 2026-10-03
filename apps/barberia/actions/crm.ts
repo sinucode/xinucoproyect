@@ -660,6 +660,7 @@ export async function updateCustomerPreferences(
     .eq('business_id', businessId)
 
   if (error) {
+    if (error.message === 'invalid_preferred_staff') return { error: 'Barbero no encontrado.' }
     return { error: error.message === 'admin_required' ? ADMIN_ONLY_PREFERRED : error.message }
   }
 

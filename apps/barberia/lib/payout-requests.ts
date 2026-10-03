@@ -36,6 +36,8 @@ export interface PayoutRequestView {
   created_at:      string
   resolved_at:     string | null
   resolution_note: string | null
+  /** Lo que realmente se pagó (puede diferir de `amount`); null si no está pagada. */
+  paid_amount:     number | null
 }
 
 export function isPayoutKind(value: unknown): value is PayoutRequestKind {
@@ -79,6 +81,39 @@ function formatPlain(amount: number): string {
 }
 
 /**
+ * Monto con el que precargar el pago de una solicitud: lo pedido, pero un pago ('payout') nunca más
+ * que el saldo actual (si no hay saldo positivo devuelve 0 = sin precarga). Un anticipo precarga lo pedido.
+ */
+export function suggestedPayAmount(request: Pick<PayoutRequestView, 'kind' | 'amount'>, balance: number): number {
+  if (request.kind !== 'payout') return request.amount
+  return Math.max(0, Math.min(request.amount, Math.floor(balance)))
+}
+
+/** "Pagada $X de $Y solicitados" si lo pagado difiere de lo pedido; null en los demás casos. */
+export function paidDifferenceLabel(
+  request: Pick<PayoutRequestView, 'status' | 'amount' | 'paid_amount'>,
+): string | null {
+  if (request.status !== 'paid' || request.paid_amount == null || request.paid_amount === request.amount) return null
+  return `Pagada ${formatPlain(request.paid_amount)} de ${formatPlain(request.amount)} solicitados`
+}
+
+export const PAYOUT_REQUEST_NOT_PENDING_MESSAGE = 'Esta solicitud ya fue pagada, cancelada o rechazada.'
+export const PAYOUT_REQUEST_MISMATCH_MESSAGE = 'La solicitud no corresponde a este profesional o tipo de pago.'
+
+/**
+ * Traduce los errores que lanza el trigger de staff_ledger al registrar un pago con payout_request_id
+ * (payout_request_invalid / _not_pending / _mismatch). null = no es uno de esos errores.
+ */
+export function mapPayoutLedgerError(message: string | null | undefined): string | null {
+  const text = message ?? ''
+  if (text.includes('payout_request_mismatch')) return PAYOUT_REQUEST_MISMATCH_MESSAGE
+  if (text.includes('payout_request_not_pending') || text.includes('payout_request_invalid')) {
+    return PAYOUT_REQUEST_NOT_PENDING_MESSAGE
+  }
+  return null
+}
+
+/**
  * Traduce el error de las funciones request_payout / cancel_payout_request / resolve_payout_request
  * (el mensaje de la excepción ES el código) a un texto para la persona. `detail` trae el saldo en
  * 'exceeds_balance'. Lo desconocido (p. ej. la migración aún no corrió) cae en un mensaje genérico.
@@ -96,7 +131,7 @@ export function mapPayoutRpcError(message: string | null | undefined, detail?: s
     case 'not_found':             return 'No encontramos la solicitud.'
     case 'not_pending':           return 'La solicitud ya no está pendiente.'
     case 'invalid_status':        return 'Estado no válido.'
-    case 'invalid_ledger_entry':  return 'El movimiento no corresponde a esta solicitud.'
+    case 'use_payment_flow':      return 'Para pagar una solicitud registra el pago en Pagos al equipo.'
     case 'exceeds_balance': {
       const balance = Number(detail)
       return Number.isFinite(balance)

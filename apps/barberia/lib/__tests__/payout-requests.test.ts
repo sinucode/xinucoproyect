@@ -2,7 +2,10 @@ import {
   PAYOUT_MAX_AMOUNT,
   isPayoutKind,
   isPayoutStatus,
+  mapPayoutLedgerError,
   mapPayoutRpcError,
+  paidDifferenceLabel,
+  suggestedPayAmount,
   validatePayoutRequestInput,
   validateRejectReason,
 } from '../payout-requests'
@@ -47,7 +50,7 @@ describe('mapPayoutRpcError', () => {
     ['invalid_amount', /entero entre \$1 y \$50\.000\.000/],
     ['forbidden', /permiso/],
     ['not_found', /No encontramos/],
-    ['invalid_ledger_entry', /movimiento/],
+    ['use_payment_flow', /Pagos al equipo/],
   ])('%s → mensaje en español', (code, pattern) => {
     expect(mapPayoutRpcError(code)).toMatch(pattern)
   })
@@ -73,5 +76,43 @@ describe('guardas de tipo', () => {
     expect(isPayoutStatus('pending')).toBe(true)
     expect(isPayoutStatus('cancelled')).toBe(true)
     expect(isPayoutStatus('done')).toBe(false)
+  })
+})
+
+describe('suggestedPayAmount', () => {
+  it('un pago precarga lo pedido sin pasar del saldo actual', () => {
+    expect(suggestedPayAmount({ kind: 'payout', amount: 90000 }, 60000)).toBe(60000)
+    expect(suggestedPayAmount({ kind: 'payout', amount: 40000 }, 60000)).toBe(40000)
+  })
+  it('sin saldo positivo no precarga (0)', () => {
+    expect(suggestedPayAmount({ kind: 'payout', amount: 40000 }, 0)).toBe(0)
+    expect(suggestedPayAmount({ kind: 'payout', amount: 40000 }, -5000)).toBe(0)
+  })
+  it('un anticipo precarga lo pedido (no depende del saldo)', () => {
+    expect(suggestedPayAmount({ kind: 'advance', amount: 50000 }, 0)).toBe(50000)
+  })
+})
+
+describe('paidDifferenceLabel', () => {
+  it('avisa cuando lo pagado difiere de lo pedido', () => {
+    expect(paidDifferenceLabel({ status: 'paid', amount: 100000, paid_amount: 80000 }))
+      .toBe('Pagada $80.000 de $100.000 solicitados')
+  })
+  it('null si coincide, no está pagada o no hay monto pagado', () => {
+    expect(paidDifferenceLabel({ status: 'paid', amount: 100000, paid_amount: 100000 })).toBeNull()
+    expect(paidDifferenceLabel({ status: 'rejected', amount: 100000, paid_amount: null })).toBeNull()
+    expect(paidDifferenceLabel({ status: 'paid', amount: 100000, paid_amount: null })).toBeNull()
+  })
+})
+
+describe('mapPayoutLedgerError', () => {
+  it('traduce los errores del trigger de staff_ledger', () => {
+    expect(mapPayoutLedgerError('payout_request_not_pending')).toMatch(/ya fue pagada, cancelada o rechazada/)
+    expect(mapPayoutLedgerError('payout_request_invalid')).toMatch(/ya fue pagada/)
+    expect(mapPayoutLedgerError('payout_request_mismatch')).toMatch(/no corresponde a este profesional o tipo de pago/)
+  })
+  it('null para cualquier otro error', () => {
+    expect(mapPayoutLedgerError('duplicate key')).toBeNull()
+    expect(mapPayoutLedgerError(undefined)).toBeNull()
   })
 })

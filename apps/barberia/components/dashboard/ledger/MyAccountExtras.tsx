@@ -15,6 +15,7 @@ import {
   PAYOUT_KIND_LABELS,
   PAYOUT_MAX_AMOUNT,
   PAYOUT_STATUS_LABELS,
+  paidDifferenceLabel,
   type PayoutRequestKind,
   type PayoutRequestStatus,
   type PayoutRequestView,
@@ -169,6 +170,9 @@ export function PayoutRequestsPanel({ requests }: { requests: PayoutRequestView[
                 <div className="min-w-0 flex flex-col gap-0.5">
                   <span className="text-sm text-xinuco-text font-medium">{requestTitle(r)}</span>
                   <span className="text-[11px] text-xinuco-muted">{formatLedgerDateTime(r.created_at)}</span>
+                  {paidDifferenceLabel(r) && (
+                    <span className="text-xs text-xinuco-muted">{paidDifferenceLabel(r)}</span>
+                  )}
                   {r.status === 'rejected' && r.resolution_note && (
                     <span className="text-xs text-red-400 break-words">Motivo: {r.resolution_note}</span>
                   )}

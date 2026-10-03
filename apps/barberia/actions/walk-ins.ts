@@ -4,7 +4,7 @@ import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { StaffStatusNow } from '@/lib/walk-in-wait'
 import {
-  canAttend, canReserve, canRelease, WALK_IN_NOT_YOURS_MESSAGE,
+  canAttend, canReserve, canRelease, canSetStatus, WALK_IN_NOT_YOURS_MESSAGE,
   type WalkInActor, type WalkInOwnership,
 } from '@/lib/walk-in-permissions'
 
@@ -80,7 +80,10 @@ export type StartWalkInResult =
 
 type Supa = Awaited<ReturnType<typeof createClient>>
 
-async function getWalkInActor(supabase: Supa, userId: string): Promise<WalkInActor> {
+/** Actor + negocio de su perfil (para filtrar las escrituras directas por business_id). */
+type WalkInActorCtx = WalkInActor & { businessId: string | null }
+
+async function getWalkInActor(supabase: Supa, userId: string): Promise<WalkInActorCtx> {
   const { data: profile } = await supabase
     .from('profiles')
     .select('role, business_id')
@@ -88,10 +91,10 @@ async function getWalkInActor(supabase: Supa, userId: string): Promise<WalkInAct
     .maybeSingle()
 
   const role = (profile as { role?: string } | null)?.role
-  if (role === 'admin' || role === 'super_admin') return { isAdmin: true, staffId: null }
+  const businessId = (profile as { business_id?: string } | null)?.business_id ?? null
+  if (role === 'admin' || role === 'super_admin') return { isAdmin: true, staffId: null, businessId }
 
-  const businessId = (profile as { business_id?: string } | null)?.business_id
-  if (!businessId) return { isAdmin: false, staffId: null }
+  if (!businessId) return { isAdmin: false, staffId: null, businessId: null }
 
   const { data: staff } = await supabase
     .from('staff')
@@ -100,7 +103,7 @@ async function getWalkInActor(supabase: Supa, userId: string): Promise<WalkInAct
     .eq('business_id', businessId)
     .maybeSingle()
 
-  return { isAdmin: false, staffId: (staff as { id?: string } | null)?.id ?? null }
+  return { isAdmin: false, staffId: (staff as { id?: string } | null)?.id ?? null, businessId }
 }
 
 async function getWalkInOwnership(supabase: Supa, walkInId: string): Promise<WalkInOwnership | null> {
@@ -110,6 +113,11 @@ async function getWalkInOwnership(supabase: Supa, walkInId: string): Promise<Wal
     .eq('id', walkInId)
     .maybeSingle()
   return (data as WalkInOwnership | null) ?? null
+}
+
+/** Traduce el error de BD de una escritura directa (el guard de walk_ins lanza walk_in_not_yours). */
+function directWriteError(message: string | undefined): string {
+  return message?.includes('walk_in_not_yours') ? WALK_IN_NOT_YOURS_MESSAGE : (message ?? 'No se pudo guardar el cambio.')
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -167,6 +175,14 @@ export async function addWalkIn(
 ): Promise<ActionResult> {
   const supabase = await createClient()
 
+  // Barbero: solo puede pedir turno sin profesional o con él mismo (el guard de BD lo exige igual)
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado.' }
+  const actor = await getWalkInActor(supabase, user.id)
+  if (!actor.isAdmin && data.staff_id && data.staff_id !== actor.staffId) {
+    return { error: WALK_IN_NOT_YOURS_MESSAGE }
+  }
+
   // Calcular la siguiente posición en cola
   const { data: maxRow } = await supabase
     .from('walk_ins')
@@ -192,7 +208,7 @@ export async function addWalkIn(
       status:         'waiting',
     })
 
-  if (error) return { error: error.message }
+  if (error) return { error: directWriteError(error.message) }
 
   revalidatePath('/[slug]/dashboard/walk-ins', 'page')
   return { success: true }
@@ -277,17 +293,30 @@ export async function updateWalkInStatus(
 ): Promise<ActionResult> {
   const supabase = await createClient()
 
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado.' }
+  const actor = await getWalkInActor(supabase, user.id)
+
+  // Barbero: nunca pasa un turno a 'in_progress' por aquí (eso es "Atender") ni toca el de otro
+  if (!actor.isAdmin) {
+    const entry = await getWalkInOwnership(supabase, walkInId)
+    if (!entry) return { error: 'Este turno ya no está en espera.' }
+    if (!canSetStatus(actor, entry, status)) return { error: WALK_IN_NOT_YOURS_MESSAGE }
+  }
+
   const updatePayload: Record<string, unknown> = { status }
   if (status === 'completed') {
     updatePayload.served_at = new Date().toISOString()
   }
 
-  const { error } = await supabase
+  let query = supabase
     .from('walk_ins')
     .update(updatePayload)
     .eq('id', walkInId)
+  if (actor.businessId) query = query.eq('business_id', actor.businessId)
+  const { error } = await query
 
-  if (error) return { error: error.message }
+  if (error) return { error: directWriteError(error.message) }
 
   revalidatePath('/[slug]/dashboard/walk-ins', 'page')
   return { success: true }
@@ -422,13 +451,25 @@ export async function setWalkInService(
 ): Promise<ActionResult> {
   const supabase = await createClient()
 
-  const { error } = await supabase
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado.' }
+  const actor = await getWalkInActor(supabase, user.id)
+
+  // Barbero: solo el servicio de un turno libre o suyo (misma regla que "Atender")
+  if (!actor.isAdmin) {
+    const entry = await getWalkInOwnership(supabase, walkInId)
+    if (!entry) return { error: 'Este turno ya no está en espera.' }
+    if (!canAttend(actor, entry)) return { error: WALK_IN_NOT_YOURS_MESSAGE }
+  }
+
+  let query = supabase
     .from('walk_ins')
     .update({ service_id: serviceId })
     .eq('id', walkInId)
-    .eq('status', 'waiting')
+  if (actor.businessId) query = query.eq('business_id', actor.businessId)
+  const { error } = await query.eq('status', 'waiting')
 
-  if (error) return { error: error.message }
+  if (error) return { error: directWriteError(error.message) }
 
   revalidatePath('/[slug]/dashboard/walk-ins', 'page')
   return { success: true }
@@ -458,11 +499,22 @@ export async function removeFromQueue(walkInId: string): Promise<ActionResult> {
     if (!rpcError.message?.includes('walk_in_not_waiting')) {
       return { error: 'No se pudo quitar el turno. Intenta de nuevo.' }
     }
-    const { error } = await supabase
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: 'No autenticado.' }
+    const actor = await getWalkInActor(supabase, user.id)
+    if (!actor.isAdmin) {
+      // Barbero: solo cancela directo un turno suyo o sin asignar (el guard de BD lo exige igual)
+      const entry = await getWalkInOwnership(supabase, walkInId)
+      if (!entry) return { error: 'Este turno ya no está en espera.' }
+      if (!canSetStatus(actor, entry, 'cancelled')) return { error: WALK_IN_NOT_YOURS_MESSAGE }
+    }
+    let query = supabase
       .from('walk_ins')
       .update({ status: 'cancelled' })
       .eq('id', walkInId)
-    if (error) return { error: error.message }
+    if (actor.businessId) query = query.eq('business_id', actor.businessId)
+    const { error } = await query
+    if (error) return { error: directWriteError(error.message) }
   }
 
   revalidatePath('/[slug]/dashboard/walk-ins', 'page')

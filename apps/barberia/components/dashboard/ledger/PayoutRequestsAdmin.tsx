@@ -3,13 +3,13 @@
 // PayoutRequestsAdmin — sección "Solicitudes (N)" de "Pagos al equipo" (admin): lo que los
 // profesionales piden (pago de lo que se les debe o anticipo). "Pagar" abre el flujo normal de
 // liquidar / anticipo ya con el profesional, el tipo y el monto; "Rechazar" pide un motivo.
-// Esta lista nunca mueve plata por sí sola.
+// Esta lista nunca mueve plata por sí sola: pagar cierra la solicitud en la base (atómico con el pago).
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { BellRing, HandCoins, Loader2, X } from 'lucide-react'
 import { formatCOP } from '@xinuco/utils'
-import { resolvePayoutRequest } from '@/actions/ledger'
+import { rejectPayoutRequest } from '@/actions/ledger'
 import { PAYOUT_KIND_LABELS, PAYOUT_MIN_REASON, type PayoutRequestView } from '@/lib/payout-requests'
 import { formatLedgerDateTime } from '@/lib/team-payments'
 
@@ -45,7 +45,7 @@ export function PayoutRequestsAdmin({
     }
     startTransition(async () => {
       try {
-        const res = await resolvePayoutRequest(id, 'rejected', reason)
+        const res = await rejectPayoutRequest(id, reason)
         if (res.error) {
           setError(res.error)
           return

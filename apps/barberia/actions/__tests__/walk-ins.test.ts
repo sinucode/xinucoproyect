@@ -46,9 +46,12 @@ describe('Walk-ins Server Actions', () => {
 
   describe('addWalkIn', () => {
     it('calculates the next position and inserts walk-in', async () => {
-      // Mock the max position calculation
-      mockSupabase.maybeSingle.mockResolvedValueOnce({ data: { position: 3 }, error: null })
-      
+      // Mock the max position calculation (las lecturas de profiles/staff siguen siendo del actor)
+      mockSupabase.maybeSingle.mockImplementation(async () => {
+        if (mockSupabase._table === 'profiles') return { data: { role: 'admin', business_id: 'b1' }, error: null }
+        return { data: { position: 3 }, error: null }
+      })
+
       mockSupabase.insert.mockResolvedValueOnce({ error: null })
 
       const result = await addWalkIn('biz1', {
@@ -64,30 +67,97 @@ describe('Walk-ins Server Actions', () => {
       }))
       expect(revalidatePath).toHaveBeenCalled()
     })
+
+    it('barbero: puede pedir turno sin profesional o con él mismo', async () => {
+      actor = { role: 'barber', staffId: 'me', entry: null }
+      mockSupabase.maybeSingle.mockImplementation(async () => {
+        if (mockSupabase._table === 'profiles') return { data: { role: 'barber', business_id: 'b1' }, error: null }
+        if (mockSupabase._table === 'staff') return { data: { id: 'me' }, error: null }
+        return { data: { position: 0 }, error: null }
+      })
+      mockSupabase.insert.mockResolvedValue({ error: null })
+      expect((await addWalkIn('b1', { customer_name: 'A', staff_id: 'me' })).success).toBe(true)
+      expect((await addWalkIn('b1', { customer_name: 'B' })).success).toBe(true)
+    })
+
+    it('barbero: NO puede pedir turno con otro profesional', async () => {
+      actor = { role: 'barber', staffId: 'me', entry: null }
+      const result = await addWalkIn('b1', { customer_name: 'A', staff_id: 'other' })
+      expect(result.error).toMatch(/otro profesional/)
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+    })
+
+    it('traduce el error walk_in_not_yours del guard de BD', async () => {
+      mockSupabase.maybeSingle.mockImplementation(async () => {
+        if (mockSupabase._table === 'profiles') return { data: { role: 'admin', business_id: 'b1' }, error: null }
+        return { data: { position: 0 }, error: null }
+      })
+      mockSupabase.insert.mockResolvedValueOnce({ error: { message: 'walk_in_not_yours' } })
+      expect((await addWalkIn('b1', { customer_name: 'A' })).error).toMatch(/otro profesional/)
+    })
   })
 
+  // update(...).eq('id').eq('business_id')... → encadenable y esperable; guarda las llamadas a eq
+  const chainUpdate = (result: { error: any } = { error: null }) => {
+    const eqs: Array<[string, unknown]> = []
+    const chain: any = {
+      eq: jest.fn((col: string, val: unknown) => { eqs.push([col, val]); return chain }),
+      then: (resolve: (v: unknown) => unknown) => resolve(result),
+    }
+    mockSupabase.update.mockReturnValueOnce(chain)
+    return eqs
+  }
+
   describe('updateWalkInStatus', () => {
-    it('sets served_at automatically when status is completed', async () => {
-      mockSupabase.update.mockReturnValueOnce({ eq: jest.fn().mockResolvedValueOnce({ error: null }) })
+    it('sets served_at automatically when status is completed (filtrado por negocio)', async () => {
+      const eqs = chainUpdate()
 
       const result = await updateWalkInStatus('wi1', 'completed')
-      
+
       expect(result.success).toBe(true)
       expect(mockSupabase.update).toHaveBeenCalledWith(expect.objectContaining({
         status: 'completed',
         served_at: expect.any(String) // should be set automatically
       }))
+      expect(eqs).toEqual([['id', 'wi1'], ['business_id', 'b1']])
     })
 
-    it('updates status without served_at for other statuses', async () => {
-      mockSupabase.update.mockReturnValueOnce({ eq: jest.fn().mockResolvedValueOnce({ error: null }) })
+    it('admin: updates status without served_at for other statuses', async () => {
+      chainUpdate()
 
       const result = await updateWalkInStatus('wi1', 'in_progress')
-      
+
       expect(result.success).toBe(true)
       expect(mockSupabase.update).toHaveBeenCalledWith({
         status: 'in_progress'
       }) // served_at should NOT be present
+    })
+
+    it('requiere sesión', async () => {
+      mockSupabase.auth.getUser.mockResolvedValueOnce({ data: { user: null } })
+      expect((await updateWalkInStatus('wi1', 'completed')).error).toBeTruthy()
+      expect(mockSupabase.update).not.toHaveBeenCalled()
+    })
+
+    it('barbero: NO puede pasar un turno a in_progress (debe usar Atender)', async () => {
+      actor = { role: 'barber', staffId: 'me', entry: { staff_id: 'me', appointment_id: null } }
+      const result = await updateWalkInStatus('wi1', 'in_progress')
+      expect(result.error).toMatch(/otro profesional/)
+      expect(mockSupabase.update).not.toHaveBeenCalled()
+    })
+
+    it('barbero: NO puede completar/cancelar el turno de otro profesional', async () => {
+      actor = { role: 'barber', staffId: 'me', entry: { staff_id: 'other', appointment_id: 'ap1' } }
+      expect((await updateWalkInStatus('wi1', 'completed')).error).toMatch(/otro profesional/)
+      expect((await updateWalkInStatus('wi1', 'cancelled')).error).toMatch(/otro profesional/)
+      expect(mockSupabase.update).not.toHaveBeenCalled()
+    })
+
+    it('barbero: completa un turno suyo', async () => {
+      actor = { role: 'barber', staffId: 'me', entry: { staff_id: 'me', appointment_id: null } }
+      const eqs = chainUpdate()
+      expect((await updateWalkInStatus('wi1', 'completed')).success).toBe(true)
+      expect(eqs).toContainEqual(['business_id', 'b1'])
     })
   })
 
@@ -194,25 +264,43 @@ describe('Walk-ins Server Actions', () => {
 
     it('falls back to a plain cancel when the turn is not waiting', async () => {
       mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'walk_in_not_waiting' } })
-      mockSupabase.update.mockReturnValueOnce({ eq: jest.fn().mockResolvedValueOnce({ error: null }) })
+      const eqs = chainUpdate()
       const result = await removeFromQueue('wi1')
       expect(mockSupabase.update).toHaveBeenCalledWith({ status: 'cancelled' })
+      expect(eqs).toEqual([['id', 'wi1'], ['business_id', 'b1']])
       expect(result).toEqual({ success: true })
+    })
+
+    it('barbero: el cancel directo (turno no en espera) no toca el turno de otro profesional', async () => {
+      actor = { role: 'barber', staffId: 'me', entry: { staff_id: 'other', appointment_id: null } }
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'walk_in_not_waiting' } })
+      const result = await removeFromQueue('wi1')
+      expect(result.error).toMatch(/otro profesional/)
+      expect(mockSupabase.update).not.toHaveBeenCalled()
     })
   })
 
   describe('setWalkInService', () => {
-    it('updates the service only while the turn is waiting', async () => {
-      const eq2 = jest.fn().mockResolvedValueOnce({ error: null })
-      const eq1 = jest.fn().mockReturnValueOnce({ eq: eq2 })
-      mockSupabase.update.mockReturnValueOnce({ eq: eq1 })
+    it('updates the service only while the turn is waiting (filtrado por negocio)', async () => {
+      const eqs = chainUpdate()
 
       const result = await setWalkInService('wi1', 'svc1')
 
       expect(mockSupabase.update).toHaveBeenCalledWith({ service_id: 'svc1' })
-      expect(eq1).toHaveBeenCalledWith('id', 'wi1')
-      expect(eq2).toHaveBeenCalledWith('status', 'waiting')
+      expect(eqs).toEqual([['id', 'wi1'], ['business_id', 'b1'], ['status', 'waiting']])
       expect(result).toEqual({ success: true })
+    })
+
+    it('barbero: NO cambia el servicio del turno de otro profesional', async () => {
+      actor = { role: 'barber', staffId: 'me', entry: { staff_id: 'other', appointment_id: null } }
+      expect((await setWalkInService('wi1', 'svc1')).error).toMatch(/otro profesional/)
+      expect(mockSupabase.update).not.toHaveBeenCalled()
+    })
+
+    it('barbero: sí el de un turno libre o suyo', async () => {
+      actor = { role: 'barber', staffId: 'me', entry: { staff_id: null, appointment_id: null } }
+      chainUpdate()
+      expect((await setWalkInService('wi1', 'svc1')).success).toBe(true)
     })
   })
 
@@ -323,12 +411,18 @@ describe('Walk-ins Server Actions', () => {
       expect(mockSupabase.rpc).not.toHaveBeenCalled()
     })
 
-    it('reserveWalkIn: puede traspasar un turno que es suyo', async () => {
+    it('reserveWalkIn: NO puede traspasar a un colega ni un turno que ya es suyo (solo el admin)', async () => {
+      actor.entry = { staff_id: 'me', appointment_id: 'ap1' }
+      expect((await reserveWalkIn('wi1', 'other')).error).toMatch(/otro profesional/)
+      expect(mockSupabase.rpc).not.toHaveBeenCalled()
+    })
+
+    it('reserveWalkIn: puede re-apartar para sí mismo un turno suyo', async () => {
       actor.entry = { staff_id: 'me', appointment_id: 'ap1' }
       mockSupabase.rpc.mockResolvedValueOnce({
-        data: { staff_id: 'other', start_time: '2026-10-02T15:00:00+00:00' }, error: null,
+        data: { staff_id: 'me', start_time: '2026-10-02T15:00:00+00:00' }, error: null,
       })
-      expect((await reserveWalkIn('wi1', 'other')).success).toBe(true)
+      expect((await reserveWalkIn('wi1', 'me')).success).toBe(true)
     })
 
     it('releaseWalkIn: libera lo suyo; NO el hueco de otro', async () => {

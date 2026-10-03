@@ -1,5 +1,5 @@
 import {
-  canAttend, canChangeStaff, canRelease, canReserve, isForSomeoneElse, sortWaitingForBarber,
+  canAttend, canChangeStaff, canRelease, canReserve, canSetStatus, isForSomeoneElse, sortWaitingForBarber,
   type WalkInActor,
 } from '../walk-in-permissions'
 
@@ -37,8 +37,10 @@ describe('canReserve', () => {
     expect(canReserve(barber, free, 'other')).toBe(false)
     expect(canReserve(barber, free, null)).toBe(false)
   })
-  it('gestiona uno suyo (incluso traspasarlo) pero no uno de otro', () => {
-    expect(canReserve(barber, mineRes, 'other')).toBe(true)
+  it('re-aparta uno suyo para sí, pero NO se lo pasa a un colega ni toma el de otro', () => {
+    expect(canReserve(barber, mineRes, 'me')).toBe(true)
+    expect(canReserve(barber, mineRes, 'other')).toBe(false)
+    expect(canReserve(barber, mineRes, null)).toBe(false)
     expect(canReserve(barber, otherRes, 'me')).toBe(false)
     expect(canReserve(barber, otherPref, 'me')).toBe(false)
   })
@@ -49,9 +51,9 @@ describe('canReserve', () => {
 })
 
 describe('canChangeStaff / canRelease', () => {
-  it('Cambiar barbero: admin, o el turno es suyo', () => {
+  it('Cambiar barbero: solo el admin (el barbero no se lo pasa a un colega, ni siquiera lo suyo)', () => {
     expect(canChangeStaff(admin, otherRes)).toBe(true)
-    expect(canChangeStaff(barber, mineRes)).toBe(true)
+    expect(canChangeStaff(barber, mineRes)).toBe(false)
     expect(canChangeStaff(barber, otherRes)).toBe(false)
     expect(canChangeStaff(barber, free)).toBe(false)
   })
@@ -66,6 +68,23 @@ describe('canChangeStaff / canRelease', () => {
     expect(canRelease(barber, otherRes, true)).toBe(false)
     expect(canRelease(barber, otherPref, true)).toBe(true) // sin hueco: el cliente se fue
     expect(canRelease(admin, otherRes, true)).toBe(true)
+  })
+})
+
+describe('canSetStatus', () => {
+  it('el admin cambia cualquier estado de cualquier turno', () => {
+    expect(canSetStatus(admin, otherRes, 'in_progress')).toBe(true)
+    expect(canSetStatus(admin, otherRes, 'cancelled')).toBe(true)
+  })
+  it('el barbero nunca pasa a in_progress por aquí (eso es Atender)', () => {
+    expect(canSetStatus(barber, free, 'in_progress')).toBe(false)
+    expect(canSetStatus(barber, mineRes, 'in_progress')).toBe(false)
+  })
+  it('el barbero completa/cancela lo suyo o lo libre, no lo de otro profesional', () => {
+    expect(canSetStatus(barber, mineRes, 'completed')).toBe(true)
+    expect(canSetStatus(barber, free, 'cancelled')).toBe(true)
+    expect(canSetStatus(barber, otherRes, 'completed')).toBe(false)
+    expect(canSetStatus(barber, otherPref, 'cancelled')).toBe(false)
   })
 })
 
