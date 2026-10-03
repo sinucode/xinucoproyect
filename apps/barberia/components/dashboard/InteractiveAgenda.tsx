@@ -1,13 +1,13 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
 import { Play, Clock, CheckCircle2, XCircle, AlertCircle, AlertTriangle, CalendarX, Loader2, ArrowRight } from 'lucide-react'
-import { updateAppointmentStatus } from '@/actions/appointments'
 import { CheckoutModal } from '../finance/CheckoutModal'
-import { FinishNoteSheet, type FinishNoteTarget } from './agenda/FinishNoteSheet'
+import { FinishNoteSheet } from './agenda/FinishNoteSheet'
+import { useAppointmentStatusChange } from './agenda/use-appointment-status'
 import { apptCardId } from './agenda/focus-appointment'
 import { apptDateKey, businessTodayISODate, dayLabel, formatApptTime } from '@/lib/agenda-time'
-import { businessWallNowMs, isApptOverdue, splitUnresolvedPast } from '@/lib/agenda-status'
+import { apptStatusLabel, availableApptActions, businessWallNowMs, isApptOverdue, splitUnresolvedPast } from '@/lib/agenda-status'
 import { useIsAdmin } from '@/lib/features/role-context'
 import type { AppointmentStatus } from '@xinuco/types'
 
@@ -99,7 +99,6 @@ export function InteractiveAgenda({
 }: InteractiveAgendaProps) {
   const isAdmin = useIsAdmin()
   const [appointments, setAppointments] = useState(initialAppointments)
-  const [isPending, startTransition] = useTransition()
 
   // "Ahora" del negocio: parte del valor del servidor y se refresca cada minuto (citas atrasadas)
   const [nowMs, setNowMs] = useState(() => nowWallMs ?? businessWallNowMs())
@@ -108,45 +107,21 @@ export function InteractiveAgenda({
     return () => clearInterval(t)
   }, [])
 
-  // "¿Dejar nota del corte?" tras terminar una cita
-  const [noteTarget, setNoteTarget] = useState<FinishNoteTarget | null>(null)
+  // Cambio de estado compartido (updatingId = fila con loader individual)
+  // (mismo código que la hoja de detalle de la línea de tiempo)
+  const {
+    isPending, updatingId, error: statusError, setError: setStatusError,
+    noteTarget, setNoteTarget, runAction,
+  } = useAppointmentStatusChange((appointmentId, nextStatus) => {
+    // Actualizar localmente para feedback inmediato
+    setAppointments((prev) =>
+      prev.map((app) => (app.id === appointmentId ? { ...app, status: nextStatus } : app))
+    )
+  })
 
-  // Fila que se está actualizando actualmente (para mostrar loader individual)
-  const [updatingId, setUpdatingId] = useState<string | null>(null)
-  
   // Checkout Modal
   const [selectedAppt, setSelectedAppt] = useState<any | null>(null)
   const [checkoutWarning, setCheckoutWarning] = useState<string | null>(null)
-  const [statusError, setStatusError] = useState<string | null>(null)
-
-  // Cambiar estado de cita
-  const handleStatusChange = (appointmentId: string, nextStatus: AppointmentStatus) => {
-    setUpdatingId(appointmentId)
-    setStatusError(null)
-    startTransition(async () => {
-      const result = await updateAppointmentStatus(appointmentId, nextStatus)
-      if (result.error) {
-        setStatusError(`Error al actualizar estado: ${result.error}`)
-      } else {
-        // Actualizar localmente para feedback inmediato
-        setAppointments((prev) =>
-          prev.map((app) => (app.id === appointmentId ? { ...app, status: nextStatus } : app))
-        )
-        // Terminada: ofrecer dejar una nota en el expediente del cliente (opcional)
-        if (nextStatus === 'ready_to_pay') {
-          const appt = appointments.find((a) => a.id === appointmentId)
-          if (appt?.customer_id) {
-            setNoteTarget({
-              customerId: appt.customer_id,
-              customerName: appt.customers?.full_name || appt.customer_name || 'el cliente',
-              appointmentId,
-            })
-          }
-        }
-      }
-      setUpdatingId(null)
-    })
-  }
 
   // Abrir Checkout Modal
   const handleOpenCheckout = (appt: any) => {
@@ -236,7 +211,9 @@ export function InteractiveAgenda({
             // Atrasada: sigue "programada" y su hora ya pasó → hay que cerrarla (Iniciar / No asistió)
             const overdue = isApptOverdue({ status: appt.status, start_time: appt.start_time, duration_minutes: duration }, nowMs)
             // Quien no es admin no cobra: la cita lista para pagar pasa por caja
-            const statusLabel = appt.status === 'ready_to_pay' && !isAdmin ? 'Lista para pagar · pasa por caja' : cfg.label
+            const statusLabel = apptStatusLabel(appt.status, isAdmin)
+            const actions = availableApptActions(appt.status, isAdmin)
+            const target = { id: appt.id, customerId: appt.customer_id, customerName }
 
             return (
               <li key={appt.id} className="flex items-stretch gap-3 animate-fade-in">
@@ -362,9 +339,9 @@ export function InteractiveAgenda({
                     {/* Botón de acción interactivo */}
                     {!isUpdating && (
                       <>
-                        {appt.status === 'scheduled' && (
+                        {actions.includes('start') && (
                           <button
-                            onClick={() => handleStatusChange(appt.id, 'in_progress')}
+                            onClick={() => runAction('start', target)}
                             disabled={isPending}
                             className="col-span-2 md:col-span-1 min-h-11 2xl:min-h-0 w-full md:w-auto text-xs px-3.5 py-1.5 rounded-lg bg-[var(--primary-color)] text-black font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-1 shrink-0 shadow-sm"
                           >
@@ -373,13 +350,9 @@ export function InteractiveAgenda({
                           </button>
                         )}
 
-                        {appt.status === 'scheduled' && (
+                        {actions.includes('no_show') && (
                           <button
-                            onClick={() => {
-                              if (window.confirm(`¿Marcar que ${customerName} no asistió?`)) {
-                                handleStatusChange(appt.id, 'no_show')
-                              }
-                            }}
+                            onClick={() => runAction('no_show', target)}
                             disabled={isPending}
                             className={SECONDARY_BTN}
                           >
@@ -387,13 +360,9 @@ export function InteractiveAgenda({
                           </button>
                         )}
 
-                        {(appt.status === 'scheduled' || appt.status === 'payment_pending') && (
+                        {actions.includes('cancel') && (
                           <button
-                            onClick={() => {
-                              if (window.confirm(`¿Cancelar la cita de ${customerName}?`)) {
-                                handleStatusChange(appt.id, 'cancelled')
-                              }
-                            }}
+                            onClick={() => runAction('cancel', target)}
                             disabled={isPending}
                             className={`${SECONDARY_BTN} hover:!text-red-400 hover:!border-red-500/40`}
                           >
@@ -401,9 +370,9 @@ export function InteractiveAgenda({
                           </button>
                         )}
 
-                        {appt.status === 'in_progress' && (
+                        {actions.includes('finish') && (
                           <button
-                            onClick={() => handleStatusChange(appt.id, 'ready_to_pay')}
+                            onClick={() => runAction('finish', target)}
                             disabled={isPending}
                             className="col-span-2 md:col-span-1 min-h-11 2xl:min-h-0 w-full md:w-auto text-xs px-3.5 py-1.5 rounded-lg bg-emerald-500 text-black font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-1 shrink-0 shadow-sm"
                           >
@@ -413,7 +382,7 @@ export function InteractiveAgenda({
                         )}
 
                         {/* Cobrar solo lo hace el administrador (el cobro también se valida en la BD) */}
-                        {appt.status === 'ready_to_pay' && isAdmin && (
+                        {actions.includes('checkout') && (
                           <button
                             onClick={() => handleOpenCheckout(appt)}
                             disabled={isPending}

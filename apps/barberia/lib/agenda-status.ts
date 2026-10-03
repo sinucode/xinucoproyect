@@ -56,3 +56,52 @@ export function splitUnresolvedPast<T extends { status: string; start_time: stri
   for (const a of appts) (isUnresolvedPast(a, todayKey) ? unresolved : rest).push(a)
   return { unresolved, rest }
 }
+
+// ── Acciones de una cita según su estado y quién la mira ─────────────────────
+// Una sola fuente de verdad para la tarjeta de la lista (InteractiveAgenda) y la
+// hoja de detalle de la línea de tiempo (AppointmentDetailSheet).
+
+export type ApptAction = 'start' | 'finish' | 'no_show' | 'cancel' | 'checkout'
+
+/** Acciones que solo cambian el estado (todas menos "Cobrar", que abre la caja). */
+export type ApptStatusAction = Exclude<ApptAction, 'checkout'>
+
+/** Estado al que lleva cada acción de cambio de estado. */
+export const APPT_ACTION_NEXT_STATUS: Record<ApptStatusAction, 'in_progress' | 'ready_to_pay' | 'no_show' | 'cancelled'> = {
+  start: 'in_progress',
+  finish: 'ready_to_pay',
+  no_show: 'no_show',
+  cancel: 'cancelled',
+}
+
+/** Etiqueta del estado. Quien no es admin no cobra: la cita lista para pagar "pasa por caja". */
+export function apptStatusLabel(status: string, isAdmin: boolean): string {
+  switch (status) {
+    case 'payment_pending': return 'Pago Pendiente'
+    case 'scheduled': return 'Programada'
+    case 'in_progress': return 'En curso'
+    case 'ready_to_pay': return isAdmin ? 'Lista para Pagar' : 'Lista para pagar · pasa por caja'
+    case 'completed': return 'Completada'
+    case 'cancelled': return 'Cancelada'
+    case 'no_show': return 'No asistió'
+    default: return status
+  }
+}
+
+/** Acciones disponibles (en orden de aparición). "Cobrar" es solo del administrador. */
+export function availableApptActions(status: string, isAdmin: boolean): ApptAction[] {
+  switch (status) {
+    case 'scheduled': return ['start', 'no_show', 'cancel']
+    case 'payment_pending': return ['cancel']
+    case 'in_progress': return ['finish']
+    case 'ready_to_pay': return isAdmin ? ['checkout'] : []
+    default: return []
+  }
+}
+
+/** Texto de confirmación de las acciones destructivas (null = sin confirmación). */
+export function apptActionConfirmText(action: ApptAction, customerName: string): string | null {
+  if (action === 'no_show') return `¿Marcar que ${customerName} no asistió?`
+  if (action === 'cancel') return `¿Cancelar la cita de ${customerName}?`
+  return null
+}

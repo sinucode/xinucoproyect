@@ -15,6 +15,16 @@ export interface TimelineAppt {
   service_name: string
   /** duración + buffer del servicio, en minutos */
   total_minutes: number
+  // ── Datos para la hoja de detalle (opcionales: la línea de tiempo no los necesita) ──
+  customer_id?: string | null
+  customer_phone?: string | null
+  staff_id?: string | null
+  /** Duración del servicio SIN buffer, en minutos */
+  duration_minutes?: number
+  service_price?: number
+  notes?: string | null
+  /** Unidades de productos apartados (appointment_products) */
+  products_count?: number
 }
 
 export interface MinuteRange {

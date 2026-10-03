@@ -16,6 +16,13 @@ interface AgendaFiltersProps {
   staffOptions: AgendaStaffOption[]
   /** Los barberos siempre ven solo lo suyo → se oculta el selector. */
   showStaff: boolean
+  /**
+   * Barbero: sin `?date=` se muestra HOY (su línea de tiempo) y "Próximas" es opt-in (`?date=upcoming`).
+   * Admin (por defecto): sin `?date=` se muestran las "Próximas".
+   */
+  defaultToToday?: boolean
+  /** Muestra el selector de estado (en la vista de día del barbero no aplica). */
+  showStatus?: boolean
 }
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -53,36 +60,43 @@ function selectClass(active: boolean): string {
   ].join(' ')
 }
 
-export function AgendaFilters({ todayKey, staffOptions, showStaff }: AgendaFiltersProps) {
+export function AgendaFilters({ todayKey, staffOptions, showStaff, defaultToToday = false, showStatus = true }: AgendaFiltersProps) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const inputRef = useRef<HTMLInputElement>(null)
 
   const rawDate = searchParams.get('date')
-  const date = rawDate && DATE_RE.test(rawDate) ? rawDate : 'upcoming'
+  const defaultDate = defaultToToday ? todayKey : 'upcoming'
+  const date = rawDate && DATE_RE.test(rawDate)
+    ? rawDate
+    : rawDate === 'upcoming'
+      ? 'upcoming'
+      : defaultDate
   const rawStatus = searchParams.get('status')
   const status = STATUS_OPTIONS.some((s) => s.value === rawStatus) ? (rawStatus as string) : 'all'
   const rawStaff = searchParams.get('staff')
   const staff = rawStaff && staffOptions.some((s) => s.id === rawStaff) ? rawStaff : ''
 
-  const hasFilters = date !== 'upcoming' || status !== 'all' || staff !== ''
+  const hasFilters = date !== defaultDate || status !== 'all' || staff !== ''
 
   const update = useCallback(
     (patch: { date?: string; staff?: string; status?: string }) => {
       const params = new URLSearchParams(searchParams.toString())
       const apply = (key: string, value: string | undefined, defaultValue: string) => {
         if (value === undefined) return
-        if (!value || value === defaultValue) params.delete(key)
+        if (value === defaultValue) params.delete(key)
+        else if (!value && key === 'date') params.set(key, 'upcoming')
+        else if (!value) params.delete(key)
         else params.set(key, value)
       }
-      apply('date', patch.date, 'upcoming')
+      apply('date', patch.date, defaultDate)
       apply('staff', patch.staff, '')
       apply('status', patch.status, 'all')
       const qs = params.toString()
       router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
     },
-    [router, pathname, searchParams],
+    [router, pathname, searchParams, defaultDate],
   )
 
   const isUpcoming = date === 'upcoming'
@@ -120,7 +134,7 @@ export function AgendaFilters({ todayKey, staffOptions, showStaff }: AgendaFilte
         </button>
         <button
           type="button"
-          title="Alternar entre Próximas y un día"
+          title={defaultToToday ? 'Alternar entre Hoy y Próximas' : 'Alternar entre Próximas y un día'}
           onClick={() => update({ date: isUpcoming ? todayKey : 'upcoming' })}
           className={`h-11 px-2 text-xs font-medium whitespace-nowrap transition-colors ${FOCUS_RING} focus-visible:ring-inset ${
             isUpcoming ? 'text-xinuco-text' : 'text-[var(--primary-color)]'
@@ -168,6 +182,7 @@ export function AgendaFilters({ todayKey, staffOptions, showStaff }: AgendaFilte
       )}
 
       {/* Estado */}
+      {showStatus && (
       <select
         aria-label="Filtrar por estado"
         value={status}
@@ -180,6 +195,7 @@ export function AgendaFilters({ todayKey, staffOptions, showStaff }: AgendaFilte
           </option>
         ))}
       </select>
+      )}
 
       {hasFilters && (
         <button

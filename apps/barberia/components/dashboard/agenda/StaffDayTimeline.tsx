@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
-import { CalendarClock, Coffee, Plus, Trash2, UserX } from 'lucide-react'
+import { useCallback, useEffect, useState, useTransition } from 'react'
+import { AlertTriangle, CalendarClock, ChevronRight, Coffee, Plus, Trash2, UserX } from 'lucide-react'
 import { deleteStaffBreak, deleteStaffTimeOff } from '@/actions/staff-availability'
 import { QuickBookingSheet } from '@/components/agenda/QuickBookingSheet'
-import { businessNowHHMM, dayLabel } from '@/lib/agenda-time'
+import { apptDateKey, businessNowHHMM, dayLabel, formatApptTime } from '@/lib/agenda-time'
+import { apptStatusLabel } from '@/lib/agenda-status'
 import { BreakForm, TimeOffForm } from './StaffAvailabilityForms'
-import { focusAppointmentCard } from './focus-appointment'
+import { AppointmentDetailSheet } from './AppointmentDetailSheet'
 import {
   ROW_HEIGHT_REM,
   TIME_OFF_KIND_LABEL,
@@ -43,6 +44,11 @@ interface StaffDayTimelineProps {
   timeOff: TimeOffRow[]
   /** Citas del día (sin canceladas / no asistió) */
   appointments: TimelineAppt[]
+  /** Negocio y turno de caja abierto (para "Cobrar" desde la hoja de detalle; solo admin) */
+  businessId: string
+  activeShiftId: string | null
+  /** Citas de días anteriores que siguen abiertas ("Sin cerrar"): aviso compacto sobre la línea de tiempo */
+  unresolved?: TimelineAppt[]
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -85,12 +91,21 @@ export function StaffDayTimeline({
   breaks,
   timeOff,
   appointments,
+  businessId,
+  activeShiftId,
+  unresolved = [],
 }: StaffDayTimelineProps) {
   const [panel, setPanel] = useState<'break' | 'timeoff' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   // "Agendar aquí": hora libre elegida (abre la reserva interna con día y hora prellenados)
   const [bookingTime, setBookingTime] = useState<string | null>(null)
+  // Detalle de una cita (hoja con datos y acciones). Se guarda el id: tras refrescar se lee el dato nuevo.
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const closeDetail = useCallback(() => setDetailId(null), [])
+  const detailAppt = detailId
+    ? [...appointments, ...unresolved].find((a) => a.id === detailId) ?? null
+    : null
 
   // Hora actual del negocio: parte de la del servidor y se refresca cada minuto (solo importa hoy)
   const [nowHHMM, setNowHHMM] = useState(nowHHMMProp)
@@ -184,6 +199,37 @@ export function StaffDayTimeline({
     : null
 
   return (
+    <>
+    {unresolved.length > 0 && (
+      <section aria-label="Citas sin cerrar" className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+        <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-amber-400">
+          <AlertTriangle size={14} className="shrink-0" aria-hidden="true" />
+          Sin cerrar ({unresolved.length})
+        </h3>
+        <p className="text-xs text-amber-300">Márcalas como atendidas o &lsquo;No asistió&rsquo;.</p>
+        <ul className="space-y-1.5">
+          {unresolved.map((a) => (
+            <li key={a.id}>
+              <button
+                type="button"
+                onClick={() => setDetailId(a.id)}
+                aria-label={`Ver cita de ${a.customer_name} del ${dayLabel(apptDateKey(a.start_time), todayKey)} a las ${isoTimeHHMM(a.start_time)}`}
+                className="flex min-h-11 w-full items-center gap-2 rounded-xl border border-amber-500/25 bg-black/20 px-3 py-2 text-left text-xs transition hover:bg-black/30 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold text-xinuco-text">{a.customer_name}</span>
+                  <span className="block truncate text-xinuco-muted">
+                    {dayLabel(apptDateKey(a.start_time), todayKey)} · {formatApptTime(a.start_time)} · {a.service_name}
+                  </span>
+                </span>
+                <span className="shrink-0 font-semibold text-amber-400">{apptStatusLabel(a.status, isAdmin)}</span>
+                <ChevronRight size={14} className="shrink-0 text-amber-400" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
     <section aria-label={`Día de ${staffName}`} className="card !p-4 space-y-4">
       {/* Encabezado */}
       <div className="flex flex-col gap-3">
@@ -388,9 +434,9 @@ export function StaffDayTimeline({
               <button
                 key={appt.id}
                 type="button"
-                onClick={() => focusAppointmentCard(appt.id)}
-                title="Ver la tarjeta de esta cita"
-                className={`rounded-lg border px-3 py-1.5 min-w-0 flex flex-col justify-center overflow-hidden z-10 text-left ${dim}`}
+                onClick={() => setDetailId(appt.id)}
+                aria-label={`Ver cita de ${appt.customer_name} a las ${isoTimeHHMM(appt.start_time)}`}
+                className={`rounded-lg border px-3 py-1.5 min-w-0 flex flex-col justify-center overflow-hidden z-10 text-left cursor-pointer transition hover:brightness-125 active:scale-[0.99] active:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-color)] ${dim}`}
                 style={{
                   gridColumn: 2,
                   gridRow: `${row + 1} / span ${span}`,
@@ -492,6 +538,16 @@ export function StaffDayTimeline({
         initialTime={bookingTime ?? undefined}
         staffId={staffId}
       />
+
+      {/* Detalle de la cita tocada en la línea de tiempo */}
+      <AppointmentDetailSheet
+        appt={detailAppt}
+        isAdmin={isAdmin}
+        activeShiftId={activeShiftId}
+        businessId={businessId}
+        onClose={closeDetail}
+      />
     </section>
+    </>
   )
 }
