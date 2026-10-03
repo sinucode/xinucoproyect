@@ -24,6 +24,7 @@ import {
   Send,
   ShoppingBag,
   Gift,
+  CalendarPlus,
 } from 'lucide-react'
 import {
   getCustomerExpediente,
@@ -45,6 +46,7 @@ import { formatCOP } from '@xinuco/utils'
 import { AdminPageHeader } from '@xinuco/ui'
 import { CustomerFilters } from './CustomerFilters'
 import { CustomerFormModal } from './CustomerFormModal'
+import { QuickBookingSheet } from '@/components/agenda/QuickBookingSheet'
 import {
   CUSTOMERS_PAGE_SIZE,
   displayPhone,
@@ -543,6 +545,8 @@ function CustomerHeader({
   const [newTag, setNewTag] = useState('')
   const [isSavingTags, startSaveTags] = useTransition()
   const [showEdit, setShowEdit] = useState(false)
+  const [showBooking, setShowBooking] = useState(false)
+  const slug = usePathname().split('/')[1] ?? ''
   const customInputRef = useRef<HTMLInputElement>(null)
 
   const noPhone = isPlaceholderPhone(customer.phone)
@@ -637,6 +641,14 @@ function CustomerHeader({
           )}
           <button
             type="button"
+            onClick={() => setShowBooking(true)}
+            className="btn-ghost !py-2 !px-3 text-xs flex-1 sm:flex-none justify-center min-h-10"
+          >
+            <CalendarPlus size={13} />
+            Agendar
+          </button>
+          <button
+            type="button"
             onClick={() => setShowEdit(true)}
             className="btn-ghost !py-2 !px-3 text-xs flex-1 sm:flex-none justify-center min-h-10"
           >
@@ -644,6 +656,13 @@ function CustomerHeader({
             Editar
           </button>
         </div>
+        {/* Agendar cita con este cliente ya elegido (mismo formulario rápido de la Agenda) */}
+        <QuickBookingSheet
+          slug={slug}
+          open={showBooking}
+          onClose={() => { setShowBooking(false); onRefresh() }}
+          customer={{ id: customer.id, full_name: customer.full_name, phone: customer.phone ?? '' }}
+        />
       </div>
 
       {/* Etiquetas editables */}

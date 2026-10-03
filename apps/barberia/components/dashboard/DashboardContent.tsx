@@ -5,6 +5,8 @@ import { getActiveShiftDetails } from '@/actions/finance'
 import { getUpcomingFixedExpenses } from '@/actions/expenses'
 import { getMoneyAccountsStatus } from '@/actions/money-accounts'
 import { getLowStockItems } from '@/actions/inventory'
+import { getPendingPayoutRequestsCount } from '@/actions/ledger'
+import { PayoutRequestsNotice } from '@/components/dashboard/PayoutRequestsNotice'
 import { UpcomingFixedExpensesNotice } from '@/components/dashboard/expenses/UpcomingFixedExpensesNotice'
 import { LowStockNotice } from '@/components/dashboard/inventory/LowStockNotice'
 import { CashShiftManager } from '@/components/finance/CashShiftManager'
@@ -55,13 +57,16 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
   // 3. Consultar Turno de Caja Activo (Solo para administradores)
   let activeShiftDetails = null
   let moneyStatus: MoneyAccountsStatus | null = null
+  let pendingPayoutRequests = 0
   if (isAdmin) {
-    // 3a. Turno de caja y saldos de cada medio ("Tu plata") en paralelo
-    const [shiftDetails, money] = await Promise.all([
+    // 3a. Turno de caja, saldos de cada medio ("Tu plata") y solicitudes de pago del equipo en paralelo
+    const [shiftDetails, money, payoutRequests] = await Promise.all([
       getActiveShiftDetails(businessId),
       getMoneyAccountsStatus(),
+      getPendingPayoutRequestsCount(),
     ])
     activeShiftDetails = shiftDetails
+    pendingPayoutRequests = payoutRequests
     // Si los saldos no cargan, el resto del Inicio sigue funcionando sin la tarjeta
     moneyStatus = money.data ?? null
   }
@@ -205,6 +210,13 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
       {isAdmin && moneyStatus && (
         <section aria-label="Tu plata">
           <MoneyAccountsCard initialStatus={moneyStatus} />
+        </section>
+      )}
+
+      {/* Aviso: el equipo pidió pago o anticipo (Solo para Administrador) */}
+      {isAdmin && pendingPayoutRequests > 0 && (
+        <section aria-label="Solicitudes de pago del equipo">
+          <PayoutRequestsNotice slug={slug} count={pendingPayoutRequests} />
         </section>
       )}
 
