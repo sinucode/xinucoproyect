@@ -121,6 +121,37 @@ export function paidDifferenceLabel(
   return `Pagada ${formatPlain(request.paid_amount)} de ${formatPlain(request.amount)} solicitados`
 }
 
+/** Días que un aviso de solicitud resuelta sigue apareciendo en el Inicio del profesional. */
+export const PAYOUT_NOTICE_DAYS = 7
+
+/** Solicitud ya resuelta (pagada o rechazada), lo mínimo para avisarle al profesional. */
+export interface PayoutUpdateView {
+  id:              string
+  kind:            PayoutRequestKind
+  amount:          number
+  paid_amount:     number | null
+  status:          'paid' | 'rejected'
+  resolution_note: string | null
+  resolved_at:     string | null
+}
+
+/**
+ * Texto del aviso al profesional cuando se resolvió su solicitud.
+ *  - pagada:    "Te pagaron el anticipo de $10.000" / "Te pagaron $8.000 de los $10.000 que pediste"
+ *  - rechazada: "Tu solicitud de anticipo de $10.000 fue rechazada: <motivo>"
+ */
+export function payoutUpdateMessage(u: Pick<PayoutUpdateView, 'kind' | 'amount' | 'paid_amount' | 'status' | 'resolution_note'>): string {
+  const noun = u.kind === 'advance' ? 'anticipo' : 'pago'
+  if (u.status === 'paid') {
+    if (u.paid_amount != null && u.paid_amount !== u.amount) {
+      return `Te pagaron ${formatPlain(u.paid_amount)} de los ${formatPlain(u.amount)} que pediste`
+    }
+    return `Te pagaron el ${noun} de ${formatPlain(u.paid_amount ?? u.amount)}`
+  }
+  const reason = u.resolution_note?.trim()
+  return `Tu solicitud de ${noun} de ${formatPlain(u.amount)} fue rechazada${reason ? `: ${reason}` : '.'}`
+}
+
 export const PAYOUT_REQUEST_NOT_PENDING_MESSAGE = 'Esta solicitud ya fue pagada, cancelada o rechazada.'
 export const PAYOUT_REQUEST_MISMATCH_MESSAGE = 'La solicitud no corresponde a este profesional o tipo de pago.'
 

@@ -5,8 +5,9 @@ import { getActiveShiftDetails } from '@/actions/finance'
 import { getUpcomingFixedExpenses } from '@/actions/expenses'
 import { getMoneyAccountsStatus } from '@/actions/money-accounts'
 import { getLowStockItems } from '@/actions/inventory'
-import { getPendingPayoutRequestsCount } from '@/actions/ledger'
+import { getPendingPayoutRequestsCount, getMyResolvedPayoutUpdates } from '@/actions/ledger'
 import { PayoutRequestsNotice } from '@/components/dashboard/PayoutRequestsNotice'
+import { PayoutRequestUpdates } from '@/components/dashboard/PayoutRequestUpdates'
 import { UpcomingFixedExpensesNotice } from '@/components/dashboard/expenses/UpcomingFixedExpensesNotice'
 import { LowStockNotice } from '@/components/dashboard/inventory/LowStockNotice'
 import { CashShiftManager } from '@/components/finance/CashShiftManager'
@@ -26,6 +27,7 @@ import {
   type SummaryAppt,
 } from '@/lib/day-summary'
 import { roleLabel } from '@/lib/roles'
+import type { PayoutUpdateView } from '@/lib/payout-requests'
 
 interface DashboardContentProps {
   slug: string
@@ -166,6 +168,11 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
     tuDia = { summary, earned, queue }
   }
 
+  // 4c. Avisos de solicitudes de pago/anticipo ya resueltas (solo el barbero; fallo → sin aviso)
+  const payoutUpdates: PayoutUpdateView[] = isStaffMember && linkedStaffId
+    ? await getMyResolvedPayoutUpdates()
+    : []
+
   // 5. Validar integridad de cierre: hay citas En Curso?
   const hasInProgressAppointments = appointments.some((a) => a.status === 'in_progress')
 
@@ -249,6 +256,11 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
 
       {/* Widget 2 — Agenda del día (el barbero ve arriba su resumen "Tu día") */}
       <div className="flex flex-col gap-6 min-w-0">
+      {payoutUpdates.length > 0 && (
+        <section aria-label="Solicitudes de pago resueltas">
+          <PayoutRequestUpdates slug={slug} updates={payoutUpdates} />
+        </section>
+      )}
       {tuDia && (
         <section aria-label="Tu día">
           <TuDiaSummary data={tuDia} nowWallMs={nowWallMs} />

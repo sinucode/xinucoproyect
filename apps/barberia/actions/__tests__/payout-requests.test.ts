@@ -1,6 +1,7 @@
 import {
   cancelPayoutRequest,
   getMyPayoutRequests,
+  getMyResolvedPayoutUpdates,
   getPendingPayoutRequestsCount,
   listPendingPayoutRequests,
   recordTeamMovement,
@@ -136,6 +137,34 @@ describe('getMyPayoutRequests', () => {
   it('usuario sin profesional vinculado → error', async () => {
     setup('barber', { staff: [{ data: null, error: null }] })
     expect(await getMyPayoutRequests()).toHaveProperty('error')
+  })
+})
+
+describe('getMyResolvedPayoutUpdates', () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  it('lee solo las resueltas del profesional en los últimos 7 días, con columnas explícitas', async () => {
+    const { calls } = setup('barber', {
+      staff: [{ data: { id: 's1' }, error: null }],
+      payout_requests: [{ data: [
+        { id: 'r1', kind: 'advance', amount: '10000', paid_amount: '10000', status: 'paid', resolution_note: null, resolved_at: '2026-10-02T15:00:00Z' },
+      ], error: null }],
+    })
+    const res = await getMyResolvedPayoutUpdates()
+    expect(res).toEqual([{ id: 'r1', kind: 'advance', amount: 10000, paid_amount: 10000, status: 'paid', resolution_note: null, resolved_at: '2026-10-02T15:00:00Z' }])
+    const select = opsOf(calls, 'payout_requests', 'select')[0].args[0]
+    expect(select).toBe('id, kind, amount, paid_amount, status, resolution_note, resolved_at')
+    const eqs = opsOf(calls, 'payout_requests', 'eq').map(o => `${o.args[0]}=${o.args[1]}`)
+    expect(eqs).toEqual(expect.arrayContaining(['business_id=biz1', 'staff_id=s1']))
+    expect(opsOf(calls, 'payout_requests', 'in')[0].args).toEqual(['status', ['paid', 'rejected']])
+    expect(opsOf(calls, 'payout_requests', 'gte')[0].args[0]).toBe('resolved_at')
+  })
+
+  it('fallo de lectura o sin profesional vinculado → lista vacía', async () => {
+    setup('barber', { staff: [{ data: { id: 's1' }, error: null }], payout_requests: [{ data: null, error: { message: 'boom' } }] })
+    expect(await getMyResolvedPayoutUpdates()).toEqual([])
+    setup('barber', { staff: [{ data: null, error: null }] })
+    expect(await getMyResolvedPayoutUpdates()).toEqual([])
   })
 })
 

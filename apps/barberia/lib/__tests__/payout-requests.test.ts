@@ -5,6 +5,7 @@ import {
   mapPayoutLedgerError,
   mapPayoutRpcError,
   paidDifferenceLabel,
+  payoutUpdateMessage,
   suggestedPayAmount,
   validatePayoutRequestInput,
   validateRejectReason,
@@ -114,5 +115,20 @@ describe('mapPayoutLedgerError', () => {
   it('null para cualquier otro error', () => {
     expect(mapPayoutLedgerError('duplicate key')).toBeNull()
     expect(mapPayoutLedgerError(undefined)).toBeNull()
+  })
+})
+
+describe('payoutUpdateMessage', () => {
+  const base = { kind: 'advance' as const, amount: 10000, paid_amount: null, resolution_note: null }
+
+  it('pagada completa', () => {
+    expect(payoutUpdateMessage({ ...base, status: 'paid', paid_amount: 10000 })).toBe('Te pagaron el anticipo de $10.000')
+  })
+  it('pagada parcial', () => {
+    expect(payoutUpdateMessage({ ...base, status: 'paid', paid_amount: 8000 })).toBe('Te pagaron $8.000 de los $10.000 que pediste')
+  })
+  it('rechazada con y sin motivo', () => {
+    expect(payoutUpdateMessage({ ...base, status: 'rejected', resolution_note: 'No hay caja' })).toBe('Tu solicitud de anticipo de $10.000 fue rechazada: No hay caja')
+    expect(payoutUpdateMessage({ ...base, kind: 'payout', status: 'rejected' })).toBe('Tu solicitud de pago de $10.000 fue rechazada.')
   })
 })

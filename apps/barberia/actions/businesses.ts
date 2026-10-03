@@ -180,13 +180,17 @@ async function requireAdmin(): Promise<{ supabase: Supabase; businessId: string 
 }
 
 function revalidateBusinessPages() {
+  revalidatePath('/[slug]', 'layout') // el tema (brand_config) se aplica en el layout del tenant
   revalidatePath('/[slug]/dashboard', 'layout')
   revalidatePath('/[slug]/book', 'page')
   revalidatePath('/[slug]', 'page')
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// updateBusinessBranding — Actualiza la columna `branding` (JSONB) del tenant
+// updateBusinessBranding — Apariencia del negocio (Configuración → Apariencia).
+// El tema que se aplica en pantalla sale de `brand_config` (fuente única de verdad, camelCase;
+// ver app/[slug]/layout.tsx), así que se guarda ahí (merge: conserva logoUrl y otras llaves) y se
+// espeja en la columna legada `branding` (snake_case) que aún leen BrandMark y /[slug].
 // ════════════════════════════════════════════════════════════════════════════════
 
 export async function updateBusinessBranding(
@@ -196,22 +200,68 @@ export async function updateBusinessBranding(
   if ('error' in auth) return { error: auth.error }
   const { supabase, businessId } = auth
 
-  // Leer el branding actual para hacer merge (no pisar campos existentes)
+  // Validación estricta de colores (mismos campos que updateBusinessTheme)
+  const colorFields = [
+    { key: 'primary_color',   value: branding.primary_color },
+    { key: 'secondary_color', value: branding.secondary_color },
+    { key: 'bg_color',        value: branding.bg_color },
+    { key: 'text_color',      value: branding.text_color },
+  ] as const
+  for (const { key, value } of colorFields) {
+    if (value !== undefined && (typeof value !== 'string' || !HEX_COLOR_REGEX.test(value))) {
+      return { error: `Color inválido en "${key}": "${String(value)}". Usa formato hexadecimal (ej: #C5A059).` }
+    }
+  }
+
+  // Fuente: el layout la resuelve en minúsculas (inter | playfair | oswald)
+  let fontKey: string | undefined
+  if (branding.font_family !== undefined) {
+    fontKey = typeof branding.font_family === 'string' ? branding.font_family.trim().toLowerCase() : ''
+    if (!fontKey || fontKey.length > 40) return { error: 'Fuente inválida.' }
+  }
+
+  // Leer lo actual para hacer merge (no pisar campos existentes: logo, etc.)
   const { data: biz, error: fetchError } = await supabase
     .from('businesses')
-    .select('branding')
+    .select('branding, brand_config')
     .eq('id', businessId)
     .single()
 
   if (fetchError || !biz) return { error: 'No se pudo obtener la configuración actual.' }
 
-  const current = (biz.branding ?? {}) as unknown as BusinessBranding
-  const merged: BusinessBranding = { ...current, ...branding }
+  const currentBranding = (biz.branding ?? {}) as unknown as BusinessBranding
+  const currentConfig   = (biz.brand_config ?? {}) as unknown as Partial<BrandConfig>
 
-  // Persistir el JSONB fusionado
+  // Logo: si se envía, se mantiene igual en ambas columnas
+  const logo = branding.logo_url !== undefined
+    ? branding.logo_url
+    : (currentBranding.logo_url ?? currentConfig.logoUrl ?? null)
+
+  const mergedConfig: Record<string, unknown> = { ...currentConfig }
+  if (branding.primary_color   !== undefined) mergedConfig.primaryColor   = branding.primary_color
+  if (branding.secondary_color !== undefined) mergedConfig.secondaryColor = branding.secondary_color
+  if (branding.bg_color        !== undefined) mergedConfig.bgColor        = branding.bg_color
+  if (branding.text_color      !== undefined) mergedConfig.textColor      = branding.text_color
+  if (fontKey                  !== undefined) mergedConfig.fontFamily     = fontKey
+  if (logo) mergedConfig.logoUrl = logo
+  else delete mergedConfig.logoUrl
+
+  const mergedBranding: BusinessBranding = {
+    ...currentBranding,
+    ...(branding.primary_color   !== undefined ? { primary_color:   branding.primary_color }   : {}),
+    ...(branding.secondary_color !== undefined ? { secondary_color: branding.secondary_color } : {}),
+    ...(branding.bg_color        !== undefined ? { bg_color:        branding.bg_color }        : {}),
+    ...(branding.text_color      !== undefined ? { text_color:      branding.text_color }      : {}),
+    ...(fontKey                  !== undefined ? { font_family:     fontKey }                  : {}),
+    logo_url: logo,
+  }
+
   const { data: updated, error: updateError } = await supabase
     .from('businesses')
-    .update({ branding: merged as unknown as Record<string, Json> })
+    .update({
+      brand_config: mergedConfig as unknown as Json,
+      branding:     mergedBranding as unknown as Record<string, Json>,
+    })
     .eq('id', businessId)
     .select('id')
 

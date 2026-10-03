@@ -2,19 +2,26 @@
 
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Loader2, Check, AlertCircle, ImageOff } from 'lucide-react'
 import { updateBusinessBranding } from '@/actions/businesses'
-import type { Business, BusinessBranding } from '@xinuco/types'
+import type { Business, BusinessBranding, BrandConfig } from '@xinuco/types'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+// Solo las fuentes que carga el layout del tenant (app/[slug]/layout.tsx). El valor es la llave
+// en minúsculas que guarda brand_config.fontFamily; `css` solo es para la vista previa.
 const FONT_OPTIONS = [
-  { value: 'Inter',            label: 'Inter' },
-  { value: 'Playfair Display', label: 'Playfair Display' },
-  { value: 'Bebas Neue',       label: 'Bebas Neue' },
-  { value: 'Oswald',           label: 'Oswald' },
-  { value: 'Montserrat',       label: 'Montserrat' },
+  { value: 'inter',    label: 'Inter',            css: 'var(--font-inter), Inter, sans-serif' },
+  { value: 'playfair', label: 'Playfair Display', css: 'var(--font-playfair), "Playfair Display", serif' },
+  { value: 'oswald',   label: 'Oswald',           css: 'var(--font-oswald), Oswald, sans-serif' },
 ] as const
+
+/** Lleva cualquier valor guardado ("Playfair Display", "bebas"…) a una llave soportada (fallback: inter). */
+function normalizeFontKey(raw?: string | null): string {
+  const n = (raw ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+  return FONT_OPTIONS.find(o => n.startsWith(o.value))?.value ?? 'inter'
+}
 
 const DEFAULT_BRANDING: BusinessBranding = {
   primary_color:   '#C5A059',
@@ -22,13 +29,13 @@ const DEFAULT_BRANDING: BusinessBranding = {
   bg_color:        '#080808',
   text_color:      '#F4F4F4',
   logo_url:        null,
-  font_family:     'Inter',
+  font_family:     'inter',
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface BrandingFormProps {
-  business: Pick<Business, 'id' | 'name' | 'slug' | 'branding'>
+  business: Pick<Business, 'id' | 'name' | 'slug' | 'branding'> & Partial<Pick<Business, 'brand_config'>>
   slug:     string
 }
 
@@ -174,8 +181,19 @@ function BrandPreview({
 // ════════════════════════════════════════════════════════════════════════════
 
 export function BrandingForm({ business, slug }: BrandingFormProps) {
-  // Merge stored branding with defaults
-  const stored = (business.branding ?? {}) as unknown as Partial<BusinessBranding>
+  const router = useRouter()
+
+  // Lo que se muestra es lo que realmente está en uso: brand_config (fuente única de verdad que aplica
+  // el layout) → branding legado → defaults.
+  const legacy = (business.branding ?? {}) as unknown as Partial<BusinessBranding>
+  const bc     = (business.brand_config ?? {}) as Partial<BrandConfig>
+  const stored: Partial<BusinessBranding> = {
+    primary_color:   bc.primaryColor   || legacy.primary_color,
+    secondary_color: bc.secondaryColor || legacy.secondary_color,
+    bg_color:        bc.bgColor        || legacy.bg_color,
+    text_color:      bc.textColor      || legacy.text_color,
+    font_family:     bc.fontFamily     || legacy.font_family,
+  }
 
   // El nombre se edita en "Datos del negocio"; aquí solo alimenta la vista previa.
   const name = business.name
@@ -185,7 +203,7 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
     bg_color:        stored.bg_color        ?? DEFAULT_BRANDING.bg_color,
     text_color:      stored.text_color      ?? DEFAULT_BRANDING.text_color,
   })
-  const [font,   setFont]   = useState(stored.font_family ?? DEFAULT_BRANDING.font_family)
+  const [font,   setFont]   = useState(normalizeFontKey(stored.font_family ?? DEFAULT_BRANDING.font_family))
 
   const [isPending, startTransition] = useTransition()
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
@@ -219,6 +237,8 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
 
         setStatus('success')
         setStatusMsg('Cambios guardados correctamente.')
+        // Re-renderiza la página actual con los nuevos CSS vars del tema
+        router.refresh()
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Error inesperado. Intenta de nuevo.'
         setStatus('error')
@@ -366,7 +386,7 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
           secondary={colors.secondary_color}
           bg={colors.bg_color}
           textColor={colors.text_color}
-          font={font}
+          font={FONT_OPTIONS.find(o => o.value === font)?.css ?? font}
         />
       </section>
 

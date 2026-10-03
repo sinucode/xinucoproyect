@@ -35,6 +35,7 @@ import {
   isPayoutStatus,
   mapPayoutLedgerError,
   mapPayoutRpcError,
+  PAYOUT_NOTICE_DAYS,
   PAYOUT_REQUEST_MISMATCH_MESSAGE,
   PAYOUT_REQUEST_NOT_PENDING_MESSAGE,
   validatePayoutRequestInput,
@@ -43,6 +44,7 @@ import {
   type PayoutRequestKind,
   type PayoutRequestStatus,
   type PayoutRequestView,
+  type PayoutUpdateView,
 } from '@/lib/payout-requests'
 import { loadStaffContacts } from '@/lib/staff-contacts'
 import { paymentMethodForAccount } from '@/lib/money-accounts'
@@ -767,6 +769,58 @@ export async function getMyPayoutRequests(): Promise<{ requests: PayoutRequestVi
   // La pendiente siempre arriba
   requests.sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending'))
   return { requests }
+}
+
+/**
+ * Solicitudes del profesional que inició sesión resueltas (pagadas o rechazadas) en los últimos
+ * `PAYOUT_NOTICE_DAYS` días — alimentan el aviso del Inicio. Lectura con el cliente del usuario (RLS
+ * `_is_my_staff`). Cualquier fallo → lista vacía (el aviso simplemente no se muestra).
+ */
+export async function getMyResolvedPayoutUpdates(): Promise<PayoutUpdateView[]> {
+  try {
+    const ctx = await getContext()
+    if ('error' in ctx) return []
+    const { supabase, userId, businessId } = ctx
+
+    const { data: staffRow } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('business_id', businessId)
+      .eq('user_id', userId)
+      .order('is_active', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const staffId = (staffRow as { id?: string } | null)?.id
+    if (!staffId) return []
+
+    const since = new Date(Date.now() - PAYOUT_NOTICE_DAYS * 24 * 60 * 60 * 1000).toISOString()
+    const { data, error } = await supabase
+      .from('payout_requests')
+      .select('id, kind, amount, paid_amount, status, resolution_note, resolved_at')
+      .eq('business_id', businessId)
+      .eq('staff_id', staffId)
+      .in('status', ['paid', 'rejected'])
+      .gte('resolved_at', since)
+      .order('resolved_at', { ascending: false })
+      .limit(5)
+    if (error) return []
+
+    type Row = {
+      id: string; kind: PayoutRequestKind; amount: number | string; paid_amount: number | string | null
+      status: 'paid' | 'rejected'; resolution_note: string | null; resolved_at: string | null
+    }
+    return ((data ?? []) as unknown as Row[]).map(r => ({
+      id:              r.id,
+      kind:            r.kind,
+      amount:          Number(r.amount),
+      paid_amount:     r.paid_amount == null ? null : Number(r.paid_amount),
+      status:          r.status,
+      resolution_note: r.resolution_note ?? null,
+      resolved_at:     r.resolved_at ?? null,
+    }))
+  } catch {
+    return []
+  }
 }
 
 /** El profesional pide un pago de lo que se le debe o un anticipo. */

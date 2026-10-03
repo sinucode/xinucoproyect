@@ -108,6 +108,52 @@ describe('updateBusinessProfile', () => {
   })
 })
 
+describe('updateBusinessBranding', () => {
+  const current = {
+    branding:     { primary_color: '#111111', secondary_color: '#222222', bg_color: '#000000', text_color: '#EEEEEE', logo_url: 'https://x.co/logo.png', font_family: 'Inter' },
+    brand_config: { primaryColor: '#111111', secondaryColor: '#222222', bgColor: '#000000', textColor: '#EEEEEE', fontFamily: 'inter', logoUrl: 'https://x.co/logo.png', extra: 'keep' },
+  }
+
+  it('guarda brand_config (merge, conserva logo y otras llaves) y espeja branding', async () => {
+    const { calls } = makeSupabase({
+      queues: { businesses: [{ data: current, error: null }, { data: [{ id: 'biz1' }], error: null }] },
+    })
+    const r = await updateBusinessBranding({ primary_color: '#C5A059', font_family: ' Playfair ' })
+    expect(r).toEqual({ success: true })
+
+    const bizCalls = calls.filter(c => c.table === 'businesses')
+    const update = bizCalls[1].ops.find(o => o.op === 'update')!.args[0]
+    expect(update.brand_config).toEqual({
+      primaryColor: '#C5A059', secondaryColor: '#222222', bgColor: '#000000', textColor: '#EEEEEE',
+      fontFamily: 'playfair', logoUrl: 'https://x.co/logo.png', extra: 'keep',
+    })
+    expect(update.branding).toEqual({
+      primary_color: '#C5A059', secondary_color: '#222222', bg_color: '#000000', text_color: '#EEEEEE',
+      font_family: 'playfair', logo_url: 'https://x.co/logo.png',
+    })
+    // El negocio sale del perfil, nunca del cliente
+    expect(bizCalls[1].ops.find(o => o.op === 'eq')!.args).toEqual(['id', 'biz1'])
+  })
+
+  it('rechaza un color inválido sin tocar la base', async () => {
+    const { calls } = makeSupabase({})
+    const r = await updateBusinessBranding({ bg_color: 'rojo' })
+    expect(r.error).toMatch(/Color inválido/)
+    expect(calls.some(c => c.table === 'businesses')).toBe(false)
+  })
+
+  it('un barbero no puede guardar', async () => {
+    const { calls } = makeSupabase({ role: 'barber' })
+    expect((await updateBusinessBranding({ primary_color: '#C5A059' })).error).toMatch(/administrador/)
+    expect(calls.some(c => c.table === 'businesses')).toBe(false)
+  })
+
+  it('0 filas actualizadas → mensaje de solo administrador', async () => {
+    makeSupabase({ queues: { businesses: [{ data: current, error: null }, { data: [], error: null }] } })
+    expect((await updateBusinessBranding({ primary_color: '#C5A059' })).error).toBe('No se pudo guardar: solo un administrador puede cambiar esto.')
+  })
+})
+
 describe('updateAvailability', () => {
   it('guarda el horario válido', async () => {
     makeSupabase({ queues: { businesses: [{ data: [{ id: 'biz1' }], error: null }] } })

@@ -32,9 +32,9 @@ export default async function BrandingPage({
       .single<Pick<Profile, 'role' | 'business_id'>>(),
     supabase
       .from('businesses')
-      .select('id, name, slug, branding')
+      .select('id, name, slug, branding, brand_config')
       .eq('slug', slug)
-      .single<Pick<Business, 'id' | 'name' | 'slug' | 'branding'>>(),
+      .single<Pick<Business, 'id' | 'name' | 'slug' | 'branding' | 'brand_config'>>(),
   ])
 
   if (!profile?.business_id || !biz) redirect(`/${slug}/login`)
