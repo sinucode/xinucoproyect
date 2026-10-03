@@ -1,6 +1,6 @@
 import {
   addWalkIn, updateWalkInStatus, startWalkIn, reserveWalkIn, releaseWalkIn,
-  suggestWalkInStaff, removeFromQueue, setWalkInService,
+  suggestWalkInStaff, removeFromQueue, setWalkInService, closeStaleWalkIns,
 } from '../walk-ins'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
@@ -15,12 +15,16 @@ jest.mock('next/cache', () => ({
 
 describe('Walk-ins Server Actions', () => {
   let mockSupabase: any
+  // Quién ejecuta la acción: por defecto admin. Los tests de barbero lo cambian.
+  let actor: { role: string; staffId: string | null; entry: { staff_id: string | null; appointment_id: string | null } | null }
 
   beforeEach(() => {
     jest.clearAllMocks()
+    actor = { role: 'admin', staffId: null, entry: null }
 
     mockSupabase = {
-      from: jest.fn().mockReturnThis(),
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: 'u1' } } }) },
+      from: jest.fn((table: string) => { mockSupabase._table = table; return mockSupabase }),
       insert: jest.fn().mockReturnThis(),
       update: jest.fn().mockReturnThis(),
       select: jest.fn().mockReturnThis(),
@@ -28,7 +32,13 @@ describe('Walk-ins Server Actions', () => {
       in: jest.fn().mockReturnThis(),
       order: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis(),
-      maybeSingle: jest.fn().mockReturnThis(),
+      // Lecturas del actor (profiles → staff) y del turno (walk_ins); los tests pueden pisarlas con *Once
+      maybeSingle: jest.fn(async () => {
+        if (mockSupabase._table === 'profiles') return { data: { role: actor.role, business_id: 'b1' }, error: null }
+        if (mockSupabase._table === 'staff')    return { data: actor.staffId ? { id: actor.staffId } : null, error: null }
+        if (mockSupabase._table === 'walk_ins') return { data: actor.entry, error: null }
+        return { data: null, error: null }
+      }),
     }
 
     ;(createClient as jest.Mock).mockResolvedValue(mockSupabase)
@@ -246,6 +256,119 @@ describe('Walk-ins Server Actions', () => {
       const result = await startWalkIn('wi1', 'staff1')
       expect(result.error).toBeTruthy()
       expect(mockSupabase.rpc).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('reglas de barbero', () => {
+    beforeEach(() => {
+      mockSupabase.rpc = jest.fn()
+      actor = { role: 'barber', staffId: 'me', entry: { staff_id: null, appointment_id: null } }
+    })
+
+    it('startWalkIn: puede atender un turno sin barbero asignado, a nombre propio', async () => {
+      mockSupabase.rpc.mockResolvedValueOnce({ data: { appointment_id: 'a1' }, error: null })
+      const res = await startWalkIn('wi1', 'me', 'svc1')
+      expect(res).toEqual({ success: true, appointmentId: 'a1' })
+      expect(mockSupabase.rpc).toHaveBeenCalledWith('start_walk_in', expect.objectContaining({ p_staff_id: 'me' }))
+    })
+
+    it('startWalkIn: puede atender un turno reservado para él', async () => {
+      actor.entry = { staff_id: 'me', appointment_id: 'ap1' }
+      mockSupabase.rpc.mockResolvedValueOnce({ data: { appointment_id: 'ap1' }, error: null })
+      expect((await startWalkIn('wi1', 'me')).success).toBe(true)
+    })
+
+    it('startWalkIn: NO puede atender un turno reservado o pedido con otro profesional', async () => {
+      actor.entry = { staff_id: 'other', appointment_id: 'ap1' }
+      const res = await startWalkIn('wi1', 'me')
+      expect(res.error).toMatch(/otro profesional/)
+      expect(mockSupabase.rpc).not.toHaveBeenCalled()
+    })
+
+    it('startWalkIn: NO puede atender a nombre de otro profesional', async () => {
+      const res = await startWalkIn('wi1', 'other')
+      expect(res.error).toMatch(/otro profesional/)
+      expect(mockSupabase.rpc).not.toHaveBeenCalled()
+    })
+
+    it('startWalkIn: un barbero sin profesional ligado no atiende', async () => {
+      actor.staffId = null
+      const res = await startWalkIn('wi1', 'me')
+      expect(res.error).toBeTruthy()
+      expect(mockSupabase.rpc).not.toHaveBeenCalled()
+    })
+
+    it('startWalkIn: el admin atiende cualquiera', async () => {
+      actor = { role: 'admin', staffId: null, entry: { staff_id: 'other', appointment_id: 'ap1' } }
+      mockSupabase.rpc.mockResolvedValueOnce({ data: { appointment_id: 'a1' }, error: null })
+      expect((await startWalkIn('wi1', 'someone')).success).toBe(true)
+    })
+
+    it('reserveWalkIn: aparta para sí mismo un turno libre', async () => {
+      mockSupabase.rpc.mockResolvedValueOnce({
+        data: { staff_id: 'me', start_time: '2026-10-02T15:00:00+00:00' }, error: null,
+      })
+      expect((await reserveWalkIn('wi1', 'me')).success).toBe(true)
+    })
+
+    it('reserveWalkIn: NO puede apartar un turno libre para otro, ni dejar que el DB elija', async () => {
+      expect((await reserveWalkIn('wi1', 'other')).error).toMatch(/otro profesional/)
+      expect((await reserveWalkIn('wi1', null)).error).toMatch(/otro profesional/)
+      expect(mockSupabase.rpc).not.toHaveBeenCalled()
+    })
+
+    it('reserveWalkIn: NO puede cambiar el barbero de un turno reservado para otro', async () => {
+      actor.entry = { staff_id: 'other', appointment_id: 'ap1' }
+      expect((await reserveWalkIn('wi1', 'me')).error).toMatch(/otro profesional/)
+      expect(mockSupabase.rpc).not.toHaveBeenCalled()
+    })
+
+    it('reserveWalkIn: puede traspasar un turno que es suyo', async () => {
+      actor.entry = { staff_id: 'me', appointment_id: 'ap1' }
+      mockSupabase.rpc.mockResolvedValueOnce({
+        data: { staff_id: 'other', start_time: '2026-10-02T15:00:00+00:00' }, error: null,
+      })
+      expect((await reserveWalkIn('wi1', 'other')).success).toBe(true)
+    })
+
+    it('releaseWalkIn: libera lo suyo; NO el hueco de otro', async () => {
+      actor.entry = { staff_id: 'me', appointment_id: 'ap1' }
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: null })
+      expect(await releaseWalkIn('wi1')).toEqual({ success: true })
+
+      actor.entry = { staff_id: 'other', appointment_id: 'ap1' }
+      expect((await releaseWalkIn('wi1')).error).toMatch(/otro profesional/)
+      expect(mockSupabase.rpc).toHaveBeenCalledTimes(1)
+    })
+
+    it('removeFromQueue: no saca de la fila el hueco apartado de otro, pero sí un turno sin hueco', async () => {
+      actor.entry = { staff_id: 'other', appointment_id: 'ap1' }
+      expect((await removeFromQueue('wi1')).error).toMatch(/otro profesional/)
+      expect(mockSupabase.rpc).not.toHaveBeenCalled()
+
+      actor.entry = { staff_id: 'other', appointment_id: null }
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: null })
+      expect(await removeFromQueue('wi1')).toEqual({ success: true })
+    })
+
+    it('traduce el error walk_in_not_yours que lanza la BD (defensa en profundidad)', async () => {
+      mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'walk_in_not_yours' } })
+      expect((await startWalkIn('wi1', 'me')).error).toMatch(/otro profesional/)
+    })
+  })
+
+  describe('closeStaleWalkIns', () => {
+    it('llama al RPC y devuelve cuántos cerró', async () => {
+      mockSupabase.rpc = jest.fn().mockResolvedValueOnce({ data: 3, error: null })
+      expect(await closeStaleWalkIns('b1')).toBe(3)
+      expect(mockSupabase.rpc).toHaveBeenCalledWith('close_stale_walk_ins', { p_business_id: 'b1' })
+    })
+
+    it('es de mejor esfuerzo: ignora errores y excepciones', async () => {
+      mockSupabase.rpc = jest.fn().mockResolvedValueOnce({ data: null, error: { message: 'x' } })
+      expect(await closeStaleWalkIns('b1')).toBe(0)
+      mockSupabase.rpc = jest.fn().mockRejectedValueOnce(new Error('boom'))
+      expect(await closeStaleWalkIns('b1')).toBe(0)
     })
   })
 })

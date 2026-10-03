@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { getWalkInQueue, getWalkInHistory, getStaffStatusNow, getWalkInSuggestions } from '@/actions/walk-ins'
+import { getWalkInQueue, getWalkInHistory, getStaffStatusNow, getWalkInSuggestions, closeStaleWalkIns } from '@/actions/walk-ins'
 import { isReservedTurn } from '@/lib/walk-in-wait'
 import { getActiveShiftDetails } from '@/actions/finance'
 import { WalkInQueue } from '@/components/dashboard/walk-ins/WalkInQueue'
@@ -46,6 +46,22 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
     const shiftDetails = await getActiveShiftDetails(profile.business_id)
     activeShiftId = shiftDetails?.shift?.id || null
   }
+
+  // 3c. Rol y profesional ligado: el barbero solo atiende lo suyo (reglas en la BD y las actions)
+  const isAdmin = profile.role === 'admin' || profile.role === 'super_admin'
+  let viewerStaffId: string | null = null
+  if (!isAdmin) {
+    const { data: me } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('business_id', profile.business_id)
+      .maybeSingle()
+    viewerStaffId = (me as { id?: string } | null)?.id ?? null
+  }
+
+  // 3d. Limpieza: turnos que quedaron en espera de un día anterior se cierran antes de listar
+  await closeStaleWalkIns(profile.business_id)
 
   // 4. Carga paralela: cola activa + historial + estado de barberos + staff + servicios
   const [queue, history, staffStatus, staffRows, serviceRows, audienceRow] = await Promise.all([
@@ -96,6 +112,8 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
         serviceAudiences={serviceAudiences}
         businessId={profile.business_id}
         activeShiftId={activeShiftId}
+        isAdmin={isAdmin}
+        viewerStaffId={viewerStaffId}
         slug={slug}
       />
     </div>
