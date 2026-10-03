@@ -3,6 +3,10 @@
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { StaffStatusNow } from '@/lib/walk-in-wait'
+import {
+  canAttend, canReserve, canRelease, WALK_IN_NOT_YOURS_MESSAGE,
+  type WalkInActor, type WalkInOwnership,
+} from '@/lib/walk-in-permissions'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -66,6 +70,64 @@ export type ReserveWalkInResult =
 export type StartWalkInResult =
   | { success: true; appointmentId: string; error?: undefined }
   | { error: string; success?: undefined; appointmentId?: undefined }
+
+// ════════════════════════════════════════════════════════════════════════════
+// Actor (rol + profesional ligado) y turno — para las reglas de barbero.
+// La BD las aplica de verdad (migración 20261002110000); aquí se validan antes
+// para dar un mensaje claro. Si no se puede determinar el rol, se trata como
+// barbero sin profesional (lo más restrictivo).
+// ════════════════════════════════════════════════════════════════════════════
+
+type Supa = Awaited<ReturnType<typeof createClient>>
+
+async function getWalkInActor(supabase: Supa, userId: string): Promise<WalkInActor> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, business_id')
+    .eq('id', userId)
+    .maybeSingle()
+
+  const role = (profile as { role?: string } | null)?.role
+  if (role === 'admin' || role === 'super_admin') return { isAdmin: true, staffId: null }
+
+  const businessId = (profile as { business_id?: string } | null)?.business_id
+  if (!businessId) return { isAdmin: false, staffId: null }
+
+  const { data: staff } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('business_id', businessId)
+    .maybeSingle()
+
+  return { isAdmin: false, staffId: (staff as { id?: string } | null)?.id ?? null }
+}
+
+async function getWalkInOwnership(supabase: Supa, walkInId: string): Promise<WalkInOwnership | null> {
+  const { data } = await supabase
+    .from('walk_ins')
+    .select('staff_id, appointment_id')
+    .eq('id', walkInId)
+    .maybeSingle()
+  return (data as WalkInOwnership | null) ?? null
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// closeStaleWalkIns
+// Cierra (status 'cancelled') los turnos que siguen en espera de un día anterior
+// y libera su hueco apartado (RPC close_stale_walk_ins). Mejor esfuerzo: nunca falla.
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function closeStaleWalkIns(businessId: string): Promise<number> {
+  try {
+    const supabase = await createClient()
+    const { data, error } = await supabase.rpc('close_stale_walk_ins', { p_business_id: businessId })
+    if (error || typeof data !== 'number') return 0
+    return data
+  } catch {
+    return 0
+  }
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // getWalkInQueue
@@ -158,6 +220,7 @@ export async function getStaffStatusNow(businessId: string): Promise<StaffStatus
 const START_WALK_IN_ERRORS: Record<string, string> = {
   walk_in_not_found:   'Este turno ya no está en espera.',
   walk_in_not_waiting: 'Este turno ya no está en espera.',
+  walk_in_not_yours:   WALK_IN_NOT_YOURS_MESSAGE,
   staff_not_found:     'Elige un barbero válido.',
   service_required:    'Elige el servicio para atender.',
   station_busy:        'La estación que necesita este servicio está ocupada ahora. Espera a que se libere o elige otro servicio.',
@@ -172,6 +235,16 @@ export async function startWalkIn(
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'No autenticado.' }
+
+  // Barbero: solo atiende a nombre propio un turno suyo o sin barbero asignado
+  const actor = await getWalkInActor(supabase, user.id)
+  if (!actor.isAdmin) {
+    const entry = await getWalkInOwnership(supabase, walkInId)
+    if (!entry) return { error: 'Este turno ya no está en espera.' }
+    if (staffId !== actor.staffId || !canAttend(actor, entry)) {
+      return { error: WALK_IN_NOT_YOURS_MESSAGE }
+    }
+  }
 
   const { data, error } = await supabase.rpc('start_walk_in', {
     p_walk_in_id: walkInId,
@@ -231,6 +304,7 @@ const RESERVE_WALK_IN_ERRORS: Record<string, string> = {
   service_required:    'Elige el servicio para apartar el turno.',
   walk_in_not_found:   'Este turno ya no está en espera.',
   walk_in_not_waiting: 'Este turno ya no está en espera.',
+  walk_in_not_yours:   WALK_IN_NOT_YOURS_MESSAGE,
   staff_not_found:     'Elige un barbero válido.',
 }
 
@@ -239,6 +313,17 @@ export async function reserveWalkIn(
   staffId:  string | null,
 ): Promise<ReserveWalkInResult> {
   const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado.' }
+
+  // Barbero: aparta para sí mismo un turno libre, o gestiona uno suyo
+  const actor = await getWalkInActor(supabase, user.id)
+  if (!actor.isAdmin) {
+    const entry = await getWalkInOwnership(supabase, walkInId)
+    if (!entry) return { error: 'Este turno ya no está en espera.' }
+    if (!canReserve(actor, entry, staffId)) return { error: WALK_IN_NOT_YOURS_MESSAGE }
+  }
 
   const { data, error } = await supabase.rpc('reserve_walk_in', {
     p_walk_in_id: walkInId,
@@ -261,6 +346,19 @@ export async function reserveWalkIn(
   return { success: true, staffId: res.staff_id, startTime: res.start_time }
 }
 
+/** Barbero: no libera ni saca de la fila el hueco apartado de otro profesional. */
+async function assertCanRelease(supabase: Supa, walkInId: string, cancel: boolean): Promise<ActionResult | null> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado.' }
+
+  const actor = await getWalkInActor(supabase, user.id)
+  if (actor.isAdmin) return null
+
+  const entry = await getWalkInOwnership(supabase, walkInId)
+  if (!entry) return { error: 'Este turno ya no está en espera.' }
+  return canRelease(actor, entry, cancel) ? null : { error: WALK_IN_NOT_YOURS_MESSAGE }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // releaseWalkIn
 // Libera el hueco apartado (cancela la cita programada) y quita el barbero.
@@ -269,6 +367,9 @@ export async function reserveWalkIn(
 
 export async function releaseWalkIn(walkInId: string, cancel = false): Promise<ActionResult> {
   const supabase = await createClient()
+
+  const denied = await assertCanRelease(supabase, walkInId, cancel)
+  if (denied) return denied
 
   const { error } = await supabase.rpc('release_walk_in', {
     p_walk_in_id: walkInId,
@@ -279,6 +380,7 @@ export async function releaseWalkIn(walkInId: string, cancel = false): Promise<A
     if (error.message?.includes('walk_in_not_waiting') || error.message?.includes('walk_in_not_found')) {
       return { error: 'Este turno ya no está en espera.' }
     }
+    if (error.message?.includes('walk_in_not_yours')) return { error: WALK_IN_NOT_YOURS_MESSAGE }
     return { error: 'No se pudo liberar el turno. Intenta de nuevo.' }
   }
 
@@ -342,6 +444,9 @@ export async function setWalkInService(
 export async function removeFromQueue(walkInId: string): Promise<ActionResult> {
   const supabase = await createClient()
 
+  const denied = await assertCanRelease(supabase, walkInId, true)
+  if (denied) return denied
+
   const { error: rpcError } = await supabase.rpc('release_walk_in', {
     p_walk_in_id: walkInId,
     p_cancel:     true,
@@ -349,6 +454,7 @@ export async function removeFromQueue(walkInId: string): Promise<ActionResult> {
 
   if (rpcError) {
     // No estaba en espera (p. ej. turno legacy en atención sin cita): cancelar directo
+    if (rpcError.message?.includes('walk_in_not_yours')) return { error: WALK_IN_NOT_YOURS_MESSAGE }
     if (!rpcError.message?.includes('walk_in_not_waiting')) {
       return { error: 'No se pudo quitar el turno. Intenta de nuevo.' }
     }
