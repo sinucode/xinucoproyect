@@ -21,7 +21,7 @@ import {
   type BookingStaff,
 } from '@/actions/staff-booking'
 import { businessTodayISODate, dayLabel } from '@/lib/agenda-time'
-import { MAX_BOOKING_NOTES } from '@/lib/staff-booking'
+import { MAX_BOOKING_NOTES, pickSlotTime } from '@/lib/staff-booking'
 
 export interface QuickBookingSheetProps {
   slug: string
@@ -91,7 +91,8 @@ function QuickBookingBody({
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState<{ date: string; time: string } | null>(null)
 
-  // Hora que vino prellenada: se aplica solo en la primera carga de horarios
+  // Hora preferida (la de la franja desde la que se abrió, o la última que eligió la persona):
+  // se re-aplica cada vez que cargan los horarios libres mientras siga libre.
   const pendingTime = useRef<string | undefined>(initialTime)
 
   // 1. Quién puede agendar y para quién
@@ -130,14 +131,7 @@ function QuickBookingBody({
       }
       if (!serviceId && res.services.length === 1) setServiceId(res.services[0].id)
       setSlots(res.slots)
-      setTime((prev) => {
-        if (pendingTime.current && res.slots.includes(pendingTime.current)) {
-          const t = pendingTime.current
-          pendingTime.current = undefined
-          return t
-        }
-        return res.slots.includes(prev) ? prev : ''
-      })
+      setTime((prev) => pickSlotTime(res.slots, pendingTime.current, prev))
     })
   }, [ctx.status, staffId, date, serviceId])
 
@@ -415,7 +409,7 @@ function QuickBookingBody({
         <select
           id="qb-service"
           value={serviceId}
-          onChange={(e) => { setServiceId(e.target.value); setTime(''); pendingTime.current = undefined }}
+          onChange={(e) => { setServiceId(e.target.value); setTime('') }}
           disabled={noServices}
           className="input-base min-h-11"
         >
@@ -469,7 +463,7 @@ function QuickBookingBody({
                   type="button"
                   role="radio"
                   aria-checked={selected}
-                  onClick={() => { setTime(s); pendingTime.current = undefined }}
+                  onClick={() => { setTime(s); pendingTime.current = s }}
                   className="min-h-11 rounded-xl border text-sm font-semibold tabular-nums transition-colors"
                   style={selected ? {
                     borderColor: 'var(--primary-color)',

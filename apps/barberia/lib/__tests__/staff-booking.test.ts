@@ -4,6 +4,7 @@ import {
   isHHMM,
   isUuid,
   mapStaffBookingError,
+  pickSlotTime,
   sanitizeCustomerSearch,
 } from '../staff-booking'
 
@@ -58,5 +59,24 @@ describe('sanitizeCustomerSearch', () => {
     expect(sanitizeCustomerSearch('Ana,phone.eq.1)')).toBe('Ana phone.eq.1')
     expect(sanitizeCustomerSearch('  a%b_c  ')).toBe('a b c')
     expect(sanitizeCustomerSearch('x'.repeat(100))).toHaveLength(60)
+  })
+})
+
+describe('pickSlotTime', () => {
+  const slots = ['09:00', '10:00', '10:30']
+  it('preselecciona la hora preferida si está libre', () => {
+    expect(pickSlotTime(slots, '10:00', '')).toBe('10:00')
+  })
+  it('sin horarios cargados (aún sin servicio) no selecciona nada', () => {
+    expect(pickSlotTime([], '10:00', '')).toBe('')
+  })
+  it('conserva la preferida al cambiar de servicio si sigue libre', () => {
+    expect(pickSlotTime(slots, '10:00', '')).toBe('10:00')
+    expect(pickSlotTime(['10:00'], '10:00', '')).toBe('10:00')
+  })
+  it('si la preferida ya no está libre, conserva la elegida si sigue libre o limpia', () => {
+    expect(pickSlotTime(slots, '11:00', '09:00')).toBe('09:00')
+    expect(pickSlotTime(slots, '11:00', '12:00')).toBe('')
+    expect(pickSlotTime(slots, undefined, '')).toBe('')
   })
 })

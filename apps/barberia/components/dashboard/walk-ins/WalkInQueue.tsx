@@ -39,6 +39,7 @@ import type { WalkInWithRelations, WalkInSuggestion } from '@/actions/walk-ins'
 import { updateAppointmentStatus } from '@/actions/appointments'
 import { CheckoutModal } from '@/components/finance/CheckoutModal'
 import { formatApptTime } from '@/lib/agenda-time'
+import { apptStatusLabel } from '@/lib/agenda-status'
 import { estimateWaits, businessNowAsUtcMs, isReservedTurn } from '@/lib/walk-in-wait'
 import type { StaffStatusNow } from '@/lib/walk-in-wait'
 import type { Staff, Service, ServiceAudience } from '@xinuco/types'
@@ -721,7 +722,8 @@ function WalkInCard({
         {hasAppointment && readyToPay && (
           <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-400/10 border-emerald-400/25">
             <Banknote size={9} />
-            Listo para cobrar
+            {/* Solo el administrador cobra: el profesional ve el mismo texto que en la Agenda */}
+            {actor.isAdmin ? 'Listo para cobrar' : apptStatusLabel('ready_to_pay', false)}
           </span>
         )}
       </div>
@@ -804,7 +806,7 @@ function WalkInCard({
                 Terminar
               </button>
             )}
-            {hasAppointment && readyToPay && (
+            {hasAppointment && readyToPay && actor.isAdmin && (
               <button
                 onClick={() => onCharge(entry)}
                 className="flex min-h-11 sm:min-h-0 items-center gap-1.5 text-sm sm:text-xs font-semibold px-4 sm:px-2.5 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 transition-all"

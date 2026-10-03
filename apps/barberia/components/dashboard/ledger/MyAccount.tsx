@@ -4,18 +4,27 @@
 // su saldo, su último pago, sus movimientos agrupados por día y sus solicitudes de pago o anticipo.
 // No registra movimientos: solo puede PEDIR (el administrador paga desde "Pagos al equipo").
 
+import { useEffect, useState } from 'react'
 import { UserX } from 'lucide-react'
 import { AdminPageHeader } from '@xinuco/ui'
 import type { StaffAccount } from '@/actions/ledger'
 import type { PayoutRequestView } from '@/lib/payout-requests'
 import { AccountHistory, BalanceSummary, useAccountUrl, type AccountViewFilters } from './AccountParts'
-import { LastPayoutLine, PayoutRequestsPanel, PeriodSummary, RequestPayoutButton } from './MyAccountExtras'
+import {
+  LastPayoutLine,
+  PayoutRequestsHistory,
+  PeriodSummary,
+  PendingRequestCard,
+  RequestPayoutButton,
+} from './MyAccountExtras'
+
+const NO_REQUESTS: PayoutRequestView[] = []
 
 export function MyAccount({
   account,
   filters,
   today,
-  requests = [],
+  requests = NO_REQUESTS,
 }: {
   account: StaffAccount
   filters: AccountViewFilters
@@ -24,7 +33,21 @@ export function MyAccount({
   requests?: PayoutRequestView[]
 }) {
   const { setParams, pending } = useAccountUrl()
-  const hasPendingRequest = requests.some(r => r.status === 'pending')
+  // Copia local de las solicitudes: lo que el profesional envía/cancela se ve al instante y el
+  // refresco del servidor (router.refresh) la reemplaza cuando llegan los datos reales.
+  const [localRequests, setLocalRequests] = useState(requests)
+  useEffect(() => { setLocalRequests(requests) }, [requests])
+
+  const pendingRequest = localRequests.find(r => r.status === 'pending') ?? null
+  const hasPendingRequest = pendingRequest !== null
+
+  function handleRequested(request: PayoutRequestView) {
+    setLocalRequests(prev => [request, ...prev.filter(r => r.status !== 'pending')])
+  }
+
+  function handleCancelled(id: string) {
+    setLocalRequests(prev => prev.map(r => (r.id === id ? { ...r, status: 'cancelled' } : r)))
+  }
 
   function changeFilters(next: Partial<AccountViewFilters>) {
     const merged = { ...filters, ...next }
@@ -41,12 +64,19 @@ export function MyAccount({
       <AdminPageHeader
         title="Mi cuenta"
         subtitle="Tus comisiones, propinas y pagos."
-        actionButton={<RequestPayoutButton balance={account.balance} hasPending={hasPendingRequest} />}
+        actionButton={
+          <RequestPayoutButton
+            balance={account.balance}
+            hasPending={hasPendingRequest}
+            onRequested={handleRequested}
+          />
+        }
       />
+      <PendingRequestCard request={pendingRequest} onCancelled={handleCancelled} />
       <PeriodSummary earnings={account.periodEarnings} />
       <BalanceSummary account={account} />
       <LastPayoutLine lastPayout={account.lastPayout} />
-      <PayoutRequestsPanel requests={requests} />
+      <PayoutRequestsHistory requests={localRequests} />
       <AccountHistory
         account={account}
         filters={filters}

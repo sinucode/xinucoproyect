@@ -40,6 +40,30 @@ export interface PayoutRequestView {
   paid_amount:     number | null
 }
 
+/**
+ * Solicitud pendiente armada en el cliente justo después de enviarla, para mostrarla de inmediato
+ * mientras el servidor refresca. Cuando llegan los datos reales (router.refresh) la reemplazan.
+ */
+export function buildOptimisticRequest(
+  input: { id?: string; kind: PayoutRequestKind; amount: number; note: string },
+  now: Date = new Date(),
+): PayoutRequestView {
+  const note = input.note.trim()
+  return {
+    id:              input.id ?? `optimistic-${now.getTime()}`,
+    staff_id:        '',
+    staff_name:      '',
+    kind:            input.kind,
+    amount:          input.amount,
+    note:            note || null,
+    status:          'pending',
+    created_at:      now.toISOString(),
+    resolved_at:     null,
+    resolution_note: null,
+    paid_amount:     null,
+  }
+}
+
 export function isPayoutKind(value: unknown): value is PayoutRequestKind {
   return value === 'payout' || value === 'advance'
 }

@@ -15,6 +15,7 @@ import {
   PAYOUT_KIND_LABELS,
   PAYOUT_MAX_AMOUNT,
   PAYOUT_STATUS_LABELS,
+  buildOptimisticRequest,
   paidDifferenceLabel,
   type PayoutRequestKind,
   type PayoutRequestStatus,
@@ -91,15 +92,20 @@ function requestTitle(r: PayoutRequestView): string {
   return `${PAYOUT_KIND_LABELS[r.kind]} · ${formatCOP(r.amount)}`
 }
 
-// ── Solicitudes: pendiente + historial ────────────────────────────────────────
+// ── Solicitudes: pendiente (arriba) + historial (abajo) ───────────────────────
 
-export function PayoutRequestsPanel({ requests }: { requests: PayoutRequestView[] }) {
+/** Tarjeta de la solicitud pendiente del profesional, con su botón "Cancelar solicitud". */
+export function PendingRequestCard({
+  request,
+  onCancelled,
+}: {
+  request: PayoutRequestView | null
+  /** Se llama tras cancelar con éxito, para reflejarlo de inmediato sin esperar al refresco del servidor. */
+  onCancelled?: (id: string) => void
+}) {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
-
-  const pending = requests.find(r => r.status === 'pending') ?? null
-  const history = requests.filter(r => r.status !== 'pending')
 
   function cancel(id: string) {
     setError(null)
@@ -107,6 +113,7 @@ export function PayoutRequestsPanel({ requests }: { requests: PayoutRequestView[
       try {
         const res = await cancelPayoutRequest(id)
         if (res.error) setError(res.error)
+        else onCancelled?.(id)
         router.refresh()
       } catch {
         setError('Error inesperado. Intenta de nuevo.')
@@ -114,13 +121,13 @@ export function PayoutRequestsPanel({ requests }: { requests: PayoutRequestView[
     })
   }
 
-  if (!pending && history.length === 0) return null
+  if (!request && !error) return null
 
   return (
-    <section aria-label="Solicitudes de pago" className="flex flex-col gap-3">
-      {pending && (
+    <section aria-label="Tu solicitud de pago" className="flex flex-col gap-3">
+      {request && (
         <div
-          className="rounded-2xl p-4 flex flex-col gap-3 border"
+          className="rounded-2xl p-4 flex flex-col gap-3 border animate-fade-in"
           style={{
             borderColor: 'color-mix(in srgb, var(--primary-color) 35%, transparent)',
             background: 'color-mix(in srgb, var(--primary-color) 6%, transparent)',
@@ -131,17 +138,17 @@ export function PayoutRequestsPanel({ requests }: { requests: PayoutRequestView[
               <span className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
                 Tu solicitud
               </span>
-              <span className="text-base font-bold text-xinuco-text">{requestTitle(pending)}</span>
-              {pending.note && <span className="text-xs text-xinuco-muted break-words">“{pending.note}”</span>}
+              <span className="text-base font-bold text-xinuco-text">{requestTitle(request)}</span>
+              {request.note && <span className="text-xs text-xinuco-muted break-words">“{request.note}”</span>}
               <span className="text-[11px] text-xinuco-muted">
-                Pedida el {formatLedgerDateTime(pending.created_at)}. El administrador la revisará.
+                Pedida el {formatLedgerDateTime(request.created_at)} · El administrador la revisará
               </span>
             </div>
             <StatusChip status="pending" />
           </div>
           <button
             type="button"
-            onClick={() => cancel(pending.id)}
+            onClick={() => cancel(request.id)}
             disabled={isPending}
             className="btn-ghost !py-2.5 text-xs min-h-11 self-start"
           >
@@ -156,33 +163,39 @@ export function PayoutRequestsPanel({ requests }: { requests: PayoutRequestView[
           {error}
         </p>
       )}
+    </section>
+  )
+}
 
-      {history.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <h2 className="text-sm font-bold text-xinuco-text uppercase tracking-wider">Tus solicitudes</h2>
-          <ul className="rounded-xl overflow-hidden" style={CARD_STYLE}>
-            {history.map((r, i) => (
-              <li
-                key={r.id}
-                className="flex items-start justify-between gap-3 px-4 py-3"
-                style={i === 0 ? undefined : { borderTop: '1px solid var(--border-color)' }}
-              >
-                <div className="min-w-0 flex flex-col gap-0.5">
-                  <span className="text-sm text-xinuco-text font-medium">{requestTitle(r)}</span>
-                  <span className="text-[11px] text-xinuco-muted">{formatLedgerDateTime(r.created_at)}</span>
-                  {paidDifferenceLabel(r) && (
-                    <span className="text-xs text-xinuco-muted">{paidDifferenceLabel(r)}</span>
-                  )}
-                  {r.status === 'rejected' && r.resolution_note && (
-                    <span className="text-xs text-red-400 break-words">Motivo: {r.resolution_note}</span>
-                  )}
-                </div>
-                <StatusChip status={r.status} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+/** Historial de solicitudes ya resueltas (pagadas, rechazadas o canceladas). */
+export function PayoutRequestsHistory({ requests }: { requests: PayoutRequestView[] }) {
+  const history = requests.filter(r => r.status !== 'pending')
+  if (history.length === 0) return null
+
+  return (
+    <section aria-label="Historial de solicitudes" className="flex flex-col gap-2">
+      <h2 className="text-sm font-bold text-xinuco-text uppercase tracking-wider">Tus solicitudes</h2>
+      <ul className="rounded-xl overflow-hidden" style={CARD_STYLE}>
+        {history.map((r, i) => (
+          <li
+            key={r.id}
+            className="flex items-start justify-between gap-3 px-4 py-3"
+            style={i === 0 ? undefined : { borderTop: '1px solid var(--border-color)' }}
+          >
+            <div className="min-w-0 flex flex-col gap-0.5">
+              <span className="text-sm text-xinuco-text font-medium">{requestTitle(r)}</span>
+              <span className="text-[11px] text-xinuco-muted">{formatLedgerDateTime(r.created_at)}</span>
+              {paidDifferenceLabel(r) && (
+                <span className="text-xs text-xinuco-muted">{paidDifferenceLabel(r)}</span>
+              )}
+              {r.status === 'rejected' && r.resolution_note && (
+                <span className="text-xs text-red-400 break-words">Motivo: {r.resolution_note}</span>
+              )}
+            </div>
+            <StatusChip status={r.status} />
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }
@@ -197,7 +210,16 @@ function formatThousands(digits: string): string {
   return digits ? Number(digits).toLocaleString('es-CO') : ''
 }
 
-export function RequestPayoutButton({ balance, hasPending }: { balance: number; hasPending: boolean }) {
+export function RequestPayoutButton({
+  balance,
+  hasPending,
+  onRequested,
+}: {
+  balance: number
+  hasPending: boolean
+  /** Se llama tras enviar con éxito, con la solicitud recién creada (para mostrarla ya, sin recargar). */
+  onRequested?: (request: PayoutRequestView) => void
+}) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -221,7 +243,7 @@ export function RequestPayoutButton({ balance, hasPending }: { balance: number; 
         <RequestForm
           balance={balance}
           onClose={() => setOpen(false)}
-          onSent={() => setOpen(false)}
+          onSent={request => { onRequested?.(request); setOpen(false) }}
         />
       </ResponsiveSheet>
     </>
@@ -235,7 +257,7 @@ function RequestForm({
 }: {
   balance: number
   onClose: () => void
-  onSent: () => void
+  onSent: (request: PayoutRequestView) => void
 }) {
   const router = useRouter()
   const canAskPayout = balance > 0
@@ -271,8 +293,8 @@ function RequestForm({
           setError(res.error)
           return
         }
+        onSent(buildOptimisticRequest({ id: res.id, kind, amount, note }))
         router.refresh()
-        onSent()
       } catch {
         setError('Error inesperado. Intenta de nuevo.')
       }

@@ -60,3 +60,12 @@ export function filterFutureSlots(slots: string[], dateKey: string, todayKey: st
 export function sanitizeCustomerSearch(q: string): string {
   return (q ?? '').replace(/[,()%*_\\"']/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)
 }
+
+/**
+ * Hora a dejar seleccionada cuando cargan los horarios libres: la preferida (la de la franja desde
+ * la que se abrió la hoja) si sigue libre; si no, la ya elegida si sigue libre; si no, ninguna.
+ */
+export function pickSlotTime(slots: string[], preferred: string | undefined, current: string): string {
+  if (preferred && slots.includes(preferred)) return preferred
+  return slots.includes(current) ? current : ''
+}
