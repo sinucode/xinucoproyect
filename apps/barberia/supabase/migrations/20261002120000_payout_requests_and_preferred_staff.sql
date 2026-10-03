@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS public.payout_requests (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id     UUID        NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
   -- RESTRICT: un profesional con solicitudes no se borra (trazabilidad financiera; se desactiva)
-  staff_id        UUID        NOT NULL REFERENCES public.staff(id)      ON DELETE RESTRICT,
+  staff_id        UUID        NOT NULL REFERENCES public.staff(id)      ON DELETE NO ACTION,
   kind            TEXT        NOT NULL CHECK (kind IN ('payout', 'advance')),
   -- NUMERIC: en producción hay columnas de dinero INTEGER; aquí no se asume nada
   amount          NUMERIC     NOT NULL CHECK (amount > 0 AND amount <= 50000000),
