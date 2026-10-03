@@ -24,6 +24,23 @@ import {
   type TeamReceiptResult,
 } from '@/lib/team-payments'
 import { maskEmail } from '@/lib/team-utils'
+import {
+  dayTotals,
+  lastPayout,
+  periodEarnings,
+  type LastPayout,
+  type PeriodEarnings,
+} from '@/lib/my-account'
+import {
+  isPayoutStatus,
+  mapPayoutRpcError,
+  validatePayoutRequestInput,
+  validateRejectReason,
+  type PayoutRequestInput,
+  type PayoutRequestKind,
+  type PayoutRequestStatus,
+  type PayoutRequestView,
+} from '@/lib/payout-requests'
 import { loadStaffContacts } from '@/lib/staff-contacts'
 import { paymentMethodForAccount } from '@/lib/money-accounts'
 import { resolveAccount } from '@/lib/account-resolve'
@@ -96,6 +113,12 @@ export interface StaffAccount {
   page:       number
   /** Período sugerido al liquidar (día siguiente al último pago → hoy). */
   suggestedPeriod: { from: string; to: string }
+  /** Lo ganado hoy / esta semana / este mes (comisiones + propinas, días locales de Colombia). */
+  periodEarnings: PeriodEarnings
+  /** Último pago registrado (null = nunca se le ha pagado). */
+  lastPayout: LastPayout | null
+  /** Total neto con signo de cada día local del historial (con los filtros), completo aunque falte "Ver más". */
+  dayTotals: Record<string, number>
 }
 
 export interface TeamMovementInput {
@@ -119,6 +142,12 @@ export interface TeamMovementInput {
   allowOverpay?: boolean
   /** Anticipo/pago: enviar el recibo por correo al profesional (por defecto true). */
   sendReceipt?: boolean
+  /**
+   * Solicitud de pago/anticipo que este movimiento atiende (solo anticipo/pago). Se verifica ANTES de
+   * mover plata que siga pendiente y sea de ese profesional; al registrarse el movimiento se marca
+   * como pagada. La solicitud en sí nunca mueve plata.
+   */
+  payoutRequestId?: string
 }
 
 export interface TeamMovementResult {
@@ -129,6 +158,10 @@ export interface TeamMovementResult {
   overpay?: { balance: number }
   /** Anticipo/pago con sendReceipt: resultado del envío del recibo (nunca falla el movimiento). */
   receipt?: TeamReceiptResult
+  /** Con payoutRequestId: la solicitud quedó marcada como pagada. */
+  requestResolved?: boolean
+  /** Con payoutRequestId: el movimiento SÍ quedó registrado pero no se pudo cerrar la solicitud. */
+  requestWarning?: string
 }
 
 // ── Constantes ────────────────────────────────────────────────────────────────
@@ -138,6 +171,8 @@ const NOT_ALLOWED    = 'No tienes permiso para ver esta cuenta.'
 const STAFF_NOT_FOUND = 'Profesional no encontrado.'
 const NO_OPEN_SHIFT  = 'No hay caja abierta. Abre la caja o elige otro medio de pago.'
 const MAX_AMOUNT     = 50_000_000
+const REQUEST_NOT_FOUND   = 'No encontramos la solicitud.'
+const REQUEST_NOT_PENDING = 'La solicitud ya no está pendiente (la cancelaron o ya se atendió). No se registró ningún movimiento.'
 const MIN_NOTES      = 3
 const MAX_NOTES      = 200
 const PAGE_SIZE      = 50
@@ -423,6 +458,8 @@ async function loadAccount(
   })
   const total = count ?? entries.length
 
+  const today = businessTodayISODate()
+
   return {
     staff,
     balance: settlement.balance,
@@ -431,7 +468,10 @@ async function loadAccount(
     total,
     hasMore: total > f.page * PAGE_SIZE,
     page: f.page,
-    suggestedPeriod: suggestPeriod(settlement.since, all.entries[0]?.created_at ?? null, businessTodayISODate()),
+    suggestedPeriod: suggestPeriod(settlement.since, all.entries[0]?.created_at ?? null, today),
+    periodEarnings: periodEarnings(all.entries, today),
+    lastPayout: lastPayout(all.entries),
+    dayTotals: dayTotals(all.entries, { type: f.type, from: f.from, to: f.to }),
   }
 }
 
@@ -558,6 +598,28 @@ export async function recordTeamMovement(input: TeamMovementInput): Promise<Team
     .maybeSingle()
   if (!staffRow) return { error: STAFF_NOT_FOUND }
 
+  // ── Solicitud que este movimiento atiende: debe seguir pendiente ANTES de mover plata ──
+  let requestId: string | null = null
+  if (input.payoutRequestId !== undefined && input.payoutRequestId !== null) {
+    if (type !== 'advance' && type !== 'payment') {
+      return { error: 'Solo un anticipo o un pago puede atender una solicitud.' }
+    }
+    if (typeof input.payoutRequestId !== 'string' || !input.payoutRequestId) return { error: REQUEST_NOT_FOUND }
+    const { data: reqRow, error: reqError } = await supabase
+      .from('payout_requests')
+      .select('id, staff_id, kind, status')
+      .eq('id', input.payoutRequestId)
+      .eq('business_id', businessId)
+      .maybeSingle()
+    const req = reqRow as { id: string; staff_id: string; kind: PayoutRequestKind; status: PayoutRequestStatus } | null
+    if (reqError || !req) return { error: REQUEST_NOT_FOUND }
+    if (req.status !== 'pending') return { error: REQUEST_NOT_PENDING }
+    if (req.staff_id !== input.staffId || (req.kind === 'payout') !== (type === 'payment')) {
+      return { error: 'La solicitud no corresponde a este profesional o a este tipo de movimiento.' }
+    }
+    requestId = req.id
+  }
+
   // ── Efectivo de la caja: exige turno abierto ────────────────────────────────
   let shiftId: string | null = null
   if (method === 'cash_register') {
@@ -618,6 +680,24 @@ export async function recordTeamMovement(input: TeamMovementInput): Promise<Team
 
   const entry = created as StaffLedgerEntry
 
+  // Solicitud atendida: se marca pagada y se enlaza con el movimiento. La plata ya se movió arriba;
+  // si esto falla el movimiento NO se deshace, solo se avisa (la solicitud se cierra a mano).
+  const closing: Pick<TeamMovementResult, 'requestResolved' | 'requestWarning'> = {}
+  if (requestId) {
+    const { error: resolveError } = await supabase.rpc('resolve_payout_request', {
+      p_id:              requestId,
+      p_status:          'paid',
+      p_note:            null,
+      p_ledger_entry_id: entry.id,
+    })
+    if (resolveError) {
+      closing.requestWarning =
+        'El movimiento se registró, pero no se pudo marcar la solicitud como pagada. Ciérrala manualmente.'
+    } else {
+      closing.requestResolved = true
+    }
+  }
+
   // Recibo por correo al profesional (anticipos y pagos): un fallo nunca falla el movimiento
   if ((type === 'advance' || type === 'payment') && input.sendReceipt !== false) {
     let receipt: TeamReceiptResult
@@ -626,8 +706,195 @@ export async function recordTeamMovement(input: TeamMovementInput): Promise<Team
     } catch {
       receipt = { sent: false, reason: 'error' }
     }
-    return { success: true, entry, receipt }
+    return { success: true, entry, receipt, ...closing }
   }
 
-  return { success: true, entry }
+  return { success: true, entry, ...closing }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Solicitudes de pago / anticipo
+//
+// El profesional pide (request_payout) y puede cancelar (cancel_payout_request) lo suyo; el admin
+// las ve y las rechaza aquí (resolve_payout_request). Una solicitud NUNCA mueve plata: para pagarla
+// el admin usa recordTeamMovement (con payoutRequestId), que la marca pagada al registrar el movimiento.
+// Todo se escribe por funciones DEFINER de la base; el negocio sale del token, nunca del cliente.
+// ════════════════════════════════════════════════════════════════════════════
+
+const REQUEST_COLS =
+  'id, staff_id, kind, amount, note, status, created_at, resolved_at, resolution_note, staff:staff_id(full_name)'
+
+type RequestRow = {
+  id: string; staff_id: string; kind: PayoutRequestKind; amount: number | string; note: string | null
+  status: PayoutRequestStatus; created_at: string; resolved_at: string | null; resolution_note: string | null
+  staff?: { full_name: string | null } | { full_name: string | null }[] | null
+}
+
+function toRequestView(row: RequestRow): PayoutRequestView {
+  const staff = Array.isArray(row.staff) ? row.staff[0] : row.staff
+  return {
+    id:              row.id,
+    staff_id:        row.staff_id,
+    staff_name:      staff?.full_name ?? 'Profesional',
+    kind:            row.kind,
+    amount:          Number(row.amount),
+    note:            row.note ?? null,
+    status:          isPayoutStatus(row.status) ? row.status : 'pending',
+    created_at:      row.created_at,
+    resolved_at:     row.resolved_at ?? null,
+    resolution_note: row.resolution_note ?? null,
+  }
+}
+
+/** Mensaje legible a partir del error de una función RPC (el mensaje de la excepción es el código). */
+function rpcErrorMessage(error: { message?: string; details?: string | null }): string {
+  return mapPayoutRpcError(error.message, error.details)
+}
+
+/** Solicitudes del profesional que inició sesión: la pendiente (si hay) primero y las últimas 10. */
+export async function getMyPayoutRequests(): Promise<{ requests: PayoutRequestView[] } | { error: string }> {
+  const ctx = await getContext()
+  if ('error' in ctx) return ctx
+  const { supabase, userId, businessId } = ctx
+
+  const { data: staffRow } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('business_id', businessId)
+    .eq('user_id', userId)
+    .order('is_active', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const staffId = (staffRow as { id?: string } | null)?.id
+  if (!staffId) return { error: NOT_ALLOWED }
+
+  const { data, error } = await supabase
+    .from('payout_requests')
+    .select(REQUEST_COLS)
+    .eq('business_id', businessId)
+    .eq('staff_id', staffId)
+    .order('created_at', { ascending: false })
+    .limit(10)
+  if (error) return { error: error.message }
+
+  const requests = ((data ?? []) as unknown as RequestRow[]).map(toRequestView)
+  // La pendiente siempre arriba
+  requests.sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending'))
+  return { requests }
+}
+
+/** El profesional pide un pago de lo que se le debe o un anticipo. */
+export async function requestPayout(
+  input: PayoutRequestInput,
+): Promise<{ success?: boolean; error?: string; id?: string }> {
+  const ctx = await getContext()
+  if ('error' in ctx) return ctx
+  const { supabase } = ctx
+
+  const valid = validatePayoutRequestInput(input)
+  if ('error' in valid) return { error: valid.error }
+
+  const { data, error } = await supabase.rpc('request_payout', {
+    p_kind:   valid.value.kind,
+    p_amount: valid.value.amount,
+    p_note:   valid.value.note,
+  })
+  if (error) return { error: rpcErrorMessage(error) }
+
+  revalidatePath('/[slug]/dashboard/ledger', 'page')
+  revalidatePath('/[slug]/dashboard', 'layout')
+  return { success: true, id: typeof data === 'string' ? data : undefined }
+}
+
+/** El profesional cancela SU solicitud pendiente. */
+export async function cancelPayoutRequest(requestId: string): Promise<{ success?: boolean; error?: string }> {
+  const ctx = await getContext()
+  if ('error' in ctx) return ctx
+  const { supabase } = ctx
+
+  if (!requestId || typeof requestId !== 'string') return { error: REQUEST_NOT_FOUND }
+
+  const { error } = await supabase.rpc('cancel_payout_request', { p_id: requestId })
+  if (error) return { error: rpcErrorMessage(error) }
+
+  revalidatePath('/[slug]/dashboard/ledger', 'page')
+  revalidatePath('/[slug]/dashboard', 'layout')
+  return { success: true }
+}
+
+/** Admin: solicitudes pendientes del negocio (la más antigua primero). */
+export async function listPendingPayoutRequests(): Promise<{ requests: PayoutRequestView[] } | { error: string }> {
+  const auth = await requireAdmin()
+  if ('error' in auth) return auth
+  const { supabase, businessId } = auth
+
+  const { data, error } = await supabase
+    .from('payout_requests')
+    .select(REQUEST_COLS)
+    .eq('business_id', businessId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true })
+    .limit(100)
+  if (error) return { error: error.message }
+
+  return { requests: ((data ?? []) as unknown as RequestRow[]).map(toRequestView) }
+}
+
+/**
+ * Admin: cantidad de solicitudes pendientes (aviso del Inicio). Cualquier falla —sin sesión, sin rol
+ * admin, o la tabla aún no creada— devuelve 0: el aviso simplemente no se muestra.
+ */
+export async function getPendingPayoutRequestsCount(): Promise<number> {
+  try {
+    const auth = await requireAdmin()
+    if ('error' in auth) return 0
+    const { supabase, businessId } = auth
+
+    const { count, error } = await supabase
+      .from('payout_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('business_id', businessId)
+      .eq('status', 'pending')
+    if (error) return 0
+    return count ?? 0
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Admin: rechaza una solicitud (motivo obligatorio) o la marca pagada enlazando el movimiento ya
+ * registrado. El pago normal NO pasa por aquí: lo cierra recordTeamMovement con payoutRequestId.
+ */
+export async function resolvePayoutRequest(
+  requestId: string,
+  status: 'paid' | 'rejected',
+  note?: string | null,
+  ledgerEntryId?: string | null,
+): Promise<{ success?: boolean; error?: string }> {
+  const auth = await requireAdmin()
+  if ('error' in auth) return auth
+  const { supabase } = auth
+
+  if (!requestId || typeof requestId !== 'string') return { error: REQUEST_NOT_FOUND }
+  if (status !== 'paid' && status !== 'rejected') return { error: 'Estado no válido.' }
+
+  let cleanNote: string | null = null
+  if (status === 'rejected') {
+    const reason = validateRejectReason(note)
+    if ('error' in reason) return { error: reason.error }
+    cleanNote = reason.value
+  }
+
+  const { error } = await supabase.rpc('resolve_payout_request', {
+    p_id:              requestId,
+    p_status:          status,
+    p_note:            cleanNote,
+    p_ledger_entry_id: status === 'paid' ? (ledgerEntryId ?? null) : null,
+  })
+  if (error) return { error: rpcErrorMessage(error) }
+
+  revalidatePath('/[slug]/dashboard/ledger', 'page')
+  revalidatePath('/[slug]/dashboard', 'layout')
+  return { success: true }
 }

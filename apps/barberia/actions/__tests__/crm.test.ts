@@ -5,6 +5,7 @@ import {
   updateCustomer,
   addCustomerNote,
   updateCustomerTags,
+  updateCustomerPreferences,
 } from '../crm'
 import { createClient } from '@xinuco/supabase/server'
 import { revalidatePath } from 'next/cache'
@@ -378,6 +379,37 @@ describe('CRM Server Actions', () => {
       const result = await updateCustomerTags('other', ['VIP'])
       expect(result.error).toBe('Cliente no encontrado.')
       expect(calls.customer_tags).toBeUndefined()
+    })
+  })
+  // ── updateCustomerPreferences (barbero preferido: solo admin) ────────────────
+
+  describe('updateCustomerPreferences', () => {
+    function loginAs(role: string) {
+      tables.profiles = []
+      queue('profiles', { data: { business_id: 'b1', full_name: 'Alguien', role }, error: null })
+    }
+
+    it.each(['barber', 'manicurist'])('el rol %s no puede cambiarlo (no toca la base)', async (role) => {
+      loginAs(role)
+      const result = await updateCustomerPreferences('c1', { preferred_staff_id: 's1' })
+      expect(result.error).toBe('Solo un administrador puede cambiar el barbero preferido.')
+      expect(calls.customers).toBeUndefined()
+    })
+
+    it('el admin lo cambia, validando que el barbero sea del negocio', async () => {
+      loginAs('admin')
+      queue('customers', { data: { id: 'c1' }, error: null }, { error: null })
+      queue('staff', { data: { id: 's1' }, error: null })
+      const result = await updateCustomerPreferences('c1', { preferred_staff_id: 's1' })
+      expect(result.success).toBe(true)
+      expect(calls.customers[1].update).toHaveBeenCalledWith({ preferred_staff_id: 's1' })
+    })
+
+    it('si la base lo rechaza (trigger admin_required) devuelve el mensaje en español', async () => {
+      loginAs('super_admin')
+      queue('customers', { data: { id: 'c1' }, error: null }, { error: { message: 'admin_required' } })
+      const result = await updateCustomerPreferences('c1', { preferred_staff_id: null })
+      expect(result.error).toBe('Solo un administrador puede cambiar el barbero preferido.')
     })
   })
 })

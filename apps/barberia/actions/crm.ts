@@ -123,6 +123,8 @@ interface TenantContext {
   userId:     string
   businessId: string
   fullName:   string | null
+  /** Rol del perfil ('admin' | 'super_admin' | 'barber' | 'manicurist'…); null si no se pudo leer. */
+  role:       string | null
 }
 
 /** businessId SIEMPRE desde el perfil de la sesión (nunca del cliente). */
@@ -132,13 +134,13 @@ async function getTenantContext(supabase: SupabaseClient): Promise<TenantContext
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('business_id, full_name')
+    .select('business_id, full_name, role')
     .eq('id', user.id)
     .single()
 
-  const p = profile as { business_id?: string | null; full_name?: string | null } | null
+  const p = profile as { business_id?: string | null; full_name?: string | null; role?: string | null } | null
   if (!p?.business_id) return null
-  return { userId: user.id, businessId: p.business_id, fullName: p.full_name ?? null }
+  return { userId: user.id, businessId: p.business_id, fullName: p.full_name ?? null, role: p.role ?? null }
 }
 
 async function customerBelongsToBusiness(
@@ -158,6 +160,7 @@ async function customerBelongsToBusiness(
 const DUPLICATE_PHONE_ERROR = 'Ya existe un cliente con ese teléfono.'
 const NOT_AUTHENTICATED     = 'No autenticado.'
 const CUSTOMER_NOT_FOUND    = 'Cliente no encontrado.'
+const ADMIN_ONLY_PREFERRED  = 'Solo un administrador puede cambiar el barbero preferido.'
 
 const num = (v: unknown): number => {
   const n = Number(v)
@@ -621,7 +624,8 @@ export async function updateCustomerTags(
 
 // ════════════════════════════════════════════════════════════════════════════
 // updateCustomerPreferences
-// Barbero preferido (debe ser del mismo negocio).
+// Barbero preferido (debe ser del mismo negocio). SOLO el administrador lo cambia: se exige aquí
+// y también en la base (trigger trg_customers_preferred_staff_guard).
 // ════════════════════════════════════════════════════════════════════════════
 
 export async function updateCustomerPreferences(
@@ -632,6 +636,7 @@ export async function updateCustomerPreferences(
   const ctx = await getTenantContext(supabase)
   if (!ctx) return { error: NOT_AUTHENTICATED }
   const { businessId } = ctx
+  if (ctx.role !== 'admin' && ctx.role !== 'super_admin') return { error: ADMIN_ONLY_PREFERRED }
 
   if (!(await customerBelongsToBusiness(supabase, businessId, customerId))) {
     return { error: CUSTOMER_NOT_FOUND }
@@ -654,7 +659,9 @@ export async function updateCustomerPreferences(
     .eq('id', customerId)
     .eq('business_id', businessId)
 
-  if (error) return { error: error.message }
+  if (error) {
+    return { error: error.message === 'admin_required' ? ADMIN_ONLY_PREFERRED : error.message }
+  }
 
   revalidatePath('/[slug]/dashboard/crm', 'page')
   return { success: true }

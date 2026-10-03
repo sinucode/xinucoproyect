@@ -1,7 +1,13 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@xinuco/supabase/server'
-import { getMyAccount, getStaffAccount, getTeamPaymentsOverview } from '@/actions/ledger'
+import {
+  getMyAccount,
+  getMyPayoutRequests,
+  getStaffAccount,
+  getTeamPaymentsOverview,
+  listPendingPayoutRequests,
+} from '@/actions/ledger'
 import { MyAccount, NotLinkedCard } from '@/components/dashboard/ledger/MyAccount'
 import { TeamPayments } from '@/components/dashboard/ledger/TeamPayments'
 import type { AccountViewFilters } from '@/components/dashboard/ledger/AccountParts'
@@ -9,9 +15,35 @@ import { businessTodayISODate } from '@/lib/agenda-time'
 import { isLedgerEntryType, isRealDateKey } from '@/lib/team-payments'
 import type { BusinessFeatures, Profile } from '@xinuco/types'
 
-export const metadata: Metadata = {
-  title: 'Pagos al equipo — Xinuco',
-  description: 'Comisiones, propinas, anticipos y pagos de cada profesional',
+/**
+ * La pestaña del navegador depende del rol: el profesional ve "Mi cuenta" y el administrador
+ * "Pagos al equipo" (es la misma ruta, con dos pantallas).
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  let isAdmin = true
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single<Pick<Profile, 'role'>>()
+      if (profile?.role) isAdmin = profile.role === 'admin' || profile.role === 'super_admin'
+    }
+  } catch {
+    // Sin sesión legible: el título genérico de administración
+  }
+  return isAdmin
+    ? {
+        title: 'Pagos al equipo — Xinuco',
+        description: 'Comisiones, propinas, anticipos y pagos de cada profesional',
+      }
+    : {
+        title: 'Mi cuenta — Xinuco',
+        description: 'Tus comisiones, propinas y pagos',
+      }
 }
 
 type SearchParams = Record<string, string | string[] | undefined>
@@ -78,7 +110,7 @@ export default async function LedgerPage({
 
   // ── Profesional (barbero / manicurista): solo su propia cuenta, en solo lectura ──
   if (!isAdmin) {
-    const mine = await getMyAccount(accountFilters)
+    const [mine, myRequests] = await Promise.all([getMyAccount(accountFilters), getMyPayoutRequests()])
     return (
       <div className={wrapper}>
         {'error' in mine ? (
@@ -88,7 +120,12 @@ export default async function LedgerPage({
         ) : 'notLinked' in mine ? (
           <NotLinkedCard />
         ) : (
-          <MyAccount account={mine} filters={filters} />
+          <MyAccount
+            account={mine}
+            filters={filters}
+            today={businessTodayISODate()}
+            requests={'requests' in myRequests ? myRequests.requests : []}
+          />
         )}
       </div>
     )
@@ -97,6 +134,10 @@ export default async function LedgerPage({
   // ── Administrador: resumen del equipo + cuenta del profesional elegido ──
   const overview = await getTeamPaymentsOverview()
   if ('error' in overview) redirect(`/${slug}/dashboard`)
+
+  // Si la tabla aún no existe (migración pendiente) la página sigue sin solicitudes
+  const requestsRes = await listPendingPayoutRequests()
+  const payoutRequests = 'requests' in requestsRes ? requestsRes.requests : []
 
   const requested = first(sp.staff)
   const selected = overview.members.find(m => m.staff.id === requested) ?? overview.members[0] ?? null
@@ -119,6 +160,7 @@ export default async function LedgerPage({
         accountError={accountError}
         filters={filters}
         today={businessTodayISODate()}
+        payoutRequests={payoutRequests}
       />
     </div>
   )

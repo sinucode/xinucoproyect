@@ -4,10 +4,10 @@ import { useCallback, useEffect, useRef, useState, useTransition } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Loader2, Search, X } from 'lucide-react'
 import {
-  CUSTOMER_FILTERS,
   CUSTOMER_FILTER_LABELS,
   CUSTOMER_SORTS,
   CUSTOMER_SORT_LABELS,
+  customerFiltersForRole,
   parseCustomerFilter,
   parseCustomerSort,
 } from '@/lib/crm-utils'
@@ -34,9 +34,12 @@ export function CustomerFilters() {
   const [isPending, startTransition] = useTransition()
 
   const urlQuery = searchParams.get('q') ?? ''
-  const filter = parseCustomerFilter(searchParams.get('filter'))
   // "Mayor gasto" es dinero: solo el admin lo ve (el servidor además lo ignora para otros roles)
   const isAdmin = useIsAdmin()
+  // "Mis clientes" es del profesional: el administrador no lo ve
+  const filterOptions = customerFiltersForRole(isAdmin)
+  const parsedFilter = parseCustomerFilter(searchParams.get('filter'))
+  const filter = filterOptions.includes(parsedFilter) ? parsedFilter : 'all'
   const parsedSort = parseCustomerSort(searchParams.get('sort'))
   const sort = !isAdmin && parsedSort === 'spent' ? 'recent' : parsedSort
   const sortOptions = CUSTOMER_SORTS.filter((s) => isAdmin || s !== 'spent')
@@ -116,7 +119,7 @@ export function CustomerFilters() {
         onChange={(e) => update({ q: text, filter: e.target.value })}
         className={selectClass(filter !== 'all')}
       >
-        {CUSTOMER_FILTERS.map((f) => (
+        {filterOptions.map((f) => (
           <option key={f} value={f}>
             Mostrar: {CUSTOMER_FILTER_LABELS[f]}
           </option>

@@ -29,7 +29,9 @@ import {
   waLink,
   type TeamReceiptResult,
 } from '@/lib/team-payments'
+import type { PayoutRequestView } from '@/lib/payout-requests'
 import { AccountHistory, BalanceSummary, useAccountUrl, type AccountViewFilters } from './AccountParts'
+import { PayoutRequestsAdmin } from './PayoutRequestsAdmin'
 import { TeamMovementSheet, type SavedMovement, type SheetKind } from './TeamMovementSheet'
 
 interface TeamPaymentsProps {
@@ -40,6 +42,8 @@ interface TeamPaymentsProps {
   accountError: string | null
   filters:      AccountViewFilters
   today:        string
+  /** Solicitudes de pago / anticipo pendientes de los profesionales. */
+  payoutRequests?: PayoutRequestView[]
 }
 
 interface Receipt {
@@ -66,12 +70,19 @@ function money(value: number): string {
   return `${value < 0 ? '−' : ''}${formatCOP(Math.abs(value))}`
 }
 
-export function TeamPayments({ slug, overview, selectedId, account, accountError, filters, today }: TeamPaymentsProps) {
+export function TeamPayments({
+  slug, overview, selectedId, account, accountError, filters, today, payoutRequests = [],
+}: TeamPaymentsProps) {
   const router = useRouter()
   const { setParams, pending } = useAccountUrl()
   const [sheet, setSheet] = useState<SheetKind | null>(null)
   const [receipt, setReceipt] = useState<Receipt | null>(null)
   const [copied, setCopied] = useState(false)
+  /** Solicitud que atiende el panel abierto (null = movimiento normal). */
+  const [activeRequest, setActiveRequest] = useState<PayoutRequestView | null>(null)
+  /** "Pagar" sobre una solicitud de otro profesional: se abre el panel cuando cargue su cuenta. */
+  const [wantPay, setWantPay] = useState<PayoutRequestView | null>(null)
+  const [requestWarning, setRequestWarning] = useState<string | null>(null)
 
   const selected = overview.members.find(m => m.staff.id === selectedId) ?? null
   const { owed, advances_outstanding } = overview.totals
@@ -80,6 +91,33 @@ export function TeamPayments({ slug, overview, selectedId, account, accountError
   useEffect(() => {
     setReceipt(prev => (prev && prev.staffId !== selectedId ? null : prev))
   }, [selectedId])
+
+  function openForRequest(r: PayoutRequestView) {
+    setActiveRequest(r)
+    setSheet(r.kind === 'payout' ? 'settle' : 'advance')
+  }
+
+  function payRequest(r: PayoutRequestView) {
+    if (r.staff_id === selectedId && account) {
+      openForRequest(r)
+      return
+    }
+    setWantPay(r)
+    selectStaff(r.staff_id)
+  }
+
+  // Al terminar de cargar la cuenta del profesional de la solicitud, se abre el panel
+  useEffect(() => {
+    if (wantPay && selected?.staff.id === wantPay.staff_id && account) {
+      openForRequest(wantPay)
+      setWantPay(null)
+    }
+  }, [wantPay, selected, account])
+
+  function closeSheet() {
+    setSheet(null)
+    setActiveRequest(null)
+  }
 
   function selectStaff(id: string) {
     // Al cambiar de profesional se reinician filtros y paginación
@@ -97,7 +135,8 @@ export function TeamPayments({ slug, overview, selectedId, account, accountError
   }
 
   function handleSaved(saved: SavedMovement) {
-    setSheet(null)
+    closeSheet()
+    setRequestWarning(saved.requestWarning)
     if (saved.kind === 'settle' && account && selected) {
       const lines = settlementTextLines(account.settlement, saved.entry.amount)
 
@@ -156,6 +195,22 @@ export function TeamPayments({ slug, overview, selectedId, account, accountError
       <AdminPageHeader
         title="Pagos al equipo"
         subtitle="Lo que gana cada profesional, lo que se le adelantó y lo que se le pagó."
+      />
+
+      {requestWarning && (
+        <p role="alert" className="flex items-start justify-between gap-3 text-xs rounded-lg px-4 py-3 border"
+          style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)' }}>
+          <span>{requestWarning}</span>
+          <button type="button" onClick={() => setRequestWarning(null)} aria-label="Cerrar aviso" className="shrink-0">
+            <X size={14} />
+          </button>
+        </p>
+      )}
+
+      <PayoutRequestsAdmin
+        requests={payoutRequests}
+        payableStaffIds={overview.members.map(m => m.staff.id)}
+        onPay={payRequest}
       />
 
       {overview.members.length === 0 ? (
@@ -377,7 +432,12 @@ export function TeamPayments({ slug, overview, selectedId, account, accountError
           hasActiveShift={overview.activeShift !== null}
           today={today}
           suggestedPeriod={account.suggestedPeriod}
-          onClose={() => setSheet(null)}
+          initialAmount={activeRequest?.amount}
+          initialNotes={activeRequest && activeRequest.kind === 'advance'
+            ? (activeRequest.note && activeRequest.note.length >= 3 ? activeRequest.note : 'Anticipo solicitado')
+            : undefined}
+          payoutRequestId={activeRequest?.id}
+          onClose={closeSheet}
           onSaved={handleSaved}
         />
       )}

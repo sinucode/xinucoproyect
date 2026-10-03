@@ -37,7 +37,7 @@ export default async function CRMPage({
   // 2. Obtener business_id desde el perfil autenticado
   const { data: profile } = await supabase
     .from('profiles')
-    .select('business_id')
+    .select('business_id, role')
     .eq('id', user.id)
     .single()
 
@@ -55,7 +55,10 @@ export default async function CRMPage({
 
   // 4. Listado (búsqueda, filtro, orden y página desde la URL) vía RPC list_customers
   const query  = firstParam(sp.q).trim().slice(0, 100)
-  const filter = parseCustomerFilter(firstParam(sp.filter))
+  // "Mis clientes" es del profesional: para el administrador cae en "Todos"
+  const isAdmin = profile.role === 'admin' || profile.role === 'super_admin'
+  const parsedFilter = parseCustomerFilter(firstParam(sp.filter))
+  const filter = isAdmin && parsedFilter === 'mine' ? 'all' : parsedFilter
   const sort   = parseCustomerSort(firstParam(sp.sort))
   const rawPage = parseInt(firstParam(sp.page), 10)
   const page   = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 0

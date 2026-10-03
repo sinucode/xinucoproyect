@@ -13,7 +13,7 @@ const BUSINESS_TZ = 'America/Bogota'
 
 export const CUSTOMERS_PAGE_SIZE = 30
 
-export const CUSTOMER_FILTERS = ['all', 'frequent', 'inactive', 'new', 'birthday'] as const
+export const CUSTOMER_FILTERS = ['all', 'frequent', 'inactive', 'new', 'birthday', 'mine'] as const
 export type CustomerFilter = (typeof CUSTOMER_FILTERS)[number]
 
 export const CUSTOMER_SORTS = ['recent', 'spent', 'name', 'created'] as const
@@ -25,6 +25,7 @@ export const CUSTOMER_FILTER_LABELS: Record<CustomerFilter, string> = {
   inactive: 'No vienen hace +30 días',
   new:      'Nuevos este mes',
   birthday: 'Cumpleaños este mes',
+  mine:     'Mis clientes',
 }
 
 export const CUSTOMER_SORT_LABELS: Record<CustomerSort, string> = {
@@ -32,6 +33,19 @@ export const CUSTOMER_SORT_LABELS: Record<CustomerSort, string> = {
   spent:   'Mayor gasto',
   name:    'Nombre',
   created: 'Más recientes',
+}
+
+/** 'Mis clientes' solo lo ofrece la pantalla al profesional (barbero / manicurista), no al administrador. */
+export function customerFiltersForRole(isAdmin: boolean): CustomerFilter[] {
+  return CUSTOMER_FILTERS.filter((f) => !isAdmin || f !== 'mine')
+}
+
+/**
+ * Une con " · " solo los textos que existen: sin separadores colgando cuando falta el segundo valor
+ * (p. ej. 'Cliente desde sept 2025' sin antigüedad → sin " · " al final).
+ */
+export function joinParts(parts: ReadonlyArray<string | null | undefined | false>, separator = ' · '): string {
+  return parts.filter((p): p is string => typeof p === 'string' && p.trim() !== '').join(separator)
 }
 
 export function parseCustomerFilter(value: unknown): CustomerFilter {
