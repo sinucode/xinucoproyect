@@ -127,7 +127,7 @@ export default function LoginPage({ params }: LoginPageProps) {
               className="w-16 h-16 rounded-2xl flex items-center justify-center glow-primary"
               style={{ background: 'var(--primary-color)' }}
             >
-              <Scissors size={28} color="var(--bg-color)" strokeWidth={2} />
+              <Scissors size={28} color="var(--on-primary, #080808)" strokeWidth={2} />
             </div>
           )}
 
@@ -279,7 +279,7 @@ export default function LoginPage({ params }: LoginPageProps) {
 
               {/* Error */}
               {error && (
-                <p role="alert" className="text-xs text-red-400 text-center px-2 animate-fade-in">
+                <p role="alert" className="text-xs text-red-400 light:text-red-700 text-center px-2 animate-fade-in">
                   {error}
                 </p>
               )}
@@ -305,7 +305,7 @@ export default function LoginPage({ params }: LoginPageProps) {
             {/* Divisor y Google Login */}
             <div className="relative my-6">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-xinuco-border" style={{ borderColor: 'var(--surface-color, #333)' }} />
+                <div className="w-full border-t border-xinuco-border" style={{ borderColor: 'var(--border-color)' }} />
               </div>
               <div className="relative flex justify-center text-xs">
                 <span className="px-2 text-xinuco-muted" style={{ backgroundColor: 'var(--bg-color)' }}>O</span>
@@ -316,8 +316,8 @@ export default function LoginPage({ params }: LoginPageProps) {
               type="button"
               onClick={() => startGoogleTransition(async () => { await signInWithGoogle(slug) })}
               disabled={isPending || isGooglePending}
-              className="flex items-center justify-center gap-3 w-full !py-6 rounded-md border text-xinuco-text font-sans font-medium transition-colors hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ borderColor: 'var(--surface-color, #333)' }}
+              className="flex items-center justify-center gap-3 w-full !py-6 rounded-md border text-xinuco-text font-sans font-medium transition-colors hover:tint-5 disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ borderColor: 'var(--border-color)' }}
             >
               {isGooglePending ? (
                 <>

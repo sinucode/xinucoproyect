@@ -221,6 +221,8 @@ export function TenantDetailDrawer({ business, onClose }: TenantDetailDrawerProp
         bgColor:        bg,
         textColor:      text,
         fontFamily:     font,
+        // Conserva el modo claro/oscuro del portal (se edita en Configuración → Apariencia)
+        ...(initial.themeMode ? { themeMode: initial.themeMode } : {}),
       }
       const res = await updateBusinessTheme(business.id, config)
       setBrandResult(res as ActionResult)

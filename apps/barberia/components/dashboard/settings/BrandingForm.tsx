@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Loader2, Check, AlertCircle, ImageOff } from 'lucide-react'
+import { Loader2, Check, AlertCircle, ImageOff, Copy, Moon, Sun } from 'lucide-react'
 import { updateBusinessBranding } from '@/actions/businesses'
-import type { Business, BusinessBranding, BrandConfig } from '@xinuco/types'
+import type { Business, BusinessBranding, BrandConfig, ThemeMode } from '@xinuco/types'
+import { THEME_PRESETS, resolveThemeMode, onPrimaryColor } from '@/lib/brand-theme'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -118,6 +119,7 @@ function BrandPreview({
   textColor:  string
   font:       string
 }) {
+  const onPrimary = onPrimaryColor(primary)
   return (
     <div
       className="rounded-xl overflow-hidden"
@@ -130,13 +132,13 @@ function BrandPreview({
       >
         <span
           className="text-sm font-bold truncate"
-          style={{ fontFamily: font, color: '#080808' }}
+          style={{ fontFamily: font, color: onPrimary }}
         >
           {name || 'Mi Barbería'}
         </span>
         <span
           className="text-[10px] font-semibold px-2 py-0.5 rounded"
-          style={{ background: 'rgba(0,0,0,0.2)', color: '#fff' }}
+          style={{ background: 'rgba(0,0,0,0.2)', color: onPrimary }}
         >
           Reservar
         </span>
@@ -167,7 +169,7 @@ function BrandPreview({
         <button
           type="button"
           className="rounded-lg py-2 text-xs font-bold w-full"
-          style={{ background: primary, color: '#080808', fontFamily: font }}
+          style={{ background: primary, color: onPrimary, fontFamily: font }}
         >
           Agendar cita
         </button>
@@ -204,6 +206,12 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
     text_color:      stored.text_color      ?? DEFAULT_BRANDING.text_color,
   })
   const [font,   setFont]   = useState(normalizeFontKey(stored.font_family ?? DEFAULT_BRANDING.font_family))
+  const [themeMode, setThemeMode] = useState<ThemeMode>(resolveThemeMode(bc.themeMode))
+
+  // Copiar la URL de reservas
+  const urlInputRef = useRef<HTMLInputElement>(null)
+  const [copied, setCopied] = useState(false)
+  const bookingUrl = `https://www.xinuco.com/${slug}/book`
 
   const [isPending, startTransition] = useTransition()
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
@@ -214,12 +222,51 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
     setStatus('idle')
   }
 
+  // Elegir modo aplica el preset de fondo/superficie/texto (el color principal no cambia);
+  // después se pueden afinar los colores individualmente.
+  function chooseThemeMode(mode: ThemeMode) {
+    setThemeMode(mode)
+    const preset = THEME_PRESETS[mode]
+    setColors(prev => ({
+      ...prev,
+      bg_color:        preset.bgColor,
+      secondary_color: preset.secondaryColor,
+      text_color:      preset.textColor,
+    }))
+    setStatus('idle')
+  }
+
+  async function handleCopyUrl() {
+    let ok = false
+    try {
+      await navigator.clipboard.writeText(bookingUrl)
+      ok = true
+    } catch {
+      // Fallback (contexto no seguro o permiso denegado): seleccionar el campo y copiar
+      try {
+        const el = urlInputRef.current
+        if (el) {
+          el.focus()
+          el.select()
+          ok = document.execCommand('copy')
+        }
+      } catch {
+        ok = false
+      }
+    }
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
   function handleSave() {
     setStatus('idle')
 
     startTransition(async () => {
       try {
-        const brandingPayload: Partial<BusinessBranding> = {
+        const brandingPayload: Partial<BusinessBranding> & { theme_mode: ThemeMode } = {
+          theme_mode:      themeMode,
           primary_color:   colors.primary_color,
           secondary_color: colors.secondary_color,
           bg_color:        colors.bg_color,
@@ -284,21 +331,30 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
             >
               URL de reservas <span className="normal-case font-normal">(no editable)</span>
             </label>
-            <div className="relative">
+            <div className="flex items-stretch gap-2">
               <input
                 id="biz-slug"
+                ref={urlInputRef}
                 type="text"
-                value={`https://www.xinuco.com/${slug}/book`}
+                value={bookingUrl}
                 readOnly
-                className="input-base font-mono text-sm pr-24 select-all"
+                className="input-base font-mono text-sm min-w-0 flex-1 select-all"
                 style={{ color: 'var(--primary-color)', opacity: 0.8 }}
               />
-              <span
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded"
-                style={{ background: 'rgba(197,160,89,0.1)', color: 'var(--primary-color)' }}
+              <button
+                type="button"
+                onClick={handleCopyUrl}
+                aria-label={copied ? 'URL copiada' : 'Copiar URL de reservas'}
+                className="shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 min-h-11 min-w-11 text-xs font-bold transition-colors"
+                style={{
+                  background: 'color-mix(in srgb, var(--primary-color) 12%, transparent)',
+                  color:      'var(--primary-color)',
+                  border:     '1px solid color-mix(in srgb, var(--primary-color) 35%, transparent)',
+                }}
               >
-                Solo lectura
-              </span>
+                {copied ? <Check size={15} /> : <Copy size={15} />}
+                <span>{copied ? '¡Copiada!' : 'Copiar'}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -313,6 +369,40 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
           className="rounded-xl p-5 grid grid-cols-1 sm:grid-cols-2 gap-5"
           style={{ background: '#111111', border: '1px solid var(--border-color)' }}
         >
+          {/* Modo de la página de reservas — aplica un preset de fondo/superficie/texto */}
+          <div className="sm:col-span-2 flex flex-col gap-1.5">
+            <span id="theme-mode-label" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
+              Modo de la página de reservas
+            </span>
+            <div role="radiogroup" aria-labelledby="theme-mode-label" className="grid grid-cols-2 gap-2">
+              {([
+                { mode: 'dark',  label: 'Oscuro', Icon: Moon },
+                { mode: 'light', label: 'Claro',  Icon: Sun },
+              ] as const).map(({ mode, label, Icon }) => {
+                const active = themeMode === mode
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => chooseThemeMode(mode)}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl min-h-11 px-4 text-sm font-semibold transition-colors"
+                    style={active
+                      ? { background: 'var(--primary-color)', color: onPrimaryColor(colors.primary_color), border: '1px solid var(--primary-color)' }
+                      : { background: 'transparent', color: 'var(--muted-color)', border: '1px solid var(--border-color)' }}
+                  >
+                    <Icon size={15} />
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-xs text-xinuco-muted">
+              Solo cambia la página que ven tus clientes al reservar. El panel del negocio siempre es oscuro.
+              Puedes ajustar cada color después.
+            </p>
+          </div>
           <ColorField
             id="color-primary"
             label="Color principal"

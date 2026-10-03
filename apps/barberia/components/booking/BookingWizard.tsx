@@ -285,7 +285,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
           className="w-20 h-20 rounded-full flex items-center justify-center mb-6 shadow-lg"
           style={{ background: 'var(--primary-color)' }}
         >
-          <Check size={36} className="text-white" />
+          <Check size={36} style={{ color: 'var(--on-primary, #080808)' }} />
         </div>
         <h2 className="text-2xl font-bold text-xinuco-text mb-2">¡Cita Confirmada!</h2>
         <p className="text-sm text-xinuco-muted leading-relaxed">
@@ -324,7 +324,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
     <div className="flex flex-col gap-3 max-w-xl mx-auto w-full">
       {/* Error de colisión */}
       {error && (
-        <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-start gap-3 animate-fade-in">
+        <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 light:text-red-700 text-sm flex items-start gap-3 animate-fade-in">
           <AlertCircle size={18} className="shrink-0 mt-0.5" />
           <p>{error}</p>
         </div>
@@ -357,10 +357,10 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
                       className="px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-200 active:scale-95"
                       style={selected ? {
                         background: 'var(--primary-color)',
-                        color: 'var(--bg-color)',
+                        color: 'var(--on-primary, #080808)',
                         borderColor: 'var(--primary-color)',
                       } : {
-                        background: 'var(--surface-color, rgba(255,255,255,0.03))',
+                        background: 'var(--booking-surface, rgba(255,255,255,0.03))',
                         color: 'var(--text-color, inherit)',
                         borderColor: 'var(--border-color)',
                       }}
@@ -380,26 +380,26 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
                   key={i} 
                   className="w-full rounded-2xl border animate-pulse flex flex-col p-4 gap-3"
                   style={{
-                    background: 'var(--surface-color, rgba(255,255,255,0.02))',
+                    background: 'var(--booking-surface, rgba(255,255,255,0.02))',
                     borderColor: 'var(--border-color)',
                   }}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-white/5 shrink-0" />
+                    <div className="w-12 h-12 rounded-xl tint-5 shrink-0" />
                     <div className="flex flex-col gap-2 flex-1">
-                      <div className="h-4 w-3/4 bg-white/10 rounded" />
-                      <div className="h-3 w-1/2 bg-white/5 rounded" />
+                      <div className="h-4 w-3/4 tint-10 rounded" />
+                      <div className="h-3 w-1/2 tint-5 rounded" />
                     </div>
                   </div>
-                  <div className="flex justify-between items-center pt-3 border-t border-white/5">
-                    <div className="h-4 w-1/4 bg-white/10 rounded" />
-                    <div className="h-8 w-24 bg-white/10 rounded-lg" />
+                  <div className="flex justify-between items-center pt-3 border-t border-xinuco-border">
+                    <div className="h-4 w-1/4 tint-10 rounded" />
+                    <div className="h-8 w-24 tint-10 rounded-lg" />
                   </div>
                 </div>
               ))}
             </>
           ) : services.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-10 text-xinuco-muted gap-2 border rounded-2xl" style={{ borderColor: 'var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}>
+            <div className="flex flex-col items-center justify-center py-10 text-xinuco-muted gap-2 border rounded-2xl" style={{ borderColor: 'var(--border-color)', background: 'var(--booking-surface, rgba(255,255,255,0.02))' }}>
               <Scissors size={28} className="opacity-40" />
               <p className="text-sm font-medium">No hay servicios disponibles</p>
               <p className="text-xs opacity-60">Pronto agregaremos nuestro catálogo.</p>
@@ -418,7 +418,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
                 key={svc.id}
                 className="flex flex-col p-4 rounded-2xl border transition-all duration-300 hover:scale-[1.01] group"
                 style={{
-                  background: 'var(--surface-color, rgba(255,255,255,0.03))',
+                  background: 'var(--booking-surface, rgba(255,255,255,0.03))',
                   borderColor: 'var(--border-color)',
                 }}
               >
@@ -463,7 +463,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
                     className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 active:scale-95 flex items-center gap-2"
                     style={{
                       background: 'var(--primary-color)',
-                      color: 'var(--bg-color)',
+                      color: 'var(--on-primary, #080808)',
                       boxShadow: '0 4px 15px color-mix(in srgb, var(--primary-color) 25%, transparent)',
                     }}
                   >
@@ -494,7 +494,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
             onClick={() => dispatch({ type: 'SET_STAFF', payload: 'any' })}
             className="flex flex-col items-center justify-center gap-2.5 p-5 rounded-2xl border transition-all duration-200 active:scale-[0.97]"
             style={{
-              background: 'var(--surface-color, rgba(255,255,255,0.03))',
+              background: 'var(--booking-surface, rgba(255,255,255,0.03))',
               borderColor: 'var(--border-color)',
             }}
           >
@@ -528,7 +528,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
                 onClick={() => dispatch({ type: 'SET_STAFF', payload: st.id })}
                 className="flex flex-col items-center justify-center gap-2.5 p-5 rounded-2xl border transition-all duration-200 active:scale-[0.97]"
                 style={{
-                  background: 'var(--surface-color, rgba(255,255,255,0.03))',
+                  background: 'var(--booking-surface, rgba(255,255,255,0.03))',
                   borderColor: 'var(--border-color)',
                 }}
               >
@@ -567,7 +567,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
               onClick={() => setWeekOffset(w => Math.max(0, w - 1))}
               disabled={weekOffset === 0}
               className="p-1.5 rounded-lg border transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
-              style={{ borderColor: 'var(--border-color)', color: 'var(--xinuco-text)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+              style={{ borderColor: 'var(--border-color)', color: 'var(--text-color)', background: 'var(--booking-surface, rgba(255,255,255,0.02))' }}
               title="Semana anterior"
             >
               <ChevronLeft size={16} />
@@ -579,7 +579,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
               onClick={() => setWeekOffset(w => w + 1)}
               disabled={weekOffset >= 4} // Máx 4 semanas a futuro
               className="p-1.5 rounded-lg border transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
-              style={{ borderColor: 'var(--border-color)', color: 'var(--xinuco-text)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+              style={{ borderColor: 'var(--border-color)', color: 'var(--text-color)', background: 'var(--booking-surface, rgba(255,255,255,0.02))' }}
               title="Siguiente semana"
             >
               <ChevronLeft size={16} className="rotate-180" />
@@ -596,9 +596,9 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
                   onClick={() => handleDateSelect(d.dateStr)}
                   className="flex flex-col items-center justify-center min-w-[64px] py-3 px-2 rounded-2xl border transition-all duration-200 shrink-0 active:scale-[0.95]"
                   style={{
-                    background: isSelected ? 'var(--primary-color)' : 'var(--surface-color, rgba(255,255,255,0.03))',
+                    background: isSelected ? 'var(--primary-color)' : 'var(--booking-surface, rgba(255,255,255,0.03))',
                     borderColor: isSelected ? 'var(--primary-color)' : 'var(--border-color)',
-                    color: isSelected ? 'var(--bg-color)' : undefined,
+                    color: isSelected ? 'var(--on-primary, #080808)' : undefined,
                   }}
                 >
                   <span className={`text-[10px] uppercase font-bold ${isSelected ? '' : 'text-xinuco-muted'}`}>
@@ -728,7 +728,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
               <div
                 className="flex flex-col gap-3 p-4 rounded-2xl border"
                 style={{
-                  background: 'var(--surface-color, rgba(255,255,255,0.03))',
+                  background: 'var(--booking-surface, rgba(255,255,255,0.03))',
                   borderColor: 'var(--border-color)',
                 }}
               >
@@ -758,7 +758,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
                             <span className="tabular-nums">{formatCOP(item.unit_price)}</span>
                             {/* available viene topado al máximo por cita: "pocas" solo si hay menos que ese tope */}
                             {item.available < maxUnits && (
-                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 light:text-amber-700 border border-amber-500/20">
                                 Quedan pocas
                               </span>
                             )}
@@ -835,7 +835,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
                   className="w-full py-4 rounded-2xl font-bold text-base flex justify-center items-center gap-2.5 transition-all duration-200 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{
                     background: 'var(--primary-color)',
-                    color: 'var(--bg-color, #080808)',
+                    color: 'var(--on-primary, #080808)',
                     boxShadow: '0 0 30px color-mix(in srgb, var(--primary-color) 30%, transparent)',
                   }}
                 >
@@ -848,7 +848,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
                   onClick={handleConfirm}
                   disabled={isPending || !state.userData.name.trim() || !state.userData.phone.trim()}
                   className="w-full py-3.5 rounded-2xl font-semibold text-sm flex justify-center items-center gap-2 transition-all duration-200 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed border"
-                  style={{ borderColor: 'var(--border-color)', color: 'var(--xinuco-text)' }}
+                  style={{ borderColor: 'var(--border-color)', color: 'var(--text-color)' }}
                 >
                   {isPending ? (
                     <><Loader2 size={16} className="animate-spin" /> Reservando…</>
@@ -865,7 +865,7 @@ export function BookingWizard({ businessId, services, staff, mpBookingEnabled = 
                 className="w-full py-4 rounded-2xl font-bold text-lg flex justify-center items-center gap-2.5 transition-all duration-200 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed mt-2"
                 style={{
                   background: 'var(--primary-color)',
-                  color: 'var(--bg-color)',
+                  color: 'var(--on-primary, #080808)',
                   boxShadow: '0 0 30px color-mix(in srgb, var(--primary-color) 30%, transparent)',
                 }}
               >
@@ -936,8 +936,8 @@ function StepAccordion({
                 ? '#22c55e'
                 : isActive
                   ? 'var(--primary-color)'
-                  : 'var(--surface-color, #1a1a1a)',
-              color: isCompleted || isActive ? 'white' : 'var(--muted-color)',
+                  : 'var(--booking-surface, #1a1a1a)',
+              color: isCompleted ? '#fff' : isActive ? 'var(--on-primary, #fff)' : 'var(--muted-color)',
             }}
           >
             {isCompleted ? <Check size={14} /> : icon}

@@ -38,7 +38,7 @@ export function CancelButton({ token, slug }: { token: string; slug: string }) {
           className="w-16 h-16 rounded-full flex items-center justify-center mb-4 shadow-lg"
           style={{ background: 'var(--primary-color)' }}
         >
-          <Check size={30} className="text-white" />
+          <Check size={30} style={{ color: 'var(--on-primary, #080808)' }} />
         </div>
         <h2 className="text-xl font-bold text-xinuco-text mb-1">Tu cita fue cancelada</h2>
         <p className="text-sm text-xinuco-muted">
@@ -46,8 +46,8 @@ export function CancelButton({ token, slug }: { token: string; slug: string }) {
         </p>
         <Link
           href={`/${slug}/book`}
-          className="mt-6 inline-flex items-center justify-center rounded-xl px-6 py-3 text-sm font-bold text-white"
-          style={{ background: 'var(--primary-color)' }}
+          className="mt-6 inline-flex items-center justify-center rounded-xl px-6 py-3 text-sm font-bold"
+          style={{ background: 'var(--primary-color)', color: 'var(--on-primary, #080808)' }}
         >
           Reservar otra cita
         </Link>
@@ -116,7 +116,7 @@ export function CancelButton({ token, slug }: { token: string; slug: string }) {
       {error && (
         <div
           role="alert"
-          className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-start gap-2 text-left"
+          className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 light:text-red-700 text-sm flex items-start gap-2 text-left"
         >
           <AlertCircle size={16} className="shrink-0 mt-0.5" />
           <p>{error}</p>
@@ -135,7 +135,7 @@ export function CancelButton({ token, slug }: { token: string; slug: string }) {
           type="button"
           onClick={() => setConfirming(false)}
           disabled={isPending}
-          className="w-full inline-flex items-center justify-center rounded-xl border border-xinuco-border px-6 py-3 text-sm font-semibold text-xinuco-text hover:bg-white/5 disabled:opacity-60 transition-colors"
+          className="w-full inline-flex items-center justify-center rounded-xl border border-xinuco-border px-6 py-3 text-sm font-semibold text-xinuco-text hover:tint-5 disabled:opacity-60 transition-colors"
         >
           No, volver
         </button>

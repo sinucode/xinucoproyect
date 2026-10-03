@@ -79,7 +79,7 @@ export default async function BookPage({ params }: BookPageProps) {
       <BusinessContactBlock data={business} />
 
       <div className="w-full flex-1 flex flex-col">
-        <Suspense fallback={<div className="h-96 w-full max-w-xl mx-auto border rounded-2xl animate-pulse" style={{ borderColor: 'var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }} />}>
+        <Suspense fallback={<div className="h-96 w-full max-w-xl mx-auto border rounded-2xl animate-pulse" style={{ borderColor: 'var(--border-color)', background: 'var(--booking-surface, rgba(255,255,255,0.02))' }} />}>
           {/* Instanciación del Wizard de Reservas del Cliente */}
           <BookingWizard
             businessId={business.id}

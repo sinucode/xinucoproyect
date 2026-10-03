@@ -21,6 +21,9 @@ export interface BusinessBranding {
   font_family:     string   // Ej: "Inter" | "Bebas Neue"
 }
 
+// ---------- Modo de la página de reservas (solo portal del cliente; el dashboard es siempre oscuro) ----------
+export type ThemeMode = 'dark' | 'light'
+
 // ---------- Brand Config (columna JSONB: brand_config) — FUENTE ÚNICA DE VERDAD ----------
 export interface BrandConfig {
   primaryColor:    string   // Hex: "#C5A059"
@@ -29,6 +32,7 @@ export interface BrandConfig {
   textColor:       string   // Texto principal: "#F4F4F4"
   fontFamily:      string   // Ej: "inter" | "playfair" | "oswald"
   logoUrl?:        string   // URL del logo (opcional)
+  themeMode?:      ThemeMode // Modo de la página de reservas (opcional; por defecto 'dark')
 }
 
 // ---------- Feature Flags ----------

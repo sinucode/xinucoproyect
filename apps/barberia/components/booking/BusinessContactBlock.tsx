@@ -34,7 +34,7 @@ export function BusinessContactBlock({ data }: { data: PublicContactData }) {
     <section
       aria-label="Información del negocio"
       className="w-full max-w-xl mx-auto mb-6 rounded-2xl p-4 flex flex-col gap-3 text-sm"
-      style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+      style={{ background: 'var(--booking-surface, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
     >
       {notices.length > 0 && (
         <div className="flex flex-col gap-1.5">
@@ -42,7 +42,7 @@ export function BusinessContactBlock({ data }: { data: PublicContactData }) {
             <p
               key={n}
               role="status"
-              className="flex items-start gap-2 text-xs rounded-lg px-3 py-2 text-amber-400 bg-amber-400/10"
+              className="flex items-start gap-2 text-xs rounded-lg px-3 py-2 text-amber-400 light:text-amber-700 bg-amber-400/10"
             >
               <TriangleAlert size={13} className="shrink-0 mt-0.5" />
               <span className="min-w-0 break-words">{n}</span>
@@ -83,7 +83,7 @@ export function BusinessContactBlock({ data }: { data: PublicContactData }) {
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold"
-              style={{ background: 'var(--primary-color)', color: 'var(--bg-color)' }}
+              style={{ background: 'var(--primary-color)', color: 'var(--on-primary, #080808)' }}
             >
               <MessageCircle size={13} />
               WhatsApp

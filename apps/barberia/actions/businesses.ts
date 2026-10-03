@@ -3,9 +3,10 @@
 import { createClient, createAdminClient }      from '@xinuco/supabase/server'
 import { revalidatePath }    from 'next/cache'
 import { Database }          from '@xinuco/types'
-import type { BusinessInsert, BusinessFeatures, BrandConfig, BusinessBranding, Json } from '@xinuco/types'
+import type { BusinessInsert, BusinessFeatures, BrandConfig, BusinessBranding, ThemeMode, Json } from '@xinuco/types'
 import { validateBusinessProfile, type BusinessProfileInput } from '@/lib/business-profile'
 import { isValidBookingInterval } from '@/lib/booking-settings'
+import { isThemeMode } from '@/lib/brand-theme'
 
 // ── Tipos de resultado compartidos ────────────────────────────────────────────
 
@@ -131,6 +132,7 @@ export async function updateBusinessTheme(businessId: string, config: BrandConfi
     textColor:      config.textColor,
     fontFamily:     config.fontFamily.trim().toLowerCase(),
     ...(config.logoUrl ? { logoUrl: config.logoUrl } : {}),
+    ...(isThemeMode(config.themeMode) ? { themeMode: config.themeMode } : {}),
   }
 
   // 4. Persistir en Supabase
@@ -194,7 +196,8 @@ function revalidateBusinessPages() {
 // ════════════════════════════════════════════════════════════════════════════════
 
 export async function updateBusinessBranding(
-  branding: Partial<BusinessBranding>,
+  // theme_mode: modo claro/oscuro de la página de reservas; vive solo en brand_config (themeMode)
+  branding: Partial<BusinessBranding> & { theme_mode?: ThemeMode },
 ): Promise<ActionResult> {
   const auth = await requireAdmin()
   if ('error' in auth) return { error: auth.error }
@@ -211,6 +214,11 @@ export async function updateBusinessBranding(
     if (value !== undefined && (typeof value !== 'string' || !HEX_COLOR_REGEX.test(value))) {
       return { error: `Color inválido en "${key}": "${String(value)}". Usa formato hexadecimal (ej: #C5A059).` }
     }
+  }
+
+  // Modo de la página de reservas: solo 'dark' | 'light'
+  if (branding.theme_mode !== undefined && !isThemeMode(branding.theme_mode)) {
+    return { error: 'Modo de tema inválido. Usa "dark" o "light".' }
   }
 
   // Fuente: el layout la resuelve en minúsculas (inter | playfair | oswald)
@@ -243,6 +251,7 @@ export async function updateBusinessBranding(
   if (branding.bg_color        !== undefined) mergedConfig.bgColor        = branding.bg_color
   if (branding.text_color      !== undefined) mergedConfig.textColor      = branding.text_color
   if (fontKey                  !== undefined) mergedConfig.fontFamily     = fontKey
+  if (branding.theme_mode      !== undefined) mergedConfig.themeMode      = branding.theme_mode
   if (logo) mergedConfig.logoUrl = logo
   else delete mergedConfig.logoUrl
 

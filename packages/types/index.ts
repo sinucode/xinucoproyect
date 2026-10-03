@@ -14,6 +14,7 @@ export type {
   DayHours,
   BusinessFeatures,
   BrandConfig,
+  ThemeMode,
   Profile,
   UserRole,
   Service,

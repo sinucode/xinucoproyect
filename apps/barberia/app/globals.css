@@ -64,6 +64,10 @@ body {
 @layer utilities {
   .text-balance { text-wrap: balance; }
 
+  /* Velos neutros que siguen el color de texto del tema (claro u oscuro): hover, skeletons, separadores */
+  .tint-5  { background-color: color-mix(in srgb, var(--text-color) 5%,  transparent); }
+  .tint-10 { background-color: color-mix(in srgb, var(--text-color) 10%, transparent); }
+
   /* Glassmorphism */
   .glass {
     background: rgba(255, 255, 255, 0.04);
@@ -82,7 +86,7 @@ body {
     background: linear-gradient(
       90deg,
       var(--secondary-color) 25%,
-      rgba(255,255,255,0.08) 50%,
+      color-mix(in srgb, var(--text-color) 8%, transparent) 50%,
       var(--secondary-color) 75%
     );
     background-size: 200% 100%;
@@ -129,9 +133,11 @@ body {
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3
            font-semibold text-sm transition-all duration-200
-           bg-xinuco-primary text-xinuco-bg
+           bg-xinuco-primary
            hover:opacity-90 active:scale-[0.98]
            disabled:opacity-50 disabled:cursor-not-allowed;
+    /* Texto legible sobre el color principal (el layout del tenant calcula --on-primary) */
+    color: var(--on-primary, var(--bg-color));
     box-shadow: var(--shadow-glow);
   }
 

@@ -47,5 +47,11 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // Variante `light:` — solo aplica en la página pública de reservas cuando el negocio eligió modo claro
+    // (el layout del tenant marca data-theme-mode="light"; el dashboard siempre es oscuro).
+    function ({ addVariant }: { addVariant: (name: string, selector: string) => void }) {
+      addVariant('light', '[data-theme-mode="light"] &:not([data-dashboard-theme] *)')
+    },
+  ],
 }

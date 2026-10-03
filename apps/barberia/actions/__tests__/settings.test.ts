@@ -135,6 +135,39 @@ describe('updateBusinessBranding', () => {
     expect(bizCalls[1].ops.find(o => o.op === 'eq')!.args).toEqual(['id', 'biz1'])
   })
 
+  it('guarda themeMode en brand_config (no en branding legado) y conserva el resto', async () => {
+    const { calls } = makeSupabase({
+      queues: { businesses: [{ data: current, error: null }, { data: [{ id: 'biz1' }], error: null }] },
+    })
+    const r = await updateBusinessBranding({ theme_mode: 'light', bg_color: '#FFFFFF', secondary_color: '#F3F4F6', text_color: '#111111' })
+    expect(r).toEqual({ success: true })
+
+    const update = calls.filter(c => c.table === 'businesses')[1].ops.find(o => o.op === 'update')!.args[0]
+    expect(update.brand_config).toEqual(expect.objectContaining({
+      themeMode: 'light', bgColor: '#FFFFFF', secondaryColor: '#F3F4F6', textColor: '#111111',
+      primaryColor: '#111111', logoUrl: 'https://x.co/logo.png', extra: 'keep',
+    }))
+    expect(update.branding).not.toHaveProperty('theme_mode')
+    expect(update.branding).not.toHaveProperty('themeMode')
+  })
+
+  it('rechaza un modo de tema inválido sin tocar la base', async () => {
+    const { calls } = makeSupabase({})
+    const r = await updateBusinessBranding({ theme_mode: 'neon' as any })
+    expect(r.error).toMatch(/Modo de tema inválido/)
+    expect(calls.some(c => c.table === 'businesses')).toBe(false)
+  })
+
+  it('sin theme_mode no toca el themeMode guardado', async () => {
+    const withMode = { ...current, brand_config: { ...current.brand_config, themeMode: 'light' } }
+    const { calls } = makeSupabase({
+      queues: { businesses: [{ data: withMode, error: null }, { data: [{ id: 'biz1' }], error: null }] },
+    })
+    await updateBusinessBranding({ primary_color: '#C5A059' })
+    const update = calls.filter(c => c.table === 'businesses')[1].ops.find(o => o.op === 'update')!.args[0]
+    expect(update.brand_config.themeMode).toBe('light')
+  })
+
   it('rechaza un color inválido sin tocar la base', async () => {
     const { calls } = makeSupabase({})
     const r = await updateBusinessBranding({ bg_color: 'rojo' })

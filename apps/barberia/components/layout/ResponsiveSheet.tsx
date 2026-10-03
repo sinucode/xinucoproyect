@@ -2,9 +2,10 @@
 
 import { createPortal } from 'react-dom'
 
-/** Dentro del contenedor del negocio (hereda colores y tipografía de la marca); si no, el body. */
+/** Dentro del contenedor de tema MÁS interno (en el dashboard el oscuro fijo; en páginas públicas el del negocio); si no, el body. */
 function portalTarget(): Element {
-  return document.querySelector('[data-tenant-theme]') ?? document.body
+  const all = document.querySelectorAll('[data-tenant-theme]')
+  return all[all.length - 1] ?? document.body
 }
 
 import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'

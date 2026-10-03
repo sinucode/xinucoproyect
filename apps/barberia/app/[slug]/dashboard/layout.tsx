@@ -1,6 +1,8 @@
 import { ReactNode } from 'react'
 import { createClient } from '@xinuco/supabase/server'
 import { redirect } from 'next/navigation'
+import type { CSSProperties } from 'react'
+import { THEME_PRESETS, MUTED_COLORS } from '@/lib/brand-theme'
 import { Header } from '@/components/layout/Header'
 import { BottomNav } from '@/components/layout/BottomNav'
 import { DashboardSidebar } from '@/components/layout/DashboardSidebar'
@@ -8,6 +10,20 @@ import { FeaturesProvider } from '@/lib/features/context'
 import { RoleProvider } from '@/lib/features/role-context'
 import { TrialBanner } from '@/components/dashboard/TrialBanner'
 import type { Business, BusinessFeatures, UserRole, Profile } from '@xinuco/types'
+
+// El dashboard (admin y barberos) es SIEMPRE oscuro: ignora fondo/superficie/texto del negocio y
+// conserva color principal y tipografía (heredados del layout del tenant). El modo claro/oscuro
+// elegido en Apariencia solo aplica a la página de reservas.
+const DASHBOARD_THEME_VARS = {
+  '--bg-color':        THEME_PRESETS.dark.bgColor,
+  '--secondary-color': THEME_PRESETS.dark.secondaryColor,
+  '--text-color':      THEME_PRESETS.dark.textColor,
+  '--border-color':    `${THEME_PRESETS.dark.secondaryColor}CC`,
+  '--muted-color':     MUTED_COLORS.dark,
+  colorScheme:         'dark',
+  backgroundColor:     THEME_PRESETS.dark.bgColor,
+  color:               THEME_PRESETS.dark.textColor,
+} as CSSProperties
 
 export default async function DashboardLayout({
   children,
@@ -41,6 +57,8 @@ export default async function DashboardLayout({
   const trialExpiresAt  = business?.trial_expires_at ?? null
 
   return (
+    // Contenedor interno de tema: los sheets (portal) toman el [data-tenant-theme] MÁS interno
+    <div data-tenant-theme="" data-dashboard-theme="" className="flex flex-col flex-1" style={DASHBOARD_THEME_VARS}>
     <RoleProvider role={(profile?.role ?? 'barber') as UserRole}>
       <FeaturesProvider features={features} trialExpiresAt={trialExpiresAt}>
         <DashboardSidebar slug={slug} business={business} userName={profile?.full_name ?? undefined}>
@@ -68,6 +86,7 @@ export default async function DashboardLayout({
         </DashboardSidebar>
       </FeaturesProvider>
     </RoleProvider>
+    </div>
   )
 }
 

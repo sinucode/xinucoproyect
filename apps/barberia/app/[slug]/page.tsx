@@ -98,12 +98,12 @@ export default async function PublicBookingPage({ params }: PublicBookingPagePro
             <img
               src={business.branding.logo_url}
               alt={`Logo de ${business.name}`}
-              className="w-20 h-20 rounded-2xl object-cover mb-5 shadow-xl ring-2 ring-white/10"
+              className="w-20 h-20 rounded-2xl object-cover mb-5 shadow-xl ring-2 ring-xinuco-border"
             />
           ) : (
             <div
               className="w-20 h-20 rounded-2xl flex items-center justify-center text-3xl font-bold mb-5 shadow-xl"
-              style={{ background: 'var(--primary-color)', color: 'var(--bg-color)' }}
+              style={{ background: 'var(--primary-color)', color: 'var(--on-primary, #080808)' }}
             >
               {business.name.substring(0, 2).toUpperCase()}
             </div>

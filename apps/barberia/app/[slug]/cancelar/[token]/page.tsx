@@ -147,8 +147,8 @@ export default async function CancelAppointmentPage({
           {appt.status === 'cancelled' && (
             <a
               href={`/${slug}/book`}
-              className="inline-flex items-center justify-center rounded-xl px-6 py-3 text-sm font-bold text-white"
-              style={{ background: 'var(--primary-color)' }}
+              className="inline-flex items-center justify-center rounded-xl px-6 py-3 text-sm font-bold"
+              style={{ background: 'var(--primary-color)', color: 'var(--on-primary, #080808)' }}
             >
               Reservar otra cita
             </a>

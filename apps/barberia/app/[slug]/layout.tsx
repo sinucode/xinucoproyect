@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import type { BrandConfig } from '@xinuco/types'
 import { Inter, Playfair_Display, Oswald } from 'next/font/google'
+import { resolveThemeMode, onPrimaryColor, MUTED_COLORS, bookingSurface } from '@/lib/brand-theme'
 
 // ── Fuentes SSR (pre-cargadas en build-time, Zero-Flicker) ──────────────────
 const inter    = Inter({           subsets: ['latin'], display: 'swap', variable: '--font-inter' })
@@ -97,6 +98,8 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
   const bgColor        = bc.bgColor        || DEFAULTS.bgColor
   const textColor      = bc.textColor      || DEFAULTS.textColor
   const font           = resolveFont(bc.fontFamily)
+  // Modo claro/oscuro: solo afecta al portal del cliente (el dashboard fuerza oscuro en su propio layout)
+  const themeMode      = resolveThemeMode(bc.themeMode)
 
   // CSS Variables inyectadas en el servidor (Zero-Flicker)
   const cssVars = {
@@ -107,12 +110,20 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
     '--bg-color':        bgColor,
     '--text-color':      textColor,
     '--border-color':    `${secondaryColor}CC`,
+    '--muted-color':     MUTED_COLORS[themeMode],
+    '--booking-surface': bookingSurface(themeMode, secondaryColor),
+    '--on-primary':      onPrimaryColor(primaryColor),
+    colorScheme:         themeMode,
+    // Fondo y texto del portal (el body global es oscuro): sin esto el modo claro dejaría fondo negro
+    backgroundColor:     bgColor,
+    color:               textColor,
     '--font-family':     bc.fontFamily || 'inter',
   } as React.CSSProperties
 
   return (
     <div
       data-tenant-theme=""
+      data-theme-mode={themeMode}
       className={`${font.className} ${font.variable} min-h-screen antialiased flex flex-col`}
       style={cssVars}
     >
