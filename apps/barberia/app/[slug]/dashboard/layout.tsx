@@ -18,7 +18,7 @@ import type { Business, BusinessFeatures, UserRole, Profile, ThemeMode } from '@
 const DASHBOARD_LIGHT = {
   bgColor:        '#F7F7F8',
   secondaryColor: '#FFFFFF',
-  textColor:      'var(--card-color, #111111)',
+  textColor:      '#111111',
   borderColor:    'rgba(0,0,0,0.10)',
 } as const
 
