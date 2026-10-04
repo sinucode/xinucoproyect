@@ -87,7 +87,7 @@ function getTagStyle(tag: string): string {
     case 'Alérgico':
       return 'text-red-400 bg-red-400/10 border-red-400/25'
     default:
-      return 'text-xinuco-muted bg-white/[0.04] border-white/10'
+      return 'text-xinuco-muted bg-fg/[0.04] border-fg/10'
   }
 }
 
@@ -101,9 +101,9 @@ function StatusBadge({ status }: { status: string }) {
     in_progress:     { label: 'En proceso',   className: 'text-sky-400 bg-sky-400/10 border-sky-400/20' },
     ready_to_pay:    { label: 'Por cobrar',   className: 'text-violet-400 bg-violet-400/10 border-violet-400/20' },
     payment_pending: { label: 'Pago pendiente', className: 'text-amber-400 bg-amber-400/10 border-amber-400/20' },
-    scheduled:       { label: 'Agendada',     className: 'text-xinuco-muted bg-white/[0.04] border-white/10' },
+    scheduled:       { label: 'Agendada',     className: 'text-xinuco-muted bg-fg/[0.04] border-fg/10' },
   }
-  const { label, className } = config[status] ?? { label: status, className: 'text-xinuco-muted bg-white/[0.04] border-white/10' }
+  const { label, className } = config[status] ?? { label: status, className: 'text-xinuco-muted bg-fg/[0.04] border-fg/10' }
 
   return (
     <span className={`inline-flex text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${className}`}>
@@ -330,7 +330,7 @@ function CustomerCard({
     <button
       type="button"
       onClick={onSelect}
-      className="w-full text-left flex items-center gap-4 p-4 rounded-xl transition-all duration-200 hover:bg-white/[0.04] active:scale-[0.99]"
+      className="w-full text-left flex items-center gap-4 p-4 rounded-xl transition-all duration-200 hover:bg-fg/[0.04] active:scale-[0.99]"
       style={{ border: '1px solid var(--border-color)' }}
     >
       {/* Avatar con iniciales */}
@@ -416,7 +416,7 @@ function CustomerCard({
 // EXPEDIENTE DEL CLIENTE — Vista de detalle
 // ════════════════════════════════════════════════════════════════════════════
 
-const CARD_STYLE = { border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }
+const CARD_STYLE = { border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.02)' }
 
 function ExpedienteView({
   expediente,
@@ -432,10 +432,10 @@ function ExpedienteView({
   if (isLoading && !expediente) {
     return (
       <div className="flex flex-col gap-4 animate-pulse">
-        <div className="h-8 w-32 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-        <div className="h-24 w-full rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-        <div className="h-32 w-full rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-        <div className="h-48 w-full rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+        <div className="h-8 w-32 rounded" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+        <div className="h-24 w-full rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+        <div className="h-32 w-full rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+        <div className="h-48 w-full rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
       </div>
     )
   }
@@ -838,7 +838,7 @@ function UpcomingAppointments({ expediente }: { expediente: CustomerExpediente }
           <div
             key={a.id}
             className="flex items-start justify-between gap-3 py-3"
-            style={{ borderTop: idx === 0 ? undefined : '1px solid rgba(255,255,255,0.05)' }}
+            style={{ borderTop: idx === 0 ? undefined : '1px solid rgb(var(--fg) / 0.05)' }}
           >
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
@@ -1086,7 +1086,7 @@ function PurchasedProducts({ expediente }: { expediente: CustomerExpediente }) {
           <div
             key={`${p.created_at}-${idx}`}
             className="flex items-center justify-between gap-3 py-2.5"
-            style={{ borderTop: idx === 0 ? undefined : '1px solid rgba(255,255,255,0.05)' }}
+            style={{ borderTop: idx === 0 ? undefined : '1px solid rgb(var(--fg) / 0.05)' }}
           >
             <div className="min-w-0">
               <p className="text-sm text-xinuco-text truncate">
@@ -1128,8 +1128,8 @@ function VisitHistory({ expediente }: { expediente: CustomerExpediente }) {
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-white/[0.02] transition-colors"
-        style={{ background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-fg/[0.02] transition-colors"
+        style={{ background: 'rgb(var(--fg) / 0.02)' }}
       >
         <span className="text-sm font-semibold text-xinuco-text">
           Historial de Visitas
@@ -1158,9 +1158,9 @@ function VisitHistory({ expediente }: { expediente: CustomerExpediente }) {
               {visitsToShow.map((v, idx) => (
                 <div
                   key={v.id}
-                  className="flex items-center gap-4 px-5 py-3.5 hover:bg-white/[0.02] transition-colors"
+                  className="flex items-center gap-4 px-5 py-3.5 hover:bg-fg/[0.02] transition-colors"
                   style={{
-                    borderTop: idx === 0 ? '1px solid var(--border-color)' : '1px solid rgba(255,255,255,0.04)',
+                    borderTop: idx === 0 ? '1px solid var(--border-color)' : '1px solid rgb(var(--fg) / 0.04)',
                   }}
                 >
                   {/* Dot de color */}
@@ -1172,7 +1172,7 @@ function VisitHistory({ expediente }: { expediente: CustomerExpediente }) {
                           ? '#34d399'
                           : v.status === 'cancelled'
                           ? '#f87171'
-                          : 'rgba(255,255,255,0.2)',
+                          : 'rgb(var(--fg) / 0.2)',
                     }}
                   />
 

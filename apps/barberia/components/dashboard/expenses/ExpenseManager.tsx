@@ -145,7 +145,7 @@ function MonthResultCard({
     return (
       <section
         className="rounded-2xl p-5 flex items-start gap-3"
-        style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+        style={{ background: 'rgb(var(--fg) / 0.03)', border: '1px solid var(--border-color)' }}
       >
         <AlertCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
         <div>
@@ -163,7 +163,7 @@ function MonthResultCard({
   return (
     <section
       className="rounded-2xl p-4 sm:p-5"
-      style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+      style={{ background: 'rgb(var(--fg) / 0.03)', border: '1px solid var(--border-color)' }}
       aria-label="Utilidad del mes"
     >
       <p className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">Utilidad del mes</p>
@@ -268,8 +268,8 @@ function PendingRecurringBanner({
                 disabled={busyKey !== null}
                 className={
                   upcoming
-                    ? 'text-[11px] font-medium px-2.5 py-1.5 rounded-lg border transition-colors hover:bg-white/[0.05] disabled:opacity-50 text-xinuco-muted hover:text-xinuco-text'
-                    : 'text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-white/[0.05] disabled:opacity-50'
+                    ? 'text-[11px] font-medium px-2.5 py-1.5 rounded-lg border transition-colors hover:bg-fg/[0.05] disabled:opacity-50 text-xinuco-muted hover:text-xinuco-text'
+                    : 'text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-fg/[0.05] disabled:opacity-50'
                 }
                 style={upcoming
                   ? { borderColor: 'var(--border-color)' }
@@ -300,7 +300,7 @@ function CategorySummary({
   return (
     <section
       className="rounded-2xl p-5"
-      style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+      style={{ background: 'rgb(var(--fg) / 0.03)', border: '1px solid var(--border-color)' }}
     >
       <h2 className="text-sm font-bold text-xinuco-text mb-4">Gastos por categoría</h2>
       <ul className="flex flex-col gap-3">
@@ -345,7 +345,7 @@ function ExpenseRow({
 }) {
   const lockedTip = 'Ya se cuadró en un cierre de caja'
   const actionClass =
-    'inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted transition-colors hover:text-xinuco-text hover:bg-white/[0.05] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-xinuco-muted'
+    'inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted transition-colors hover:text-xinuco-text hover:bg-fg/[0.05] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-xinuco-muted'
 
   return (
     <li
@@ -458,7 +458,7 @@ function ConfirmDeleteDialog({
             type="button"
             onClick={onCancel}
             disabled={pending}
-            className="flex-1 py-2.5 rounded-xl text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
+            className="flex-1 py-2.5 rounded-xl text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-fg/[0.03]"
             style={{ borderColor: 'var(--border-color)' }}
           >
             Cancelar
@@ -667,7 +667,7 @@ function ExpenseSheet({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors"
             aria-label="Cerrar panel"
           >
             <X size={20} />
@@ -843,7 +843,7 @@ function ExpenseSheet({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
+              className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-fg/[0.03]"
               style={{ borderColor: 'var(--border-color)' }}
             >
               Cancelar
@@ -939,12 +939,12 @@ function CategoryRowEditor({
   const inUse = (usage ?? 0) > 0
   const canDelete = usage !== null && !inUse
   const iconBtn =
-    'p-2 rounded-lg text-xinuco-muted transition-colors hover:text-xinuco-text hover:bg-white/[0.05] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-xinuco-muted'
+    'p-2 rounded-lg text-xinuco-muted transition-colors hover:text-xinuco-text hover:bg-fg/[0.05] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-xinuco-muted'
 
   return (
     <li
       className="rounded-xl px-3 py-2.5 flex flex-col gap-2"
-      style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)', opacity: category.is_hidden ? 0.7 : 1 }}
+      style={{ background: 'rgb(var(--fg) / 0.03)', border: '1px solid var(--border-color)', opacity: category.is_hidden ? 0.7 : 1 }}
     >
       <div className="flex items-center gap-2">
         <button
@@ -1151,7 +1151,7 @@ function CategoriesSheet({
           <button
             type="button"
             onClick={close}
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors"
             aria-label="Cerrar panel"
           >
             <X size={20} />
@@ -1329,7 +1329,7 @@ export function ExpenseManager({
             <button
               type="button"
               onClick={() => setCategoriesOpen(true)}
-              className="flex min-h-11 items-center gap-2 !py-2.5 px-4 rounded-lg text-sm font-medium text-xinuco-text border transition-colors hover:bg-white/[0.05]"
+              className="flex min-h-11 items-center gap-2 !py-2.5 px-4 rounded-lg text-sm font-medium text-xinuco-text border transition-colors hover:bg-fg/[0.05]"
               style={{ borderColor: 'var(--border-color)' }}
             >
               <Tags size={16} />
@@ -1346,13 +1346,13 @@ export function ExpenseManager({
       {/* Navegador de mes */}
       <div
         className="flex items-center justify-between rounded-xl px-2 py-1.5"
-        style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+        style={{ background: 'rgb(var(--fg) / 0.03)', border: '1px solid var(--border-color)' }}
       >
         <button
           type="button"
           onClick={() => goToMonth(prevMonthKey)}
           disabled={navPending}
-          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors disabled:opacity-40"
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors disabled:opacity-40"
           aria-label="Mes anterior"
         >
           <ChevronLeft size={18} />
@@ -1365,7 +1365,7 @@ export function ExpenseManager({
           type="button"
           onClick={() => nextMonthKey && goToMonth(nextMonthKey)}
           disabled={navPending || !nextMonthKey}
-          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           aria-label="Mes siguiente"
         >
           <ChevronRight size={18} />
@@ -1441,7 +1441,7 @@ export function ExpenseManager({
 
             <ul
               className="rounded-2xl overflow-hidden"
-              style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+              style={{ border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.02)' }}
             >
               {visible.map(expense => (
                 <ExpenseRow

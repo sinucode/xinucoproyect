@@ -44,16 +44,16 @@ export function TrialBanner({ slug }: TrialBannerProps) {
       {/* Icono + texto */}
       <div className="flex items-center gap-2.5">
         {isUrgent
-          ? <Clock size={15} style={{ color: '#f87171', flexShrink: 0 }} />
+          ? <Clock size={15} style={{ color: 'var(--danger-text, #f87171)', flexShrink: 0 }} />
           : <Sparkles size={15} style={{ color: 'var(--primary-color)', flexShrink: 0 }} />
         }
-        <span style={{ color: isUrgent ? '#fca5a5' : 'rgba(244,244,244,0.75)' }}>
+        <span style={{ color: isUrgent ? 'var(--danger-soft, #fca5a5)' : 'color-mix(in srgb, var(--text-color) 75%, transparent)' }}>
           {isUrgent
             ? `⚠️ Tu período de prueba vence en ${daysLeft} ${daysLeft === 1 ? 'día' : 'días'} (${expiryFormatted}).`
             : `Período de prueba activo — ${daysLeft} ${daysLeft === 1 ? 'día restante' : 'días restantes'} hasta el ${expiryFormatted}.`
           }
           {' '}
-          <span style={{ color: isUrgent ? '#f87171' : 'rgba(197,160,89,0.80)' }}>
+          <span style={{ color: isUrgent ? 'var(--danger-text, #f87171)' : 'rgba(197,160,89,0.80)' }}>
             Al vencer, solo se desactiva el acceso, tus datos permanecen intactos.
           </span>
         </span>
@@ -67,7 +67,7 @@ export function TrialBanner({ slug }: TrialBannerProps) {
           background: isUrgent
             ? 'rgba(239,68,68,0.15)'
             : 'color-mix(in srgb, var(--primary-color) 15%, transparent)',
-          color: isUrgent ? '#fca5a5' : 'var(--primary-color)',
+          color: isUrgent ? 'var(--danger-soft, #fca5a5)' : 'var(--primary-color)',
           border: `1px solid ${isUrgent ? 'rgba(239,68,68,0.25)' : 'color-mix(in srgb, var(--primary-color) 30%, transparent)'}`,
         }}
       >

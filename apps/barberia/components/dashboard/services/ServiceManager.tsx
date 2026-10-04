@@ -235,7 +235,7 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
                 aria-selected={selected}
                 onClick={() => setTabState(t)}
                 className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                  selected ? '' : 'text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.03]'
+                  selected ? '' : 'text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.03]'
                 }`}
                 style={selected
                   ? { background: 'var(--primary-color)', color: 'var(--bg-color)', borderColor: 'var(--primary-color)' }
@@ -266,7 +266,7 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
             >
               <table className="w-full text-sm" aria-label="Catálogo de servicios">
                 <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.03))' }}>
+                  <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.03)' }}>
                     <Th>Servicio</Th>
                     <Th>Duración</Th>
                     <Th>Precio</Th>
@@ -282,7 +282,7 @@ export function ServiceManager({ overview }: ServiceManagerProps) {
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr style={{ borderTop: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}>
+                  <tr style={{ borderTop: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.02)' }}>
                     <td colSpan={7} className="px-5 py-3 text-xs text-xinuco-muted">
                       {visibleList.length} servicio{visibleList.length !== 1 ? 's' : ''} registrado{visibleList.length !== 1 ? 's' : ''}
                     </td>
@@ -369,7 +369,7 @@ function AudienceControl({
               title={isLast ? 'Debes atender al menos un público.' : undefined}
               onClick={() => toggle(a)}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                active ? '' : 'text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.03]'
+                active ? '' : 'text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.03]'
               } ${isPending ? 'opacity-60 cursor-wait' : isLast ? 'cursor-not-allowed' : ''}`}
               style={active
                 ? { background: 'var(--primary-color)', color: 'var(--bg-color)', borderColor: 'var(--primary-color)' }
@@ -484,7 +484,7 @@ function StatusSwitch({ active, pending, onClick }: { active: boolean; pending: 
       disabled={pending}
       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${pending ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
       style={{
-        backgroundColor: active ? 'var(--primary-color)' : 'var(--surface-color, #333)',
+        backgroundColor: active ? 'var(--primary-color)' : 'var(--off-color, #333)',
         '--tw-ring-color': 'var(--primary-color)',
       } as React.CSSProperties}
     >
@@ -520,7 +520,7 @@ function ActionsMenu({
       <button
         onClick={() => setOpen(!open)}
         disabled={pending}
-        className="p-1.5 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors disabled:opacity-40"
+        className="p-1.5 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors disabled:opacity-40"
         aria-label={`Acciones para ${service.name}`}
       >
         {pending ? <Loader2 size={16} className="animate-spin" /> : <MoreVertical size={16} />}
@@ -535,7 +535,7 @@ function ActionsMenu({
           >
             <button
               onClick={() => { setOpen(false); onEdit() }}
-              className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-xs font-medium text-xinuco-text hover:bg-white/[0.04] transition-colors text-left"
+              className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-xs font-medium text-xinuco-text hover:bg-fg/[0.04] transition-colors text-left"
             >
               <Pencil size={13} style={{ color: 'var(--primary-color)' }} />
               Editar
@@ -543,7 +543,7 @@ function ActionsMenu({
             {onDuplicate && (
               <button
                 onClick={() => { setOpen(false); onDuplicate() }}
-                className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-xs font-medium text-xinuco-text hover:bg-white/[0.04] transition-colors text-left"
+                className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-xs font-medium text-xinuco-text hover:bg-fg/[0.04] transition-colors text-left"
               >
                 <Copy size={13} style={{ color: 'var(--primary-color)' }} />
                 Duplicar
@@ -551,7 +551,7 @@ function ActionsMenu({
             )}
             <button
               onClick={() => { setOpen(false); onToggle() }}
-              className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-xs font-medium text-xinuco-text hover:bg-white/[0.04] transition-colors text-left"
+              className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-xs font-medium text-xinuco-text hover:bg-fg/[0.04] transition-colors text-left"
             >
               <Power size={13} className={service.is_active ? 'text-amber-400' : 'text-emerald-400'} />
               {service.is_active ? 'Desactivar' : 'Activar'}
@@ -591,7 +591,7 @@ function StaffCell({ service, staff }: { service: ServiceOverviewItem; staff: St
           <span
             key={p.id}
             className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold text-xinuco-text"
-            style={{ background: 'var(--surface-color, #333)', border: '1px solid var(--border-color)' }}
+            style={{ background: 'var(--off-color, #333)', border: '1px solid var(--border-color)' }}
           >
             {initials(p.full_name)}
           </span>
@@ -612,7 +612,7 @@ function ServiceRow(props: RowProps) {
 
   return (
     <tr
-      className="transition-all duration-200 hover:bg-white/[0.02]"
+      className="transition-all duration-200 hover:bg-fg/[0.02]"
       style={{
         borderTop: '1px solid var(--border-color)',
         opacity: a.isPending ? 0.4 : service.is_active ? 1 : 0.55,
@@ -668,7 +668,7 @@ function ServiceCard(props: RowProps) {
       className="rounded-xl p-4 flex flex-col gap-3 transition-opacity"
       style={{
         border: '1px solid var(--border-color)',
-        background: 'var(--surface-color, rgba(255,255,255,0.02))',
+        background: 'rgb(var(--fg) / 0.02)',
         opacity: a.isPending ? 0.4 : service.is_active ? 1 : 0.55,
       }}
     >
@@ -844,7 +844,7 @@ function ServiceSheet({
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors"
             aria-label="Cerrar panel"
           >
             <X size={20} />
@@ -940,7 +940,7 @@ function ServiceSheet({
                 ) : staff.map(s => (
                   <label
                     key={s.id}
-                    className="flex items-center gap-2.5 text-sm text-xinuco-text px-2 py-1.5 rounded-md hover:bg-white/[0.03] cursor-pointer"
+                    className="flex items-center gap-2.5 text-sm text-xinuco-text px-2 py-1.5 rounded-md hover:bg-fg/[0.03] cursor-pointer"
                   >
                     <input
                       type="checkbox" checked={staffSel.includes(s.id)}
@@ -964,7 +964,7 @@ function ServiceSheet({
                 {workstations.map(w => (
                   <label
                     key={w.id}
-                    className="flex items-center gap-2.5 text-sm text-xinuco-text px-2 py-1.5 rounded-md hover:bg-white/[0.03] cursor-pointer"
+                    className="flex items-center gap-2.5 text-sm text-xinuco-text px-2 py-1.5 rounded-md hover:bg-fg/[0.03] cursor-pointer"
                   >
                     <input
                       type="checkbox" checked={wsSel.includes(w.id)}
@@ -990,7 +990,7 @@ function ServiceSheet({
           <div className="flex gap-3 pt-2">
             <button
               type="button" onClick={onClose}
-              className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
+              className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-fg/[0.03]"
               style={{ borderColor: 'var(--border-color)' }}
             >
               Cancelar

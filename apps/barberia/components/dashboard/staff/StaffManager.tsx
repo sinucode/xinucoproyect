@@ -201,7 +201,7 @@ const STATUS_STYLES: Record<NonNullable<TeamMember['status']>, string> = {
   busy:     'bg-amber-500/15 text-amber-400 border-amber-500/30',
   break:    'bg-sky-500/15 text-sky-400 border-sky-500/30',
   time_off: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
-  off:      'bg-white/5 text-xinuco-muted border-white/10',
+  off:      'bg-fg/5 text-xinuco-muted border-fg/10',
 }
 
 function StatusPill({ member }: { member: TeamMember }) {
@@ -281,7 +281,7 @@ function StaffCard({
             <h3 className="font-bold text-xinuco-text text-base leading-tight break-words">
               {member.full_name}
             </h3>
-            <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider border bg-white/5 border-white/10 text-xinuco-muted w-fit">
+            <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider border bg-fg/5 border-fg/10 text-xinuco-muted w-fit">
               <Scissors size={10} />
               {specialtyLabel(member.specialty_role)}
             </span>
@@ -297,7 +297,7 @@ function StaffCard({
           disabled={isPending}
           className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed"
           style={{
-            backgroundColor: member.is_active ? 'var(--primary-color)' : 'var(--surface-color, #333)',
+            backgroundColor: member.is_active ? 'var(--primary-color)' : 'var(--off-color, #333)',
           }}
           title={member.is_active ? 'Desactivar profesional' : 'Activar profesional'}
         >
@@ -438,7 +438,7 @@ function ConfirmDeactivate({
             type="button"
             onClick={onCancel}
             autoFocus
-            className="flex-1 py-2.5 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
+            className="flex-1 py-2.5 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-fg/[0.03]"
             style={{ borderColor: 'var(--border-color)' }}
           >
             Cancelar
@@ -629,7 +629,7 @@ function StaffSheet({
             type="button"
             onClick={onClose}
             aria-label="Cerrar"
-            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors"
           >
             <X size={20} />
           </button>
@@ -759,12 +759,12 @@ function StaffSheet({
               ) : (
                 <div
                   className="flex flex-col rounded-xl overflow-hidden max-h-64 overflow-y-auto"
-                  style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+                  style={{ border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.02)' }}
                 >
                   {services.map((svc, idx) => (
                     <label
                       key={svc.id}
-                      className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-xinuco-text cursor-pointer hover:bg-white/[0.03]"
+                      className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-xinuco-text cursor-pointer hover:bg-fg/[0.03]"
                       style={{ borderBottom: idx === services.length - 1 ? 'none' : '1px solid var(--border-color)' }}
                     >
                       <input
@@ -774,7 +774,7 @@ function StaffSheet({
                       />
                       <span className="flex-1 min-w-0 break-words">{svc.name}</span>
                       {showAudience && (
-                        <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold border bg-white/5 border-white/10 text-xinuco-muted">
+                        <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold border bg-fg/5 border-fg/10 text-xinuco-muted">
                           {svc.audience === 'all' ? 'Unisex' : AUDIENCE_LABELS[svc.audience].singular}
                         </span>
                       )}
@@ -866,7 +866,7 @@ function StaffSheet({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
+              className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-fg/[0.03]"
               style={{ borderColor: 'var(--border-color)' }}
             >
               Cancelar

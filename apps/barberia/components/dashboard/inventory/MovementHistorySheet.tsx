@@ -120,7 +120,7 @@ export function MovementHistorySheet({ item, onClose }: { item: InventoryItem; o
         {rows.length > 0 && (
           <ul
             className="flex flex-col divide-y rounded-xl border"
-            style={{ borderColor: 'var(--border-color)', backgroundColor: '#111111' }}
+            style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--card-color, #111111)' }}
           >
             {rows.map((m) => <MovementRow key={m.id} m={m} />)}
           </ul>
@@ -136,7 +136,7 @@ export function MovementHistorySheet({ item, onClose }: { item: InventoryItem; o
           <button
             type="button"
             onClick={() => load(page + 1, () => false)}
-            className="self-center text-sm font-semibold px-4 py-2 rounded-xl border transition-colors hover:bg-white/[0.04]"
+            className="self-center text-sm font-semibold px-4 py-2 rounded-xl border transition-colors hover:bg-fg/[0.04]"
             style={{ borderColor: 'var(--border-color)', color: 'var(--primary-color)' }}
           >
             Ver más

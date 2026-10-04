@@ -49,7 +49,7 @@ const KIND_CHIPS: { key: KindFilter; label: string }[] = [
 const PAGE_SIZE = 150
 
 const cardStyle = {
-  background: 'var(--surface-color, rgba(255,255,255,0.03))',
+  background: 'rgb(var(--fg) / 0.03)',
   border: '1px solid var(--border-color)',
 } as const
 
@@ -81,7 +81,7 @@ function MovementRow({ m }: { m: MoneyMovement }) {
     <li className="flex items-start gap-3 py-3">
       <span
         className="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-xinuco-muted"
-        style={{ background: 'rgba(255,255,255,0.05)' }}
+        style={{ background: 'rgb(var(--fg) / 0.05)' }}
         title={SOURCE_LABEL[m.source]}
         aria-hidden
       >

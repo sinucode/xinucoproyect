@@ -356,7 +356,7 @@ function QuickBookingBody({
                         <button
                           type="button"
                           onClick={() => { setCustomer(c); setError(null) }}
-                          className="flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-xinuco-border bg-xinuco-surface px-3 py-2 text-left active:bg-white/[0.06]"
+                          className="flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-xinuco-border bg-xinuco-surface px-3 py-2 text-left active:bg-fg/[0.06]"
                         >
                           <span className="truncate text-sm font-medium text-xinuco-text">{c.full_name}</span>
                           <span className="shrink-0 text-xs text-xinuco-muted">{c.phone}</span>

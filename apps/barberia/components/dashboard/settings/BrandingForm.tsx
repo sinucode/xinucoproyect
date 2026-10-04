@@ -304,7 +304,7 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
         </h2>
         <div
           className="rounded-xl p-5 flex flex-col gap-4"
-          style={{ background: '#111111', border: '1px solid var(--border-color)' }}
+          style={{ background: 'var(--card-color, #111111)', border: '1px solid var(--border-color)' }}
         >
           {/* Nombre — se edita en Datos del negocio */}
           <div className="flex flex-col gap-1.5">
@@ -367,12 +367,12 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
         </h2>
         <div
           className="rounded-xl p-5 grid grid-cols-1 sm:grid-cols-2 gap-5"
-          style={{ background: '#111111', border: '1px solid var(--border-color)' }}
+          style={{ background: 'var(--card-color, #111111)', border: '1px solid var(--border-color)' }}
         >
-          {/* Modo de la página de reservas — aplica un preset de fondo/superficie/texto */}
+          {/* Modo claro/oscuro — aplica un preset de fondo/superficie/texto a la página de reservas y al panel */}
           <div className="sm:col-span-2 flex flex-col gap-1.5">
             <span id="theme-mode-label" className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">
-              Modo de la página de reservas
+              Modo claro / oscuro
             </span>
             <div role="radiogroup" aria-labelledby="theme-mode-label" className="grid grid-cols-2 gap-2">
               {([
@@ -399,8 +399,8 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
               })}
             </div>
             <p className="text-xs text-xinuco-muted">
-              Solo cambia la página que ven tus clientes al reservar. El panel del negocio siempre es oscuro.
-              Puedes ajustar cada color después.
+              Se aplica a la página de reservas de tus clientes y al panel del negocio (administrador y barberos).
+              En la página de reservas puedes ajustar cada color después.
             </p>
           </div>
           <ColorField
@@ -437,7 +437,7 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
         </h2>
         <div
           className="rounded-xl p-5"
-          style={{ background: '#111111', border: '1px solid var(--border-color)' }}
+          style={{ background: 'var(--card-color, #111111)', border: '1px solid var(--border-color)' }}
         >
           <div className="flex flex-col gap-1.5">
             <label
@@ -485,7 +485,7 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
         aria-label="Logo del negocio"
         className="rounded-xl px-5 py-4 flex items-center gap-3"
         style={{
-          background: '#111111',
+          background: 'var(--card-color, #111111)',
           border:     '1px dashed var(--border-color)',
         }}
       >
@@ -505,8 +505,8 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
           className="flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm animate-fade-in"
           style={
             status === 'success'
-              ? { background: 'rgba(74,222,128,0.1)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.2)' }
-              : { background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)' }
+              ? { background: 'rgba(74,222,128,0.1)', color: 'var(--st-green, #4ade80)', border: '1px solid rgba(74,222,128,0.2)' }
+              : { background: 'rgba(248,113,113,0.1)', color: 'var(--danger-text, #f87171)', border: '1px solid rgba(248,113,113,0.2)' }
           }
         >
           {status === 'success' ? (

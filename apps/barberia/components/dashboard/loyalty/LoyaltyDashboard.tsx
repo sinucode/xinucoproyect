@@ -63,7 +63,7 @@ function formatDate(iso: string): string {
 const unitWord = (mode: LoyaltyMode, n: number) =>
   mode === 'points' ? (n === 1 ? 'punto' : 'puntos') : (n === 1 ? 'sello' : 'sellos')
 
-const CARD_STYLE = { border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }
+const CARD_STYLE = { border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.02)' }
 
 // ════════════════════════════════════════════════════════════════════════════
 // COMPONENTE PRINCIPAL — LoyaltyDashboard
@@ -444,7 +444,7 @@ function AdjustSheet({
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            className="p-1 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors"
             aria-label="Cerrar"
           >
             <X size={18} />
@@ -565,7 +565,7 @@ function MovementsTable({ movements, mode }: { movements: LoyaltyMovement[]; mod
         <div className="rounded-xl overflow-x-auto" style={{ border: '1px solid var(--border-color)' }}>
           <table className="w-full text-left min-w-[640px]">
             <thead>
-              <tr style={{ background: 'var(--surface-color, rgba(255,255,255,0.02))' }}>
+              <tr style={{ background: 'rgb(var(--fg) / 0.02)' }}>
                 {['Cliente', 'Tipo', unitsLabel, 'Equivale a', 'Fecha', 'Nota'].map((h, i) => (
                   <th
                     key={h}
@@ -583,7 +583,7 @@ function MovementsTable({ movements, mode }: { movements: LoyaltyMovement[]; mod
                 return (
                   <tr
                     key={m.id}
-                    className="transition-colors hover:bg-white/[0.02]"
+                    className="transition-colors hover:bg-fg/[0.02]"
                     style={{ borderTop: '1px solid var(--border-color)' }}
                   >
                     <td className="px-4 py-3">
@@ -618,7 +618,7 @@ function MovementsTable({ movements, mode }: { movements: LoyaltyMovement[]; mod
           </table>
           <p
             className="px-4 py-3 text-xs text-xinuco-muted"
-            style={{ borderTop: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+            style={{ borderTop: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.02)' }}
           >
             Últimos {movements.length} {movements.length === 1 ? 'movimiento' : 'movimientos'} (máximo 100)
           </p>

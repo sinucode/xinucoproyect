@@ -84,29 +84,29 @@ function InventorySkeleton() {
         style={{ borderColor: 'var(--border-color)' }}
       >
         <div className="flex items-center gap-4">
-          <div className="w-11 h-11 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+          <div className="w-11 h-11 rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
           <div className="flex flex-col gap-2">
-            <div className="h-6 w-36 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="h-3 w-56 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+            <div className="h-6 w-36 rounded-md" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+            <div className="h-3 w-56 rounded-md" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
           </div>
         </div>
-        <div className="h-10 w-36 rounded-lg" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+        <div className="h-10 w-36 rounded-lg" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
       </div>
 
       {/* Summary chips skeleton */}
       <div className="flex gap-3 flex-wrap">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="h-12 w-40 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+          <div key={i} className="h-12 w-40 rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
         ))}
       </div>
 
       {/* Search bar skeleton */}
-      <div className="h-10 w-full rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+      <div className="h-10 w-full rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
 
       {/* Item rows skeleton */}
       <div className="flex flex-col gap-3">
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="h-20 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+          <div key={i} className="h-20 rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
         ))}
       </div>
     </div>

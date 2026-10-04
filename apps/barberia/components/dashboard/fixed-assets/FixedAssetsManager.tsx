@@ -48,7 +48,7 @@ function SummaryCard({
   return (
     <div
       className={`rounded-xl px-4 py-3.5 flex flex-col gap-1.5 border min-w-0 ${className}`}
-      style={{ backgroundColor: '#111111', borderColor: 'var(--border-color)' }}
+      style={{ backgroundColor: 'var(--card-color, #111111)', borderColor: 'var(--border-color)' }}
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{label}</span>
@@ -185,7 +185,7 @@ export function FixedAssetsManager({
         role="tablist"
         aria-label="Equipos"
         className="flex gap-1 p-1 rounded-xl border self-start w-full sm:w-auto"
-        style={{ borderColor: 'var(--border-color)', backgroundColor: '#0D0D0D' }}
+        style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--sunken-color, #0D0D0D)' }}
       >
         {tabBtn('active', 'En uso', assets.length)}
         {tabBtn('disposed', 'Dados de baja', disposed.length)}
@@ -195,7 +195,7 @@ export function FixedAssetsManager({
       {list.length === 0 ? (
         <div
           className="rounded-xl border px-5 py-10 flex flex-col items-center gap-3 text-center"
-          style={{ borderColor: 'var(--border-color)', backgroundColor: '#111111' }}
+          style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--card-color, #111111)' }}
         >
           <div
             className="w-11 h-11 rounded-xl flex items-center justify-center"

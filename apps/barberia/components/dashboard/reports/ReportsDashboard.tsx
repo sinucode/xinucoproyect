@@ -26,7 +26,7 @@ import { Delta, StatTile } from './StatTile'
 
 type CategoryInfo = Pick<ExpenseCategoryRow, 'slug' | 'name' | 'color' | 'is_hidden'>
 
-const CARD_STYLE = { background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' } as const
+const CARD_STYLE = { background: 'rgb(var(--fg) / 0.03)', border: '1px solid var(--border-color)' } as const
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (

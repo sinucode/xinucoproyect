@@ -114,7 +114,7 @@ export function FundsWarning({ check }: { check: FundsCheck }) {
         <div
           role="alert"
           className="flex flex-col gap-3 rounded-xl border px-3 py-3 text-xs animate-fade-in"
-          style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)' }}
+          style={{ color: 'var(--st-amber, #fbbf24)', borderColor: 'rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)' }}
         >
           <p className="flex items-start gap-2">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />

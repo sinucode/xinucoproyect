@@ -1,6 +1,6 @@
 // lib/brand-theme.ts — Modo claro/oscuro de la página de reservas y helpers de color del tema.
-// El modo SOLO aplica al portal del cliente (/[slug], /[slug]/book, login, cancelar): el dashboard
-// (admin y barberos) es siempre oscuro (ver app/[slug]/dashboard/layout.tsx).
+// El modo aplica al portal del cliente (/[slug], /[slug]/book, login, cancelar) y al dashboard
+// (admin y barberos): el layout del dashboard fija sus propios neutros según el modo (ver app/[slug]/dashboard/layout.tsx).
 
 import type { ThemeMode } from '@xinuco/types'
 

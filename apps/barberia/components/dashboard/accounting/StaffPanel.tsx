@@ -7,7 +7,7 @@ import { formatCOP } from '@xinuco/utils'
 import { sortStaffByProduction, staffTotals, summarizeStaff } from '@/lib/accounting-utils'
 
 const cardStyle = {
-  background: 'var(--surface-color, rgba(255,255,255,0.03))',
+  background: 'rgb(var(--fg) / 0.03)',
   border: '1px solid var(--border-color)',
 } as const
 

@@ -2,28 +2,50 @@ import { ReactNode } from 'react'
 import { createClient } from '@xinuco/supabase/server'
 import { redirect } from 'next/navigation'
 import type { CSSProperties } from 'react'
-import { THEME_PRESETS, MUTED_COLORS } from '@/lib/brand-theme'
+import { THEME_PRESETS, MUTED_COLORS, resolveThemeMode } from '@/lib/brand-theme'
 import { Header } from '@/components/layout/Header'
 import { BottomNav } from '@/components/layout/BottomNav'
 import { DashboardSidebar } from '@/components/layout/DashboardSidebar'
 import { FeaturesProvider } from '@/lib/features/context'
 import { RoleProvider } from '@/lib/features/role-context'
 import { TrialBanner } from '@/components/dashboard/TrialBanner'
-import type { Business, BusinessFeatures, UserRole, Profile } from '@xinuco/types'
+import type { Business, BusinessFeatures, UserRole, Profile, ThemeMode } from '@xinuco/types'
 
-// El dashboard (admin y barberos) es SIEMPRE oscuro: ignora fondo/superficie/texto del negocio y
-// conserva color principal y tipografía (heredados del layout del tenant). El modo claro/oscuro
-// elegido en Apariencia solo aplica a la página de reservas.
-const DASHBOARD_THEME_VARS = {
-  '--bg-color':        THEME_PRESETS.dark.bgColor,
-  '--secondary-color': THEME_PRESETS.dark.secondaryColor,
-  '--text-color':      THEME_PRESETS.dark.textColor,
-  '--border-color':    `${THEME_PRESETS.dark.secondaryColor}CC`,
-  '--muted-color':     MUTED_COLORS.dark,
-  colorScheme:         'dark',
-  backgroundColor:     THEME_PRESETS.dark.bgColor,
-  color:               THEME_PRESETS.dark.textColor,
-} as CSSProperties
+// El dashboard (admin y barberos) sigue el modo claro/oscuro elegido en Apariencia (brand_config.themeMode).
+// Ignora fondo/superficie/texto personalizados del negocio y conserva color principal y tipografía
+// (heredados del layout del tenant). Oscuro = valores históricos; claro = neutros claros fijos.
+// Los neutros zinc / velos fg se invierten por CSS (globals.css, [data-dashboard-theme][data-theme-mode="light"]).
+const DASHBOARD_LIGHT = {
+  bgColor:        '#F7F7F8',
+  secondaryColor: '#FFFFFF',
+  textColor:      'var(--card-color, #111111)',
+  borderColor:    'rgba(0,0,0,0.10)',
+} as const
+
+function dashboardThemeVars(mode: ThemeMode): CSSProperties {
+  if (mode === 'light') {
+    return {
+      '--bg-color':        DASHBOARD_LIGHT.bgColor,
+      '--secondary-color': DASHBOARD_LIGHT.secondaryColor,
+      '--text-color':      DASHBOARD_LIGHT.textColor,
+      '--border-color':    DASHBOARD_LIGHT.borderColor,
+      '--muted-color':     MUTED_COLORS.light,
+      colorScheme:         'light',
+      backgroundColor:     DASHBOARD_LIGHT.bgColor,
+      color:               DASHBOARD_LIGHT.textColor,
+    } as CSSProperties
+  }
+  return {
+    '--bg-color':        THEME_PRESETS.dark.bgColor,
+    '--secondary-color': THEME_PRESETS.dark.secondaryColor,
+    '--text-color':      THEME_PRESETS.dark.textColor,
+    '--border-color':    `${THEME_PRESETS.dark.secondaryColor}CC`,
+    '--muted-color':     MUTED_COLORS.dark,
+    colorScheme:         'dark',
+    backgroundColor:     THEME_PRESETS.dark.bgColor,
+    color:               THEME_PRESETS.dark.textColor,
+  } as CSSProperties
+}
 
 export default async function DashboardLayout({
   children,
@@ -55,10 +77,12 @@ export default async function DashboardLayout({
 
   const features        = (business?.features_enabled ?? {}) as unknown as BusinessFeatures
   const trialExpiresAt  = business?.trial_expires_at ?? null
+  // Modo claro/oscuro del negocio (brand_config.themeMode; por defecto oscuro)
+  const themeMode       = resolveThemeMode((business?.brand_config as { themeMode?: unknown } | null)?.themeMode)
 
   return (
     // Contenedor interno de tema: los sheets (portal) toman el [data-tenant-theme] MÁS interno
-    <div data-tenant-theme="" data-dashboard-theme="" className="flex flex-col flex-1" style={DASHBOARD_THEME_VARS}>
+    <div data-tenant-theme="" data-dashboard-theme="" data-theme-mode={themeMode} className="flex flex-col flex-1" style={dashboardThemeVars(themeMode)}>
     <RoleProvider role={(profile?.role ?? 'barber') as UserRole}>
       <FeaturesProvider features={features} trialExpiresAt={trialExpiresAt}>
         <DashboardSidebar slug={slug} business={business} userName={profile?.full_name ?? undefined}>

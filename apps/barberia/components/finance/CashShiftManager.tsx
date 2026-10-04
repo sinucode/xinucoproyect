@@ -260,7 +260,7 @@ export function CashShiftManager({
                 setActualClosing('')
                 setErrorMsg(null)
               }}
-              className="px-4 py-2 rounded-xl text-xs font-bold border border-zinc-800 text-zinc-300 hover:text-zinc-150 hover:bg-white/[0.04] transition-all flex items-center gap-2"
+              className="px-4 py-2 rounded-xl text-xs font-bold border border-zinc-800 text-zinc-300 hover:text-zinc-150 hover:bg-fg/[0.04] transition-all flex items-center gap-2"
             >
               <Lock size={13} />
               Cerrar caja (arqueo)

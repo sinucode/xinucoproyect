@@ -71,7 +71,7 @@ export function StatTile({
   return (
     <div
       className={`rounded-xl px-3.5 py-3 min-w-0 flex flex-col gap-1 ${className}`}
-      style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+      style={{ background: 'rgb(var(--fg) / 0.03)', border: '1px solid var(--border-color)' }}
     >
       <span className="text-[11px] font-semibold uppercase tracking-wider text-xinuco-muted">{label}</span>
       <span className="text-xl sm:text-2xl font-bold tabular-nums text-xinuco-text leading-tight break-words">{value}</span>

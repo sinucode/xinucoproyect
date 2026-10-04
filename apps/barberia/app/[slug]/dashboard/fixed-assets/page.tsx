@@ -82,26 +82,26 @@ function FixedAssetsSkeleton() {
         style={{ borderColor: 'var(--border-color)' }}
       >
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+          <div className="w-12 h-12 rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
           <div className="flex flex-col gap-2">
-            <div className="h-6 w-40 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="h-3 w-64 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+            <div className="h-6 w-40 rounded-md" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+            <div className="h-3 w-64 rounded-md" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
           </div>
         </div>
-        <div className="h-10 w-36 rounded-lg" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+        <div className="h-10 w-36 rounded-lg" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
       </div>
 
       {/* Summary cards skeleton */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="h-24 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+          <div key={i} className="h-24 rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
         ))}
       </div>
 
       {/* Asset cards skeleton */}
       <div className="flex flex-col gap-3">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="h-28 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+          <div key={i} className="h-28 rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
         ))}
       </div>
     </div>

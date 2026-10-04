@@ -214,7 +214,7 @@ export function StaffDayTimeline({
                 type="button"
                 onClick={() => setDetailId(a.id)}
                 aria-label={`Ver cita de ${a.customer_name} del ${dayLabel(apptDateKey(a.start_time), todayKey)} a las ${isoTimeHHMM(a.start_time)}`}
-                className="flex min-h-11 w-full items-center gap-2 rounded-xl border border-amber-500/25 bg-black/20 px-3 py-2 text-left text-xs transition hover:bg-black/30 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                className="flex min-h-11 w-full items-center gap-2 rounded-xl border border-amber-500/25 bg-black/20 light:bg-black/[0.04] px-3 py-2 text-left text-xs transition hover:bg-black/30 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-semibold text-xinuco-text">{a.customer_name}</span>

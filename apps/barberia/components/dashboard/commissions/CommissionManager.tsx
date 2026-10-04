@@ -389,7 +389,7 @@ function RuleRow({
             <button
               type="button"
               onClick={onEdit}
-              className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+              className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors"
               aria-label={`Editar regla: ${title}`}
               title="Editar"
             >
@@ -579,7 +579,7 @@ function RuleModal({
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors"
             aria-label="Cerrar"
           >
             <X size={20} />
@@ -637,7 +637,7 @@ function RuleModal({
             <p className={labelCls}>Comisión por servicio</p>
             <div
               className="grid grid-cols-2 gap-1 p-1 rounded-xl"
-              style={{ background: 'rgba(255,255,255,0.04)' }}
+              style={{ background: 'rgb(var(--fg) / 0.04)' }}
             >
               {([
                 ['percentage', 'Porcentaje', Percent],
@@ -726,7 +726,7 @@ function RuleModal({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
+              className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-fg/[0.03]"
               style={{ borderColor: 'var(--border-color)' }}
             >
               Cancelar

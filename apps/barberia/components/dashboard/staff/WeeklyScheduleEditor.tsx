@@ -115,7 +115,7 @@ export function WeeklyScheduleEditor({ value, onChange, disabled = false }: Week
                   disabled={disabled}
                   onClick={() => toggleQuickDay(day.index)}
                   className={`w-9 h-9 rounded-full text-xs font-bold border transition-colors disabled:opacity-50 ${
-                    on ? 'border-transparent' : 'text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.04]'
+                    on ? 'border-transparent' : 'text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.04]'
                   }`}
                   style={
                     on
@@ -140,7 +140,7 @@ export function WeeklyScheduleEditor({ value, onChange, disabled = false }: Week
                   disabled={disabled}
                   onClick={() => setQuickDays(p.days)}
                   className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors disabled:opacity-50 ${
-                    active ? 'text-xinuco-text' : 'text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.04]'
+                    active ? 'text-xinuco-text' : 'text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.04]'
                   }`}
                   style={
                     active
@@ -207,7 +207,7 @@ export function WeeklyScheduleEditor({ value, onChange, disabled = false }: Week
       {/* ── Días (excepciones) ─────────────────────────────────────────── */}
       <div
         className="flex flex-col gap-0 rounded-xl overflow-hidden"
-        style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+        style={{ border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.02)' }}
       >
         {WEEK_DAYS.map((day, idx) => {
           const state = value[day.index]
@@ -231,7 +231,7 @@ export function WeeklyScheduleEditor({ value, onChange, disabled = false }: Week
                     {day.name}
                   </span>
                   {differs && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold border bg-white/5 border-white/10 text-xinuco-muted">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold border bg-fg/5 border-fg/10 text-xinuco-muted">
                       distinto
                     </span>
                   )}

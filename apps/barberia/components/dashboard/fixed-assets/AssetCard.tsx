@@ -89,13 +89,13 @@ export function AssetCard({ asset, today, disposed = false, onEdit, onDispose }:
   return (
     <div
       className="rounded-xl border overflow-hidden"
-      style={{ backgroundColor: '#111111', borderColor: 'var(--border-color)' }}
+      style={{ backgroundColor: 'var(--card-color, #111111)', borderColor: 'var(--border-color)' }}
     >
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        className="w-full text-left p-4 flex flex-col gap-3 hover:bg-white/[0.02] transition-colors"
+        className="w-full text-left p-4 flex flex-col gap-3 hover:bg-fg/[0.02] transition-colors"
       >
         {/* Nombre y categoría */}
         <div className="flex items-start justify-between gap-3">
@@ -248,7 +248,7 @@ export function AssetCard({ asset, today, disposed = false, onEdit, onDispose }:
                 <button
                   type="button"
                   onClick={() => onEdit(asset)}
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium text-zinc-300 hover:text-zinc-100 hover:bg-white/[0.04] transition-colors"
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium text-zinc-300 hover:text-zinc-100 hover:bg-fg/[0.04] transition-colors"
                   style={{ borderColor: 'var(--border-color)' }}
                 >
                   <Pencil size={14} /> Editar

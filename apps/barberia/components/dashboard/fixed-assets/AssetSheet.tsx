@@ -403,7 +403,7 @@ export function AssetSheet({ editAsset, hasOpenShift, onClose, onDone }: AssetSh
         </div>
 
         {!isEdit && (
-          <p className="flex items-start gap-2 text-[11px] text-zinc-500 rounded-lg bg-white/[0.03] px-3 py-2">
+          <p className="flex items-start gap-2 text-[11px] text-zinc-500 rounded-lg bg-fg/[0.03] px-3 py-2">
             <Info size={12} className="mt-0.5 flex-shrink-0" />
             La compra no es un gasto del mes: el equipo se va desgastando poco a poco y ese desgaste se resta en Contabilidad.
           </p>

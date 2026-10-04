@@ -40,7 +40,7 @@ export function ChartCard({
   return (
     <section
       className={`rounded-2xl p-4 sm:p-5 min-w-0 ${className}`}
-      style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+      style={{ background: 'rgb(var(--fg) / 0.03)', border: '1px solid var(--border-color)' }}
       aria-label={title}
     >
       <div className="flex items-start justify-between gap-3">

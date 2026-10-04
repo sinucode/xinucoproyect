@@ -98,7 +98,7 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
   const bgColor        = bc.bgColor        || DEFAULTS.bgColor
   const textColor      = bc.textColor      || DEFAULTS.textColor
   const font           = resolveFont(bc.fontFamily)
-  // Modo claro/oscuro: solo afecta al portal del cliente (el dashboard fuerza oscuro en su propio layout)
+  // Modo claro/oscuro: aplica al portal del cliente y al dashboard (que fija sus propios neutros según este modo)
   const themeMode      = resolveThemeMode(bc.themeMode)
 
   // CSS Variables inyectadas en el servidor (Zero-Flicker)

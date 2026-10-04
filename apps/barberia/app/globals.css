@@ -26,6 +26,22 @@
   /* Sombras */
   --shadow-glow: 0 0 20px rgba(197, 160, 89, 0.25);
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
+
+  /* Escala de neutros zinc como variables (canales RGB) — valores = paleta zinc de Tailwind 3.4.
+     tailwind.config.ts mapea zinc-* a estas variables; el dashboard en modo claro las invierte. */
+  --zinc-50:  250 250 250;
+  --zinc-100: 244 244 245;
+  --zinc-200: 228 228 231;
+  --zinc-300: 212 212 216;
+  --zinc-400: 161 161 170;
+  --zinc-500: 113 113 122;
+  --zinc-600: 82 82 91;
+  --zinc-700: 63 63 70;
+  --zinc-800: 39 39 42;
+  --zinc-900: 24 24 27;
+  --zinc-950: 9 9 11;
+  /* Tinta neutra para velos translúcidos (bg-fg/5…): blanco por defecto */
+  --fg: 255 255 255;
 }
 
 /* ============================================================
@@ -167,3 +183,124 @@ body {
     @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium;
   }
 }
+
+/* ============================================================
+   Dashboard del negocio (admin y barberos) — tema por negocio
+   El layout del dashboard marca data-dashboard-theme y data-theme-mode (brand_config.themeMode).
+   Oscuro = valores por defecto de :root (idéntico al histórico); claro = escala neutra invertida.
+   ============================================================ */
+/* Superficies puntuales del dashboard (antes hex fijos). Oscuro: valores históricos. */
+[data-dashboard-theme] {
+  --card-color:     #111111;  /* tarjetas / paneles */
+  --sunken-color:   #0D0D0D;  /* campos y zonas hundidas */
+  --skeleton-color: #1A1A1A;  /* skeleton de carga */
+  --off-color:      #333333;  /* interruptor apagado / borde neutro */
+  --line-color:     #222222;  /* separadores sutiles */
+  --soft-text:      #AAAAAA;  /* texto secundario */
+  --faint-text:     #666666;  /* texto terciario */
+  /* Neutros de los gráficos (reports/charts/theme.ts) */
+  --chart-grid:     #2c2c2a;  /* líneas guía */
+  --chart-axis:     #383835;  /* ejes y línea base */
+  --chart-muted:    #898781;  /* texto de ejes */
+  --chart-ink-2:    #c3c2b7;  /* texto secundario */
+  --chart-ink:      #ffffff;  /* texto principal */
+  --chart-surface:  #1a1a19;  /* fondo de tooltips */
+  --chart-empty:    #1f1f1d;  /* celda sin dato */
+  --danger-text:    #f87171;  /* rojo de aviso (inline styles) */
+  --danger-soft:    #fca5a5;
+  --st-red:         #ef4444;  /* estados en inline styles (texto) */
+  --st-amber:       #fbbf24;
+  --st-amber-2:     #f59e0b;
+  --st-green:       #4ade80;
+  --st-green-2:     #22c55e;
+  --st-emerald:     #34d399;
+  --st-blue:        #60a5fa;
+}
+
+[data-dashboard-theme][data-theme-mode="light"] {
+  /* Escala zinc invertida (950↔50, 900↔100, 800↔200, 700↔300, 600↔400; 500 igual) */
+  --zinc-50:  9 9 11;
+  --zinc-100: 24 24 27;
+  --zinc-200: 39 39 42;
+  --zinc-300: 63 63 70;
+  --zinc-400: 82 82 91;
+  --zinc-500: 113 113 122;
+  --zinc-600: 161 161 170;
+  --zinc-700: 212 212 216;
+  --zinc-800: 228 228 231;
+  --zinc-900: 244 244 245;
+  --zinc-950: 250 250 250;
+  --fg: 0 0 0;
+
+  --card-color:     #FFFFFF;
+  --sunken-color:   #F4F4F5;
+  --skeleton-color: #E4E4E7;
+  --off-color:      #D4D4D8;
+  --line-color:     rgba(0, 0, 0, 0.08);
+  --soft-text:      #52525B;
+  --faint-text:     #71717A;
+  --chart-grid:     #E4E4E7;
+  --chart-axis:     #D4D4D8;
+  --chart-muted:    #71717A;
+  --chart-ink-2:    #52525B;
+  --chart-ink:      #111111;
+  --chart-surface:  #FFFFFF;
+  --chart-empty:    #F4F4F5;
+  --danger-text:    #B91C1C;
+  --danger-soft:    #B91C1C;
+  --st-red:         #B91C1C;
+  --st-amber:       #B45309;
+  --st-amber-2:     #B45309;
+  --st-green:       #15803D;
+  --st-green-2:     #15803D;
+  --st-emerald:     #047857;
+  --st-blue:        #1D4ED8;
+}
+
+/* Colores de estado: los tonos 300/400/500 son claros y se pierden sobre fondo blanco → versión 700 */
+[data-dashboard-theme][data-theme-mode="light"] .text-red-300,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-red-300:hover,
+[data-dashboard-theme][data-theme-mode="light"] .text-red-400,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-red-400:hover,
+[data-dashboard-theme][data-theme-mode="light"] .text-red-500,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-red-500:hover { color: #B91C1C; }
+[data-dashboard-theme][data-theme-mode="light"] .text-amber-300,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-amber-300:hover,
+[data-dashboard-theme][data-theme-mode="light"] .text-amber-400,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-amber-400:hover,
+[data-dashboard-theme][data-theme-mode="light"] .text-amber-500,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-amber-500:hover { color: #B45309; }
+[data-dashboard-theme][data-theme-mode="light"] .text-emerald-300,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-emerald-300:hover,
+[data-dashboard-theme][data-theme-mode="light"] .text-emerald-400,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-emerald-400:hover,
+[data-dashboard-theme][data-theme-mode="light"] .text-emerald-500,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-emerald-500:hover { color: #047857; }
+[data-dashboard-theme][data-theme-mode="light"] .text-sky-300,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-sky-300:hover,
+[data-dashboard-theme][data-theme-mode="light"] .text-sky-400,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-sky-400:hover { color: #0369A1; }
+[data-dashboard-theme][data-theme-mode="light"] .text-yellow-300,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-yellow-300:hover,
+[data-dashboard-theme][data-theme-mode="light"] .text-yellow-400,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-yellow-400:hover { color: #A16207; }
+[data-dashboard-theme][data-theme-mode="light"] .text-rose-400,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-rose-400:hover { color: #BE123C; }
+[data-dashboard-theme][data-theme-mode="light"] .text-violet-400,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-violet-400:hover { color: #6D28D9; }
+[data-dashboard-theme][data-theme-mode="light"] .text-green-300,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-green-300:hover,
+[data-dashboard-theme][data-theme-mode="light"] .text-green-400,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-green-400:hover,
+[data-dashboard-theme][data-theme-mode="light"] .text-green-500,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-green-500:hover { color: #15803D; }
+[data-dashboard-theme][data-theme-mode="light"] .text-blue-300,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-blue-300:hover,
+[data-dashboard-theme][data-theme-mode="light"] .text-blue-400,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-blue-400:hover,
+[data-dashboard-theme][data-theme-mode="light"] .text-blue-500,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-blue-500:hover { color: #1D4ED8; }
+[data-dashboard-theme][data-theme-mode="light"] .text-orange-400,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-orange-400:hover { color: #C2410C; }
+[data-dashboard-theme][data-theme-mode="light"] .text-lime-400,
+[data-dashboard-theme][data-theme-mode="light"] .hover\:text-lime-400:hover { color: #4D7C0F; }

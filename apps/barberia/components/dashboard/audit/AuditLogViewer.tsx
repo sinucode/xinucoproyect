@@ -58,7 +58,7 @@ const CATEGORY_ICON: Record<AuditCategory, LucideIcon> = {
   customers:    UserRound,
 }
 
-const AMBER = '#fbbf24'
+const AMBER = 'var(--st-amber, #fbbf24)'
 const AMBER_BORDER = 'rgba(251,191,36,0.35)'
 const AMBER_BG = 'rgba(251,191,36,0.10)'
 
@@ -87,7 +87,7 @@ function AlertsCard({ alerts }: { alerts: AuditAlertItem[] | null }) {
     <section
       aria-label="Últimos 7 días"
       className="rounded-2xl p-4 sm:p-5 flex flex-col gap-3"
-      style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
+      style={{ border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.03)' }}
     >
       <h2 className="text-sm font-bold text-xinuco-text uppercase tracking-wider">Últimos 7 días</h2>
       {alerts === null ? (
@@ -133,7 +133,7 @@ function DetailTable({ log }: { log: AuditLog }) {
     <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border-color)' }}>
       <table className="w-full table-fixed text-xs">
         <thead>
-          <tr className="text-left text-[11px] uppercase tracking-wider text-xinuco-muted" style={{ background: 'rgba(255,255,255,0.03)' }}>
+          <tr className="text-left text-[11px] uppercase tracking-wider text-xinuco-muted" style={{ background: 'rgb(var(--fg) / 0.03)' }}>
             <th className="px-3 py-2 font-semibold">Campo</th>
             {both ? (
               <>
@@ -420,7 +420,7 @@ export function AuditLogViewer({
           !pending && !error && (
             <div
               className="rounded-xl px-4 py-10 text-center text-sm text-xinuco-muted"
-              style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+              style={{ border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.02)' }}
             >
               Todavía no hay registros con estos filtros.
             </div>
@@ -434,7 +434,7 @@ export function AuditLogViewer({
                 </h3>
                 <ul
                   className="rounded-xl overflow-hidden min-w-0"
-                  style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+                  style={{ border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.02)' }}
                 >
                   {g.items.map((log, i) => (
                     <LogRow

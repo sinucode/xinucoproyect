@@ -50,7 +50,7 @@ export function PayoutRequestUpdates({ slug, updates }: { slug: string; updates:
       {visible.map(u => {
         const paid = u.status === 'paid'
         const Icon = paid ? CheckCircle2 : XCircle
-        const color = paid ? '#4ade80' : '#f87171'
+        const color = paid ? 'var(--st-green, #4ade80)' : 'var(--danger-text, #f87171)'
         return (
           <div
             key={u.id}
@@ -76,7 +76,7 @@ export function PayoutRequestUpdates({ slug, updates }: { slug: string; updates:
               type="button"
               onClick={() => dismiss(u.id)}
               aria-label="Descartar aviso"
-              className="shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-xl text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.06] transition-colors"
+              className="shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-xl text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.06] transition-colors"
             >
               <X size={18} aria-hidden="true" />
             </button>

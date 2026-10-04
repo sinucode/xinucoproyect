@@ -51,23 +51,23 @@ function ServicesSkeleton() {
       {/* Header skeleton */}
       <div className="flex items-center justify-between pb-6 border-b" style={{ borderColor: 'var(--border-color)' }}>
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+          <div className="w-12 h-12 rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
           <div className="flex flex-col gap-2">
-            <div className="h-6 w-48 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="h-3 w-64 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+            <div className="h-6 w-48 rounded-md" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+            <div className="h-3 w-64 rounded-md" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
           </div>
         </div>
-        <div className="h-10 w-36 rounded-lg" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+        <div className="h-10 w-36 rounded-lg" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
       </div>
 
       {/* Table skeleton */}
       <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-color)' }}>
         {/* Header row */}
-        <div className="flex gap-4 px-5 py-3.5" style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))' }}>
-          <div className="h-3 w-24 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-          <div className="h-3 w-20 rounded hidden sm:block" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-          <div className="h-3 w-16 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-          <div className="h-3 w-16 rounded hidden sm:block" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+        <div className="flex gap-4 px-5 py-3.5" style={{ background: 'rgb(var(--fg) / 0.03)' }}>
+          <div className="h-3 w-24 rounded" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+          <div className="h-3 w-20 rounded hidden sm:block" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+          <div className="h-3 w-16 rounded" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+          <div className="h-3 w-16 rounded hidden sm:block" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
         </div>
 
         {/* Data rows */}
@@ -78,13 +78,13 @@ function ServicesSkeleton() {
             style={{ borderTop: '1px solid var(--border-color)' }}
           >
             <div className="flex flex-col gap-1.5 flex-1">
-              <div className="h-4 w-32 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-              <div className="h-3 w-48 rounded" style={{ background: 'var(--surface-color, #1a1a1a)', opacity: 0.5 }} />
+              <div className="h-4 w-32 rounded" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+              <div className="h-3 w-48 rounded" style={{ background: 'var(--skeleton-color, #1a1a1a)', opacity: 0.5 }} />
             </div>
-            <div className="h-4 w-14 rounded hidden sm:block" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="h-4 w-20 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="h-6 w-11 rounded-full hidden sm:block" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="h-6 w-6 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+            <div className="h-4 w-14 rounded hidden sm:block" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+            <div className="h-4 w-20 rounded" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+            <div className="h-6 w-11 rounded-full hidden sm:block" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+            <div className="h-6 w-6 rounded" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
           </div>
         ))}
       </div>

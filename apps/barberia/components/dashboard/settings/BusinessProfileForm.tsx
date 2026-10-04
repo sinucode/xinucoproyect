@@ -14,7 +14,7 @@ import {
   type BusinessProfileInput,
 } from '@/lib/business-profile'
 
-const cardStyle = { backgroundColor: '#111111', border: '1px solid var(--border-color)' } as const
+const cardStyle = { backgroundColor: 'var(--card-color, #111111)', border: '1px solid var(--border-color)' } as const
 const inputStyle = {
   backgroundColor: 'var(--bg-color)',
   borderColor:     'var(--border-color)',

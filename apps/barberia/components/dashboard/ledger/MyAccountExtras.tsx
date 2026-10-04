@@ -25,7 +25,7 @@ import { formatLedgerDateTime } from '@/lib/team-payments'
 
 const CARD_STYLE = {
   border: '1px solid var(--border-color)',
-  background: 'var(--surface-color, rgba(255,255,255,0.03))',
+  background: 'rgb(var(--fg) / 0.03)',
 }
 
 // ── Resumen por período ───────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ const STATUS_STYLE: Record<PayoutRequestStatus, string> = {
   pending:   'text-yellow-400 bg-yellow-400/10 border-yellow-400/20',
   paid:      'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
   rejected:  'text-red-400 bg-red-400/10 border-red-400/20',
-  cancelled: 'text-xinuco-muted bg-white/[0.04] border-white/10',
+  cancelled: 'text-xinuco-muted bg-fg/[0.04] border-fg/10',
 }
 
 function StatusChip({ status }: { status: PayoutRequestStatus }) {
@@ -383,7 +383,7 @@ function RequestForm({
         <button
           type="button"
           onClick={onClose}
-          className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03] min-h-11"
+          className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-fg/[0.03] min-h-11"
           style={{ borderColor: 'var(--border-color)' }}
         >
           Cancelar

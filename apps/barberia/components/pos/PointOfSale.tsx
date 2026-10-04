@@ -481,7 +481,7 @@ export function PointOfSale({ slug, catalog, compact = false, onSold }: PointOfS
                     type="button"
                     onClick={() => removeProduct(product.id)}
                     aria-label={`Quitar ${product.name} del carrito`}
-                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-zinc-500 hover:text-red-400 hover:bg-white/[0.05] transition-colors shrink-0"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-zinc-500 hover:text-red-400 hover:bg-fg/[0.05] transition-colors shrink-0"
                   >
                     <Trash2 size={14} />
                   </button>

@@ -227,7 +227,7 @@ function StationCard({
             disabled={isPending}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${isPending ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
             style={{
-              backgroundColor: station.is_active ? 'var(--primary-color)' : 'var(--surface-color, #333)',
+              backgroundColor: station.is_active ? 'var(--primary-color)' : 'var(--off-color, #333)',
               border: '1px solid var(--border-color)',
               '--tw-ring-color': 'var(--primary-color)',
             } as React.CSSProperties}
@@ -267,7 +267,7 @@ function StationCard({
       <footer className="flex items-center gap-2 pt-1">
         <button
           onClick={onEdit}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-xinuco-text border transition-colors hover:bg-white/[0.04]"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-xinuco-text border transition-colors hover:bg-fg/[0.04]"
           style={{ borderColor: 'var(--border-color)' }}
         >
           <Pencil size={13} style={{ color: 'var(--primary-color)' }} />
@@ -348,7 +348,7 @@ function ConfirmDelete({
             type="button"
             onClick={onCancel}
             disabled={isPending}
-            className="flex-1 py-2.5 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
+            className="flex-1 py-2.5 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-fg/[0.03]"
             style={{ borderColor: 'var(--border-color)' }}
           >
             Cancelar
@@ -456,7 +456,7 @@ function WorkstationSheet({
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors"
             aria-label="Cerrar panel"
           >
             <X size={20} />
@@ -493,7 +493,7 @@ function WorkstationSheet({
                 {services.map(s => (
                   <label
                     key={s.id}
-                    className="flex items-center gap-2.5 text-sm text-xinuco-text px-2 py-1.5 rounded-md hover:bg-white/[0.03] cursor-pointer"
+                    className="flex items-center gap-2.5 text-sm text-xinuco-text px-2 py-1.5 rounded-md hover:bg-fg/[0.03] cursor-pointer"
                   >
                     <input
                       type="checkbox"
@@ -531,7 +531,7 @@ function WorkstationSheet({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
+              className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-fg/[0.03]"
               style={{ borderColor: 'var(--border-color)' }}
             >
               Cancelar

@@ -210,7 +210,7 @@ export function PurchaseSheet({
           <FundsWarning check={funds} />
         </div>
 
-        <p className="flex items-start gap-2 text-[11px] text-zinc-500 rounded-lg bg-white/[0.03] px-3 py-2">
+        <p className="flex items-start gap-2 text-[11px] text-zinc-500 rounded-lg bg-fg/[0.03] px-3 py-2">
           <Info size={12} className="mt-0.5 flex-shrink-0" />
           La compra no es un gasto: su costo se cuenta cuando vendes el producto.
         </p>
@@ -288,7 +288,7 @@ export function CountSheet({ item, onClose, onDone }: SheetProps) {
           <p
             className={`text-sm font-semibold rounded-lg px-3 py-2 ${
               diff === 0
-                ? 'text-zinc-400 bg-white/[0.04]'
+                ? 'text-zinc-400 bg-fg/[0.04]'
                 : diff > 0
                   ? 'text-emerald-400 bg-emerald-400/10'
                   : 'text-red-400 bg-red-400/10'
@@ -309,7 +309,7 @@ export function CountSheet({ item, onClose, onDone }: SheetProps) {
           />
         </div>
 
-        <p className="flex items-start gap-2 text-[11px] text-zinc-500 rounded-lg bg-white/[0.03] px-3 py-2">
+        <p className="flex items-start gap-2 text-[11px] text-zinc-500 rounded-lg bg-fg/[0.03] px-3 py-2">
           <Info size={12} className="mt-0.5 flex-shrink-0" />
           El stock quedará en lo que contaste y la diferencia se guarda en el historial.
         </p>

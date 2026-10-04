@@ -56,8 +56,8 @@ function StockGauge({ item }: { item: InventoryItem }) {
   const isLow    = item.current_stock < item.min_stock
   const isExact  = item.current_stock === item.min_stock
 
-  const color = isLow    ? '#ef4444'
-              : isExact  ? '#f59e0b'
+  const color = isLow    ? 'var(--st-red, #ef4444)'
+              : isExact  ? 'var(--st-amber-2, #f59e0b)'
               : 'var(--primary-color)'
 
   return (
@@ -121,14 +121,14 @@ function ItemRow({ item, reservations, onAction, onDeactivate, isDeactivating }:
     .map((r) => `${r.customer_name ?? 'Cliente'} — ${reservationWhen(r.start_time)} (${r.quantity})`)
     .join('\n')
 
-  const menuItemCls = 'w-full flex items-center gap-2.5 text-left text-sm px-4 py-2.5 hover:bg-white/[0.05] transition-colors text-zinc-200'
+  const menuItemCls = 'w-full flex items-center gap-2.5 text-left text-sm px-4 py-2.5 hover:bg-fg/[0.05] transition-colors text-zinc-200'
   const pick = (action: PanelAction) => { setMenuOpen(false); onAction(action, item) }
 
   return (
     <div
       className="rounded-xl border transition-colors"
       style={{
-        backgroundColor: '#111111',
+        backgroundColor: 'var(--card-color, #111111)',
         borderColor:     isLow ? 'rgba(239,68,68,0.35)' : 'var(--border-color)',
       }}
     >
@@ -211,7 +211,7 @@ function ItemRow({ item, reservations, onAction, onDeactivate, isDeactivating }:
               onClick={() => setMenuOpen((v) => !v)}
               aria-label="Más acciones"
               aria-expanded={menuOpen}
-              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.05] transition-colors"
+              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-fg/[0.05] transition-colors"
             >
               <MoreVertical size={15} />
             </button>
@@ -220,7 +220,7 @@ function ItemRow({ item, reservations, onAction, onDeactivate, isDeactivating }:
                 <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
                 <div
                   className="absolute right-0 top-8 z-20 rounded-xl shadow-xl border min-w-[190px] overflow-hidden"
-                  style={{ backgroundColor: '#1A1A1A', borderColor: 'var(--border-color)' }}
+                  style={{ backgroundColor: 'var(--secondary-color)', borderColor: 'var(--border-color)' }}
                 >
                   <button onClick={() => pick('purchase')} className={menuItemCls}>
                     <ArrowDownToLine size={14} className="text-zinc-500" /> Registrar compra
@@ -384,7 +384,7 @@ export function InventoryManager({
   const panelItem = panel ? items.find((i) => i.id === panel.itemId) ?? null : null
 
   const inputStyle = {
-    backgroundColor: '#0D0D0D',
+    backgroundColor: 'var(--sunken-color, #0D0D0D)',
     borderColor:     'var(--border-color)',
     color:           'var(--text-color, #F4F4F4)',
   }
@@ -417,7 +417,7 @@ export function InventoryManager({
         {/* Total items */}
         <div
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
-          style={{ backgroundColor: '#111111', borderColor: 'var(--border-color)' }}
+          style={{ backgroundColor: 'var(--card-color, #111111)', borderColor: 'var(--border-color)' }}
         >
           <Package size={14} style={{ color: 'var(--primary-color)' }} />
           <span className="text-zinc-400">Total:</span>
@@ -428,18 +428,18 @@ export function InventoryManager({
         <div
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
           style={{
-            backgroundColor: '#111111',
+            backgroundColor: 'var(--card-color, #111111)',
             borderColor:     lowStockCount > 0 ? 'rgba(245,158,11,0.4)' : 'var(--border-color)',
           }}
         >
           <AlertTriangle
             size={14}
-            style={{ color: lowStockCount > 0 ? '#f59e0b' : 'var(--zinc-500, #71717a)' }}
+            style={{ color: lowStockCount > 0 ? 'var(--st-amber-2, #f59e0b)' : 'rgb(var(--zinc-500))' }}
           />
           <span className="text-zinc-400">Stock bajo:</span>
           <span
             className="font-bold"
-            style={{ color: lowStockCount > 0 ? '#f59e0b' : '#71717a' }}
+            style={{ color: lowStockCount > 0 ? 'var(--st-amber-2, #f59e0b)' : 'rgb(var(--zinc-500))' }}
           >
             {lowStockCount}
           </span>
@@ -449,7 +449,7 @@ export function InventoryManager({
         {totalInventoryValue > 0 && (
           <div
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
-            style={{ backgroundColor: '#111111', borderColor: 'var(--border-color)' }}
+            style={{ backgroundColor: 'var(--card-color, #111111)', borderColor: 'var(--border-color)' }}
           >
             <span className="text-zinc-400">Valor en inventario:</span>
             <span className="font-bold" style={{ color: 'var(--primary-color)' }}>
@@ -508,7 +508,7 @@ export function InventoryManager({
                 className="text-[11px] px-2 py-0.5 rounded-full font-medium"
                 style={{
                   backgroundColor: 'rgba(245,158,11,0.12)',
-                  color:           '#f59e0b',
+                  color:           'var(--st-amber-2, #f59e0b)',
                   border:          '1px solid rgba(245,158,11,0.25)',
                 }}
               >
@@ -558,7 +558,7 @@ export function InventoryManager({
       {filteredItems.length === 0 ? (
         <div
           className="rounded-2xl flex flex-col items-center justify-center gap-4 py-16 border"
-          style={{ backgroundColor: '#111111', borderColor: 'var(--border-color)' }}
+          style={{ backgroundColor: 'var(--card-color, #111111)', borderColor: 'var(--border-color)' }}
         >
           <div
             className="w-16 h-16 rounded-2xl flex items-center justify-center"

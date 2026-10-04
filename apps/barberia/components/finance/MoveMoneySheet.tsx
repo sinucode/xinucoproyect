@@ -102,7 +102,7 @@ function MoveMoneyBody({
                   setKind(k.kind)
                   if (k.kind === 'loan_repayment' && !amount) setAmount(String(ownerLoansPending))
                 }}
-                className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-xinuco-border bg-xinuco-surface px-3 py-2 text-left transition-colors active:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-xinuco-border bg-xinuco-surface px-3 py-2 text-left transition-colors active:bg-fg/[0.06] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <span
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"

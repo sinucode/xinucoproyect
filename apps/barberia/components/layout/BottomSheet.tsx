@@ -3,7 +3,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-/** Dentro del contenedor de tema MÁS interno (en el dashboard el oscuro fijo; en páginas públicas el del negocio); si no, el body. */
+/** Dentro del contenedor de tema MÁS interno (en el dashboard el del dashboard, claro u oscuro; en páginas públicas el del negocio); si no, el body. */
 function portalTarget(): Element {
   const all = document.querySelectorAll('[data-tenant-theme]')
   return all[all.length - 1] ?? document.body

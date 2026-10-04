@@ -164,7 +164,7 @@ export function BalanceSummary({ account }: { account: StaffAccount }) {
     <section
       aria-label="Saldo"
       className="rounded-2xl p-5 flex flex-col gap-4 animate-fade-in"
-      style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
+      style={{ border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.03)' }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col">
@@ -173,7 +173,7 @@ export function BalanceSummary({ account }: { account: StaffAccount }) {
           </span>
           <span
             className="text-3xl font-bold tabular-nums leading-none"
-            style={{ color: negative ? '#f87171' : 'var(--primary-color)' }}
+            style={{ color: negative ? 'var(--danger-text, #f87171)' : 'var(--primary-color)' }}
           >
             {money(balance)}
           </span>
@@ -209,7 +209,7 @@ export function BalanceSummary({ account }: { account: StaffAccount }) {
             <span>Total a pagar</span>
             <span
               className="tabular-nums"
-              style={{ color: settlement.total_to_pay < 0 ? '#f87171' : 'var(--primary-color)' }}
+              style={{ color: settlement.total_to_pay < 0 ? 'var(--danger-text, #f87171)' : 'var(--primary-color)' }}
             >
               {money(settlement.total_to_pay)}
             </span>
@@ -413,18 +413,18 @@ export function AccountHistory({
       {account.entries.length === 0 ? (
         <div
           className="rounded-xl px-4 py-10 text-center text-sm text-xinuco-muted"
-          style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+          style={{ border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.02)' }}
         >
           {hasFilters ? 'No hay movimientos con esos filtros.' : 'Todavía no hay movimientos.'}
         </div>
       ) : (
         <div
           className="rounded-xl overflow-hidden"
-          style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+          style={{ border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.02)' }}
         >
           <div
             className="hidden sm:grid grid-cols-[9rem_1fr_auto] gap-x-4 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-xinuco-muted"
-            style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
+            style={{ background: 'rgb(var(--fg) / 0.03)' }}
           >
             <span>Tipo</span>
             <span>Detalle</span>

@@ -8,6 +8,26 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        // ── Neutros theme-aware: la escala zinc es de variables CSS (valores por defecto = paleta zinc de
+        //    Tailwind, definidos en globals.css :root → render oscuro idéntico). El dashboard en modo claro
+        //    la invierte (ver [data-dashboard-theme][data-theme-mode="light"] en globals.css).
+        //    No se definen pasos inexistentes en Tailwind (550/650/850/150): esas clases siguen sin generar CSS.
+        zinc: {
+          50:  'rgb(var(--zinc-50) / <alpha-value>)',
+          100: 'rgb(var(--zinc-100) / <alpha-value>)',
+          200: 'rgb(var(--zinc-200) / <alpha-value>)',
+          300: 'rgb(var(--zinc-300) / <alpha-value>)',
+          400: 'rgb(var(--zinc-400) / <alpha-value>)',
+          500: 'rgb(var(--zinc-500) / <alpha-value>)',
+          600: 'rgb(var(--zinc-600) / <alpha-value>)',
+          700: 'rgb(var(--zinc-700) / <alpha-value>)',
+          800: 'rgb(var(--zinc-800) / <alpha-value>)',
+          900: 'rgb(var(--zinc-900) / <alpha-value>)',
+          950: 'rgb(var(--zinc-950) / <alpha-value>)',
+        },
+        // Color de "tinta" neutra: blanco en oscuro, negro en claro. Reemplaza white/ en velos translúcidos
+        // del dashboard (bg-fg/[0.05], border-fg/10…). Por defecto = blanco → idéntico al actual.
+        fg: 'rgb(var(--fg) / <alpha-value>)',
         // ── Token dinámico del tenant (brand_config.primaryColor) ──
         brand: {
           DEFAULT: 'var(--brand-primary, #C5A059)',
@@ -48,10 +68,10 @@ module.exports = {
     },
   },
   plugins: [
-    // Variante `light:` — solo aplica en la página pública de reservas cuando el negocio eligió modo claro
-    // (el layout del tenant marca data-theme-mode="light"; el dashboard siempre es oscuro).
+    // Variante `light:` — aplica cuando el negocio eligió modo claro (el layout del tenant y el wrapper
+    // del dashboard marcan data-theme-mode="light"): portal de reservas y dashboard.
     function ({ addVariant }: { addVariant: (name: string, selector: string) => void }) {
-      addVariant('light', '[data-theme-mode="light"] &:not([data-dashboard-theme] *)')
+      addVariant('light', '[data-theme-mode="light"] &')
     },
   ],
 }

@@ -24,7 +24,7 @@ export function UpcomingFixedExpensesNotice({
   return (
     <a
       href={`/${slug}/dashboard/expenses`}
-      className="flex items-start gap-3 rounded-2xl p-4 transition-colors hover:bg-white/[0.03]"
+      className="flex items-start gap-3 rounded-2xl p-4 transition-colors hover:bg-fg/[0.03]"
       style={{
         background: 'color-mix(in srgb, var(--primary-color) 7%, transparent)',
         border: '1px solid color-mix(in srgb, var(--primary-color) 30%, transparent)',

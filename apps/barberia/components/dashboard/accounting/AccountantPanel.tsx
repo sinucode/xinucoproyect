@@ -33,7 +33,7 @@ function downloadCsv(filename: string, content: string) {
 }
 
 const cardStyle = {
-  background: 'var(--surface-color, rgba(255,255,255,0.03))',
+  background: 'rgb(var(--fg) / 0.03)',
   border: '1px solid var(--border-color)',
 } as const
 
@@ -81,7 +81,7 @@ function FileCard({
         type="button"
         onClick={onDownload}
         disabled={disabled}
-        className="w-full min-h-11 flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full min-h-11 flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-fg/5 disabled:opacity-50 disabled:cursor-not-allowed"
         style={{ border: '1px solid var(--border-color)', color: 'var(--primary-color)' }}
       >
         {loading ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <Download size={16} aria-hidden />}

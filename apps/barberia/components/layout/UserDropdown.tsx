@@ -51,9 +51,9 @@ export function UserDropdown({ initials, userName, role }: UserDropdownProps) {
           
           <div 
             className="absolute right-0 mt-2 w-48 bg-xinuco-bg border border-xinuco-border rounded-xl shadow-xl z-50 overflow-hidden animate-slide-up" 
-            style={{ borderColor: 'var(--surface-color, #333)' }}
+            style={{ borderColor: 'var(--off-color, #333)' }}
           >
-            <div className="px-4 py-3 border-b border-xinuco-border" style={{ borderColor: 'var(--surface-color, #333)' }}>
+            <div className="px-4 py-3 border-b border-xinuco-border" style={{ borderColor: 'var(--off-color, #333)' }}>
               <p className="text-sm font-semibold text-xinuco-text truncate">{userName || 'Usuario'}</p>
               {role && (
                 <p className="text-xs text-xinuco-muted truncate">{roleLabel(role)}</p>

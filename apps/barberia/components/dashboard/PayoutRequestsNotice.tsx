@@ -11,7 +11,7 @@ export function PayoutRequestsNotice({ slug, count }: { slug: string; count: num
   return (
     <Link
       href={`/${slug}/dashboard/ledger`}
-      className="flex items-center gap-3 rounded-2xl border px-4 py-3 min-h-12 transition-colors hover:bg-white/[0.04]"
+      className="flex items-center gap-3 rounded-2xl border px-4 py-3 min-h-12 transition-colors hover:bg-fg/[0.04]"
       style={{
         borderColor: 'color-mix(in srgb, var(--primary-color) 35%, transparent)',
         background: 'color-mix(in srgb, var(--primary-color) 6%, transparent)',

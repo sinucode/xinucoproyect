@@ -43,7 +43,7 @@ function ErrorCard({ title, message }: { title: string; message: string }) {
     <section
       role="alert"
       className="rounded-2xl p-5 flex items-start gap-3"
-      style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+      style={{ background: 'rgb(var(--fg) / 0.03)', border: '1px solid var(--border-color)' }}
     >
       <AlertCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
       <div className="min-w-0">
@@ -124,7 +124,7 @@ export function AccountingView({
         role="tablist"
         aria-label="Secciones de contabilidad"
         className="grid grid-cols-2 sm:grid-cols-4 gap-1 p-1 rounded-xl"
-        style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+        style={{ background: 'rgb(var(--fg) / 0.03)', border: '1px solid var(--border-color)' }}
       >
         {TABS.map(t => {
           const active = tab === t.key

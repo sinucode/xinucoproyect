@@ -72,7 +72,7 @@ export function DashboardSidebar({
               ? 'text-xinuco-muted opacity-50 hover:opacity-70'
               : active
                 ? 'bg-[color-mix(in_srgb,var(--primary-color)_10%,transparent)] text-xinuco-text'
-                : 'text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05]'
+                : 'text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05]'
             }`}
         >
           {active && (
@@ -184,7 +184,7 @@ export function DashboardSidebar({
             onClick={() => setIsCollapsed(!isCollapsed)}
             aria-label={isCollapsed ? 'Expandir menú' : 'Contraer menú'}
             title={isCollapsed ? 'Expandir menú' : 'Contraer menú'}
-            className={`hidden lg:flex items-center gap-3 rounded-xl min-h-10 py-2 text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors ${isCollapsed ? 'justify-center px-0' : 'px-3'}`}
+            className={`hidden lg:flex items-center gap-3 rounded-xl min-h-10 py-2 text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors ${isCollapsed ? 'justify-center px-0' : 'px-3'}`}
           >
             {isCollapsed ? <ChevronsRight size={20} strokeWidth={1.75} /> : <ChevronsLeft size={20} strokeWidth={1.75} />}
             {!isCollapsed && <span className="text-sm font-medium">Contraer menú</span>}

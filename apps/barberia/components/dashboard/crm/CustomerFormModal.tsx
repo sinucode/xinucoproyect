@@ -89,7 +89,7 @@ export function CustomerFormModal({ customerId, initial, onClose, onSaved }: Cus
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            className="p-1.5 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors"
             aria-label="Cerrar"
           >
             <X size={16} />

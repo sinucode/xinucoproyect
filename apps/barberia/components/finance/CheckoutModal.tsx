@@ -383,7 +383,7 @@ export function CheckoutModal({
           </div>
           <button
             onClick={loyaltyWarning ? onSuccess : onClose}
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-fg/[0.05] transition-colors"
             title="Cerrar modal"
           >
             <X size={20} />
@@ -419,7 +419,7 @@ export function CheckoutModal({
                       <button
                         type="button"
                         onClick={() => setShowAddProduct(false)}
-                        className="p-0.5 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
+                        className="p-0.5 rounded text-zinc-400 hover:text-zinc-100 hover:bg-fg/[0.05] transition-colors"
                         title="Cerrar"
                       >
                         <X size={14} />
@@ -536,7 +536,7 @@ export function CheckoutModal({
                 <div className="flex gap-2 justify-end">
                   <button
                     onClick={() => setShowManualForm(false)}
-                    className="text-xs px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
+                    className="text-xs px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-fg/[0.05] transition-colors"
                   >
                     Volver
                   </button>
@@ -594,7 +594,7 @@ export function CheckoutModal({
                     </span>
                     <button
                       onClick={() => handleRemoveItem(idx)}
-                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-zinc-500 hover:text-red-400 hover:bg-white/[0.05] transition-colors"
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-zinc-500 hover:text-red-400 hover:bg-fg/[0.05] transition-colors"
                       title="Eliminar del ticket"
                     >
                       <Trash size={14} />
@@ -609,7 +609,7 @@ export function CheckoutModal({
           {loyalty && (
             <div
               className="rounded-xl border p-3 space-y-2.5 animate-fade-in"
-              style={{ borderColor: 'var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.02))' }}
+              style={{ borderColor: 'var(--border-color)', background: 'rgb(var(--fg) / 0.02)' }}
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5 min-w-0">

@@ -222,7 +222,7 @@ export function TeamMovementSheet({
             type="button"
             onClick={onClose}
             aria-label="Cerrar panel"
-            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors shrink-0"
+            className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors shrink-0"
           >
             <X size={20} />
           </button>
@@ -419,7 +419,7 @@ export function TeamMovementSheet({
             <div
               role="alert"
               className="flex flex-col gap-3 text-xs rounded-lg px-4 py-3 animate-fade-in border"
-              style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)' }}
+              style={{ color: 'var(--st-amber, #fbbf24)', borderColor: 'rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)' }}
             >
               <p className="flex items-start gap-2">
                 <AlertTriangle size={14} className="shrink-0 mt-px" />
@@ -432,7 +432,7 @@ export function TeamMovementSheet({
                   type="button"
                   onClick={() => setOverpay(null)}
                   disabled={isPending}
-                  className="flex-1 py-2 rounded-lg text-xs font-medium text-xinuco-text border transition-colors hover:bg-white/[0.05]"
+                  className="flex-1 py-2 rounded-lg text-xs font-medium text-xinuco-text border transition-colors hover:bg-fg/[0.05]"
                   style={{ borderColor: 'var(--border-color)' }}
                 >
                   Corregir monto
@@ -460,7 +460,7 @@ export function TeamMovementSheet({
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-white/[0.03]"
+                className="flex-1 py-3 rounded-lg text-sm font-medium text-xinuco-muted border transition-colors hover:text-xinuco-text hover:bg-fg/[0.03]"
                 style={{ borderColor: 'var(--border-color)' }}
               >
                 Cancelar

@@ -1,11 +1,13 @@
-// Paleta y medidas de los gráficos del tablero (superficie oscura).
+// Paleta y medidas de los gráficos del tablero. Los neutros (guías, ejes, texto, tooltip, celda vacía)
+// son variables CSS del dashboard (globals.css) con el valor oscuro histórico como fallback, así leen bien
+// en modo claro; los colores categóricos y de estado no cambian.
 export const CHART = {
-  grid:    '#2c2c2a',   // líneas guía (hairline)
-  axis:    '#383835',   // ejes y línea base
-  muted:   '#898781',   // texto de ejes
-  ink2:    '#c3c2b7',   // texto secundario
-  ink:     '#ffffff',   // texto principal
-  surface: '#1a1a19',   // fondo de tooltips
+  grid:    'var(--chart-grid, #2c2c2a)',   // líneas guía (hairline)
+  axis:    'var(--chart-axis, #383835)',   // ejes y línea base
+  muted:   'var(--chart-muted, #898781)',   // texto de ejes
+  ink2:    'var(--chart-ink-2, #c3c2b7)',   // texto secundario
+  ink:     'var(--chart-ink, #ffffff)',   // texto principal
+  surface: 'var(--chart-surface, #1a1a19)',   // fondo de tooltips
   // Categóricos en orden fijo
   blue:    '#3987e5',
   orange:  '#d95926',
@@ -20,7 +22,7 @@ export const CHART = {
   warning:  '#fab219',
   critical: '#d03b3b',
   // Sin dato
-  empty:   '#1f1f1d',
+  empty:   'var(--chart-empty, #1f1f1d)',
 } as const
 
 export const FONT_SIZE = 11

@@ -129,13 +129,13 @@ function StaffSkeleton() {
       {/* Header Skeleton */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+          <div className="w-12 h-12 rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
           <div className="flex flex-col gap-2">
-            <div className="h-7 w-40 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="h-4 w-56 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+            <div className="h-7 w-40 rounded-md" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+            <div className="h-4 w-56 rounded-md" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
           </div>
         </div>
-        <div className="h-11 w-40 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+        <div className="h-11 w-40 rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
       </div>
 
       {/* Grid Skeleton */}
@@ -145,7 +145,7 @@ function StaffSkeleton() {
             key={i} 
             className="rounded-2xl p-5 flex flex-col gap-5"
             style={{ 
-              background: 'var(--surface-color, #1a1a1a)',
+              background: 'var(--skeleton-color, #1a1a1a)',
               border: '1px solid var(--border-color)'
             }}
           >

@@ -219,7 +219,7 @@ export function TeamPayments({
           <section aria-label="Totales" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div
               className="rounded-2xl p-5 flex flex-col gap-1"
-              style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
+              style={{ border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.03)' }}
             >
               <span className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">Le debes al equipo</span>
               <span className="text-2xl font-bold tabular-nums" style={{ color: 'var(--primary-color)' }}>
@@ -229,7 +229,7 @@ export function TeamPayments({
             {advances_outstanding > 0 && (
               <div
                 className="rounded-2xl p-5 flex flex-col gap-1"
-                style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
+                style={{ border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.03)' }}
               >
                 <span className="text-xs font-semibold text-xinuco-muted uppercase tracking-wider">Anticipos por descontar</span>
                 <span className="text-2xl font-bold tabular-nums text-yellow-400">
@@ -264,7 +264,7 @@ export function TeamPayments({
                   </span>
                   <span
                     className="text-xs font-bold tabular-nums"
-                    style={{ color: bal < 0 ? '#f87171' : bal === 0 ? 'var(--text-muted, #a1a1aa)' : 'var(--primary-color)' }}
+                    style={{ color: bal < 0 ? 'var(--danger-text, #f87171)' : bal === 0 ? 'rgb(var(--zinc-400))' : 'var(--primary-color)' }}
                   >
                     {money(bal)}
                   </span>
@@ -336,7 +336,7 @@ export function TeamPayments({
                           return (
                             <p
                               className="text-xs mt-0.5 flex items-center gap-1.5"
-                              style={{ color: msg.ok ? '#34d399' : '#fbbf24' }}
+                              style={{ color: msg.ok ? 'var(--st-emerald, #34d399)' : 'var(--st-amber, #fbbf24)' }}
                             >
                               {msg.ok ? <Mail size={12} className="shrink-0" /> : <AlertTriangle size={12} className="shrink-0" />}
                               {msg.text}
@@ -354,7 +354,7 @@ export function TeamPayments({
                       type="button"
                       onClick={() => setReceipt(null)}
                       aria-label="Cerrar aviso"
-                      className="p-1.5 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors shrink-0"
+                      className="p-1.5 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors shrink-0"
                     >
                       <X size={16} />
                     </button>

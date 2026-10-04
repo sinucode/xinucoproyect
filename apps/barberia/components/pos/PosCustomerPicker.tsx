@@ -106,7 +106,7 @@ export function PosCustomerPicker({ value, onChange, disabled }: PosCustomerPick
           onClick={() => onChange(null)}
           disabled={disabled}
           aria-label="Quitar cliente"
-          className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-white/[0.05] transition-colors disabled:opacity-50"
+          className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-fg/[0.05] transition-colors disabled:opacity-50"
         >
           <X size={14} />
         </button>
@@ -140,7 +140,7 @@ export function PosCustomerPicker({ value, onChange, disabled }: PosCustomerPick
               <button
                 type="button"
                 onClick={() => select(c)}
-                className="w-full text-left px-3 py-2 hover:bg-white/[0.04] transition-colors"
+                className="w-full text-left px-3 py-2 hover:bg-fg/[0.04] transition-colors"
               >
                 <p className="text-sm font-medium text-xinuco-text">{c.full_name}</p>
                 <p className="text-xs text-xinuco-muted">{c.phone}</p>

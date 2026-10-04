@@ -46,8 +46,8 @@ const PLAN_ICONS: Record<PlanName, React.ReactNode> = {
 }
 
 const PLAN_COLORS: Record<PlanName, { bg: string; border: string; text: string }> = {
-  esencial:    { bg: 'rgba(161,161,170,0.08)', border: 'rgba(161,161,170,0.2)', text: '#a1a1aa' },
-  profesional: { bg: 'rgba(96,165,250,0.08)',  border: 'rgba(96,165,250,0.25)', text: '#60a5fa' },
+  esencial:    { bg: 'rgba(161,161,170,0.08)', border: 'rgba(161,161,170,0.2)', text: 'rgb(var(--zinc-400))' },
+  profesional: { bg: 'rgba(96,165,250,0.08)',  border: 'rgba(96,165,250,0.25)', text: 'var(--st-blue, #60a5fa)' },
   elite:       { bg: 'rgba(197,160,89,0.08)',  border: 'rgba(197,160,89,0.3)',  text: '#C5A059' },
 }
 
@@ -136,7 +136,7 @@ export function SaaSBillingPanel({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {currentPlan !== 'custom' && (
-              <span style={{ color: PLAN_COLORS[currentPlan]?.text ?? '#a1a1aa' }}>
+              <span style={{ color: PLAN_COLORS[currentPlan]?.text ?? 'rgb(var(--zinc-400))' }}>
                 {PLAN_ICONS[currentPlan] ?? PLAN_ICONS.esencial}
               </span>
             )}
@@ -200,7 +200,7 @@ export function SaaSBillingPanel({
               key={planId}
               className="flex flex-col rounded-2xl border p-5 transition-all"
               style={{
-                background:   isCurrent ? colors.bg   : 'rgba(255,255,255,0.02)',
+                background:   isCurrent ? colors.bg   : 'rgb(var(--fg) / 0.02)',
                 borderColor:  isCurrent ? colors.border : 'var(--border-color)',
                 borderWidth:  isCurrent ? '2px' : '1px',
               }}

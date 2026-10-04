@@ -269,7 +269,7 @@ export function StaffScheduleSheet({
               type="button"
               onClick={onClose}
               aria-label="Cerrar"
-              className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors shrink-0"
+              className="p-2 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors shrink-0"
             >
               <X size={20} />
             </button>
@@ -291,7 +291,7 @@ export function StaffScheduleSheet({
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap border transition-colors ${
                     active
                       ? 'text-xinuco-text border-transparent'
-                      : 'text-xinuco-muted border-transparent hover:text-xinuco-text hover:bg-white/[0.04]'
+                      : 'text-xinuco-muted border-transparent hover:text-xinuco-text hover:bg-fg/[0.04]'
                   }`}
                   style={active ? { background: 'color-mix(in srgb, var(--primary-color) 18%, transparent)', color: 'var(--primary-color)' } : undefined}
                 >
@@ -357,7 +357,7 @@ export function StaffScheduleSheet({
                     </summary>
                     <div className="flex flex-col" style={{ borderTop: '1px solid var(--border-color)' }}>
                       <label
-                        className="flex items-center gap-2.5 px-4 py-2.5 text-sm font-semibold text-xinuco-text cursor-pointer hover:bg-white/[0.03]"
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-sm font-semibold text-xinuco-text cursor-pointer hover:bg-fg/[0.03]"
                         style={{ borderBottom: '1px solid var(--border-color)' }}
                       >
                         <input type="checkbox" checked={allSelected} onChange={toggleAllTeam} disabled={isSaving} />
@@ -366,7 +366,7 @@ export function StaffScheduleSheet({
                       {otherActive.map((m, idx) => (
                         <label
                           key={m.id}
-                          className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-xinuco-text cursor-pointer hover:bg-white/[0.03]"
+                          className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-xinuco-text cursor-pointer hover:bg-fg/[0.03]"
                           style={{ borderBottom: idx === otherActive.length - 1 ? 'none' : '1px solid var(--border-color)' }}
                         >
                           <input type="checkbox" checked={applyTo.has(m.id)} onChange={() => toggleApplyTo(m.id)} disabled={isSaving} />

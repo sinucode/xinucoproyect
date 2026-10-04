@@ -167,7 +167,7 @@ export function MoneyAccountsCard({ initialStatus }: MoneyAccountsCardProps) {
       {loansPending > 0 && (
         <div
           className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border px-3 py-2.5"
-          style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)' }}
+          style={{ color: 'var(--st-amber, #fbbf24)', borderColor: 'rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)' }}
         >
           <p className="flex min-w-0 flex-1 basis-48 items-start gap-2 text-xs">
             <HandCoins size={14} className="mt-0.5 shrink-0" aria-hidden="true" />

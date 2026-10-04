@@ -40,7 +40,7 @@ export function LoyaltySettingsForm({ initial, slug }: LoyaltySettingsFormProps)
     color:           'var(--text-color, #F4F4F4)',
   }
   const labelCls = 'text-xs font-semibold text-zinc-400 uppercase tracking-wide'
-  const cardStyle = { backgroundColor: '#111111', borderColor: 'var(--border-color)' }
+  const cardStyle = { backgroundColor: 'var(--card-color, #111111)', borderColor: 'var(--border-color)' }
 
   // Configuración en edición (los campos vacíos o inválidos quedan como NaN y no pasan la validación)
   const draft: LoyaltyConfig = {
@@ -91,7 +91,7 @@ export function LoyaltySettingsForm({ initial, slug }: LoyaltySettingsFormProps)
         onClick={() => { setMode(value); touch() }}
         className="flex flex-col gap-2 text-left rounded-2xl border p-4 transition-all"
         style={{
-          backgroundColor: active ? 'color-mix(in srgb, var(--primary-color) 8%, transparent)' : '#111111',
+          backgroundColor: active ? 'color-mix(in srgb, var(--primary-color) 8%, transparent)' : 'var(--card-color, #111111)',
           borderColor:     active ? 'var(--primary-color)' : 'var(--border-color)',
         }}
       >

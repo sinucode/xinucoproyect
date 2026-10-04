@@ -199,7 +199,7 @@ export function DisposeSheet({ asset, hasOpenShift, onClose, onDone }: DisposeSh
           />
         </div>
 
-        <p className="text-[11px] text-zinc-500 rounded-lg bg-white/[0.03] px-3 py-2">
+        <p className="text-[11px] text-zinc-500 rounded-lg bg-fg/[0.03] px-3 py-2">
           Al dar de baja, el equipo pasa a «Dados de baja» y ya no se puede editar.
         </p>
 

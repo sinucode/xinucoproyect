@@ -932,7 +932,7 @@ function AddWalkInSheet({ businessId, staffList, serviceList, serviceAudiences, 
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-white/[0.05] transition-colors"
+            className="p-1.5 rounded-lg text-xinuco-muted hover:text-xinuco-text hover:bg-fg/[0.05] transition-colors"
           >
             <X size={18} />
           </button>
@@ -1201,7 +1201,7 @@ export function WalkInQueue({
     <div className="flex items-center gap-2 mb-4">
       <h3
         className="text-xs font-bold uppercase tracking-widest"
-        style={{ color: isGold ? 'var(--primary-color)' : '#f59e0b' }}
+        style={{ color: isGold ? 'var(--primary-color)' : 'var(--st-amber-2, #f59e0b)' }}
       >
         {label}
       </h3>
@@ -1213,7 +1213,7 @@ export function WalkInQueue({
                 color:           'var(--primary-color)',
                 backgroundColor: 'color-mix(in srgb, var(--primary-color) 15%, transparent)',
               }
-            : { color: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.12)' }
+            : { color: 'var(--st-amber-2, #f59e0b)', backgroundColor: 'rgba(245, 158, 11, 0.12)' }
         }
       >
         {count}
@@ -1367,7 +1367,7 @@ export function WalkInQueue({
         >
           <button
             onClick={() => setShowHistory((v) => !v)}
-            className="w-full flex items-center justify-between px-5 py-3.5 text-left transition-colors hover:bg-white/[0.02]"
+            className="w-full flex items-center justify-between px-5 py-3.5 text-left transition-colors hover:bg-fg/[0.02]"
             style={{ backgroundColor: 'var(--surface-color)' }}
           >
             <span className="text-xs font-bold uppercase tracking-widest text-xinuco-muted">

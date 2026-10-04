@@ -1,4 +1,4 @@
-const BLOCK = { background: 'var(--surface-color, rgba(255,255,255,0.06))' }
+const BLOCK = { background: 'rgb(var(--fg) / 0.06)' }
 
 export default function ReportsLoading() {
   return (

@@ -9,7 +9,7 @@ export interface ClosureRow {
 }
 
 export function cardStyle(): React.CSSProperties {
-  return { backgroundColor: '#111111', border: '1px solid var(--border-color)' }
+  return { backgroundColor: 'var(--card-color, #111111)', border: '1px solid var(--border-color)' }
 }
 
 export function SectionHeader({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle: string }) {

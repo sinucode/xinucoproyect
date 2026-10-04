@@ -214,7 +214,7 @@ export function MPPaymentPanel({
           <button
             type="button"
             onClick={handleGenerate}
-            className="w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 bg-[var(--primary-color)] text-zinc-950 hover:opacity-90 transition-opacity"
+            className="w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 bg-[var(--primary-color)] text-[#09090b] hover:opacity-90 transition-opacity"
           >
             <QrCode size={16} />
             Generar link de pago

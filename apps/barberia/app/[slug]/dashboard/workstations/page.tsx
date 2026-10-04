@@ -71,13 +71,13 @@ function WorkstationsSkeleton() {
       {/* Header skeleton */}
       <div className="flex items-center justify-between pb-6 border-b" style={{ borderColor: 'var(--border-color)' }}>
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+          <div className="w-12 h-12 rounded-xl" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
           <div className="flex flex-col gap-2">
-            <div className="h-6 w-48 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-            <div className="h-3 w-64 rounded-md" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+            <div className="h-6 w-48 rounded-md" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+            <div className="h-3 w-64 rounded-md" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
           </div>
         </div>
-        <div className="h-10 w-36 rounded-lg" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+        <div className="h-10 w-36 rounded-lg" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
       </div>
 
       {/* Cards skeleton */}
@@ -86,14 +86,14 @@ function WorkstationsSkeleton() {
           <div
             key={i}
             className="rounded-xl p-5 flex flex-col gap-3"
-            style={{ border: '1px solid var(--border-color)', background: 'var(--surface-color, rgba(255,255,255,0.03))' }}
+            style={{ border: '1px solid var(--border-color)', background: 'rgb(var(--fg) / 0.03)' }}
           >
             <div className="flex items-center justify-between">
-              <div className="h-5 w-32 rounded" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
-              <div className="h-6 w-11 rounded-full" style={{ background: 'var(--surface-color, #1a1a1a)' }} />
+              <div className="h-5 w-32 rounded" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
+              <div className="h-6 w-11 rounded-full" style={{ background: 'var(--skeleton-color, #1a1a1a)' }} />
             </div>
-            <div className="h-3 w-48 rounded" style={{ background: 'var(--surface-color, #1a1a1a)', opacity: 0.6 }} />
-            <div className="h-3 w-28 rounded" style={{ background: 'var(--surface-color, #1a1a1a)', opacity: 0.6 }} />
+            <div className="h-3 w-48 rounded" style={{ background: 'var(--skeleton-color, #1a1a1a)', opacity: 0.6 }} />
+            <div className="h-3 w-28 rounded" style={{ background: 'var(--skeleton-color, #1a1a1a)', opacity: 0.6 }} />
           </div>
         ))}
       </div>

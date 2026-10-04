@@ -30,7 +30,7 @@ export function InsightCards({ insights }: { insights: Insight[] }) {
             key={i}
             className="flex items-start gap-3 rounded-xl p-3.5 min-w-0"
             style={{
-              background: 'var(--surface-color, rgba(255,255,255,0.03))',
+              background: 'rgb(var(--fg) / 0.03)',
               border: '1px solid var(--border-color)',
               borderLeft: `3px solid ${t.color}`,
             }}

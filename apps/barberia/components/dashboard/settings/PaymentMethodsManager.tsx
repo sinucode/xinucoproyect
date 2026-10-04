@@ -143,7 +143,7 @@ export function PaymentMethodsManager({ accounts, today }: PaymentMethodsManager
                 <button
                   type="button"
                   onClick={() => setSheet({ account: a })}
-                  className="flex min-h-11 items-center gap-1.5 rounded-xl border border-xinuco-border px-3 text-sm font-medium text-xinuco-text hover:bg-white/[0.04]"
+                  className="flex min-h-11 items-center gap-1.5 rounded-xl border border-xinuco-border px-3 text-sm font-medium text-xinuco-text hover:bg-fg/[0.04]"
                 >
                   <Pencil size={14} aria-hidden="true" />
                   Editar

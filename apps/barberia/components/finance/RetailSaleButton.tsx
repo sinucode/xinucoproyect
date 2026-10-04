@@ -103,7 +103,7 @@ export function RetailSaleButton({ slug, activeShiftId }: RetailSaleButtonProps)
         {/* Tooltip para estado deshabilitado */}
         {!hasActiveShift && (
           <div
-            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-zinc-800 border border-zinc-700 whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-10"
+            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 rounded-lg text-xs font-medium text-white light:text-xinuco-text bg-zinc-800 border border-zinc-700 whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-10"
           >
             Debes abrir un turno de caja primero
             <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-zinc-800" />
@@ -134,7 +134,7 @@ export function RetailSaleButton({ slug, activeShiftId }: RetailSaleButtonProps)
                 type="button"
                 onClick={() => setIsOpen(false)}
                 aria-label="Cerrar"
-                className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors"
+                className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-fg/[0.05] transition-colors"
               >
                 <X size={18} />
               </button>

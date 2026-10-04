@@ -91,7 +91,7 @@ export function ProfitLossStatement({ result: pl, previous, monthLabel, previous
   return (
     <section
       className="rounded-2xl p-4 sm:p-6"
-      style={{ background: 'var(--surface-color, rgba(255,255,255,0.03))', border: '1px solid var(--border-color)' }}
+      style={{ background: 'rgb(var(--fg) / 0.03)', border: '1px solid var(--border-color)' }}
       aria-label="Estado de resultados"
     >
       <div className="flex items-baseline justify-between gap-3 mb-2">

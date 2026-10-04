@@ -34,10 +34,10 @@ interface SettingGroup {
 
 function PlanBadge({ plan }: { plan: string }) {
   const colors: Record<string, { bg: string; text: string; border: string }> = {
-    basico:  { bg: 'rgba(161,161,170,0.1)', text: '#a1a1aa', border: 'rgba(161,161,170,0.2)' },
-    pro:     { bg: 'rgba(96,165,250,0.1)',  text: '#60a5fa', border: 'rgba(96,165,250,0.2)' },
+    basico:  { bg: 'rgba(161,161,170,0.1)', text: 'rgb(var(--zinc-400))', border: 'rgba(161,161,170,0.2)' },
+    pro:     { bg: 'rgba(96,165,250,0.1)',  text: 'var(--st-blue, #60a5fa)', border: 'rgba(96,165,250,0.2)' },
     premium: { bg: 'rgba(197,160,89,0.1)',  text: '#C5A059', border: 'rgba(197,160,89,0.2)' },
-    custom:  { bg: 'rgba(74,222,128,0.1)',  text: '#4ade80', border: 'rgba(74,222,128,0.2)' },
+    custom:  { bg: 'rgba(74,222,128,0.1)',  text: 'var(--st-green, #4ade80)', border: 'rgba(74,222,128,0.2)' },
   }
   const c      = colors[plan] ?? colors.custom
   const labels: Record<string, string> = {
@@ -73,9 +73,9 @@ function NavCard({
   return (
     <Link
       href={href}
-      className="group flex items-center gap-4 rounded-xl px-5 py-4 transition-all duration-150 hover:bg-white/[0.03]"
+      className="group flex items-center gap-4 rounded-xl px-5 py-4 transition-all duration-150 hover:bg-fg/[0.03]"
       style={{
-        background:  '#111111',
+        background:  'var(--card-color, #111111)',
         border:      '1px solid var(--border-color)',
         borderLeft:  '3px solid var(--primary-color)',
       }}
@@ -92,7 +92,7 @@ function NavCard({
         {card.status && (
           <p
             className="text-xs font-medium mt-1.5 leading-tight break-words"
-            style={{ color: card.attention ? '#f59e0b' : 'var(--primary-color)' }}
+            style={{ color: card.attention ? 'var(--st-amber-2, #f59e0b)' : 'var(--primary-color)' }}
           >
             {card.status}
           </p>
@@ -292,7 +292,7 @@ export default async function SettingsPage({
         <div
           className="rounded-xl px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
           style={{
-            background: '#111111',
+            background: 'var(--card-color, #111111)',
             border:     '1px solid var(--border-color)',
           }}
         >

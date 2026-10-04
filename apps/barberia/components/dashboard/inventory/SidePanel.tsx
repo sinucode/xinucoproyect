@@ -58,7 +58,7 @@ export function SidePanel({ title, subtitle, icon, onClose, children, footer, wi
           <button
             onClick={onClose}
             aria-label="Cerrar"
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors flex-shrink-0"
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-fg/[0.05] transition-colors flex-shrink-0"
           >
             <X size={18} />
           </button>

@@ -124,7 +124,7 @@ export function BottomNav({ slug }: BottomNavProps) {
               <Link
                 href={a.href(slug)}
                 onClick={closeQuick}
-                className="flex min-h-14 items-center gap-3 rounded-xl border border-xinuco-border bg-xinuco-surface px-3 py-2 active:bg-white/[0.06]"
+                className="flex min-h-14 items-center gap-3 rounded-xl border border-xinuco-border bg-xinuco-surface px-3 py-2 active:bg-fg/[0.06]"
               >
                 <span
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
@@ -165,7 +165,7 @@ export function BottomNav({ slug }: BottomNavProps) {
                         ${item.locked ? 'opacity-50' : ''}
                         ${active
                           ? 'border-[color-mix(in_srgb,var(--primary-color)_40%,transparent)] bg-[color-mix(in_srgb,var(--primary-color)_10%,transparent)] text-xinuco-text'
-                          : 'border-xinuco-border bg-xinuco-surface text-xinuco-muted active:bg-white/[0.06]'}`}
+                          : 'border-xinuco-border bg-xinuco-surface text-xinuco-muted active:bg-fg/[0.06]'}`}
                     >
                       <item.icon
                         size={22}
@@ -196,7 +196,7 @@ export function BottomNav({ slug }: BottomNavProps) {
                 onClick={closeMore}
                 aria-current={active ? 'page' : undefined}
                 className={`flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-medium
-                  ${active ? 'bg-[color-mix(in_srgb,var(--primary-color)_10%,transparent)] text-xinuco-text' : 'text-xinuco-text active:bg-white/[0.06]'}`}
+                  ${active ? 'bg-[color-mix(in_srgb,var(--primary-color)_10%,transparent)] text-xinuco-text' : 'text-xinuco-text active:bg-fg/[0.06]'}`}
               >
                 <item.icon size={22} strokeWidth={1.75} aria-hidden="true" />
                 {item.label}

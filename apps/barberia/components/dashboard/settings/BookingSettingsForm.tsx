@@ -67,7 +67,7 @@ export function BookingSettingsForm({ initial }: BookingSettingsFormProps) {
   return (
     <div
       className="rounded-2xl border p-5 flex flex-col gap-6"
-      style={{ backgroundColor: '#111111', borderColor: 'var(--border-color)' }}
+      style={{ backgroundColor: 'var(--card-color, #111111)', borderColor: 'var(--border-color)' }}
     >
       <div className="flex items-center gap-3">
         <div

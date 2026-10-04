@@ -95,16 +95,16 @@ function CRMSkeleton() {
         <div className="flex items-center gap-4">
           <div
             className="w-12 h-12 rounded-xl"
-            style={{ background: 'var(--surface-color, #1a1a1a)' }}
+            style={{ background: 'var(--skeleton-color, #1a1a1a)' }}
           />
           <div className="flex flex-col gap-2">
             <div
               className="h-6 w-36 rounded-md"
-              style={{ background: 'var(--surface-color, #1a1a1a)' }}
+              style={{ background: 'var(--skeleton-color, #1a1a1a)' }}
             />
             <div
               className="h-3 w-52 rounded-md"
-              style={{ background: 'var(--surface-color, #1a1a1a)' }}
+              style={{ background: 'var(--skeleton-color, #1a1a1a)' }}
             />
           </div>
         </div>
@@ -113,7 +113,7 @@ function CRMSkeleton() {
       {/* Search bar */}
       <div
         className="h-11 w-full rounded-xl"
-        style={{ background: 'var(--surface-color, #1a1a1a)' }}
+        style={{ background: 'var(--skeleton-color, #1a1a1a)' }}
       />
 
       {/* Customer cards */}
@@ -121,12 +121,12 @@ function CRMSkeleton() {
         <div
           key={i}
           className="flex items-center gap-4 p-4 rounded-xl"
-          style={{ background: 'var(--surface-color, #1a1a1a)' }}
+          style={{ background: 'var(--skeleton-color, #1a1a1a)' }}
         >
-          <div className="w-11 h-11 rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }} />
+          <div className="w-11 h-11 rounded-full" style={{ background: 'rgb(var(--fg) / 0.06)' }} />
           <div className="flex-1 flex flex-col gap-2">
-            <div className="h-4 w-32 rounded" style={{ background: 'rgba(255,255,255,0.06)' }} />
-            <div className="h-3 w-24 rounded" style={{ background: 'rgba(255,255,255,0.04)' }} />
+            <div className="h-4 w-32 rounded" style={{ background: 'rgb(var(--fg) / 0.06)' }} />
+            <div className="h-3 w-24 rounded" style={{ background: 'rgb(var(--fg) / 0.04)' }} />
           </div>
         </div>
       ))}
