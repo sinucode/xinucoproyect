@@ -1,12 +1,13 @@
 'use client'
 
-import { useRef, useState, useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Loader2, Check, AlertCircle, ImageOff, Copy, Moon, Sun } from 'lucide-react'
+import { Loader2, Check, AlertCircle, ImageOff, Moon, Sun } from 'lucide-react'
 import { updateBusinessBranding } from '@/actions/businesses'
 import type { Business, BusinessBranding, BrandConfig, ThemeMode } from '@xinuco/types'
 import { THEME_PRESETS, resolveThemeMode, onPrimaryColor } from '@/lib/brand-theme'
+import { CopyButton } from '@/components/ui/CopyButton'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -208,9 +209,6 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
   const [font,   setFont]   = useState(normalizeFontKey(stored.font_family ?? DEFAULT_BRANDING.font_family))
   const [themeMode, setThemeMode] = useState<ThemeMode>(resolveThemeMode(bc.themeMode))
 
-  // Copiar la URL de reservas
-  const urlInputRef = useRef<HTMLInputElement>(null)
-  const [copied, setCopied] = useState(false)
   const bookingUrl = `https://www.xinuco.com/${slug}/book`
 
   const [isPending, startTransition] = useTransition()
@@ -234,30 +232,6 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
       text_color:      preset.textColor,
     }))
     setStatus('idle')
-  }
-
-  async function handleCopyUrl() {
-    let ok = false
-    try {
-      await navigator.clipboard.writeText(bookingUrl)
-      ok = true
-    } catch {
-      // Fallback (contexto no seguro o permiso denegado): seleccionar el campo y copiar
-      try {
-        const el = urlInputRef.current
-        if (el) {
-          el.focus()
-          el.select()
-          ok = document.execCommand('copy')
-        }
-      } catch {
-        ok = false
-      }
-    }
-    if (ok) {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }
   }
 
   function handleSave() {
@@ -334,27 +308,13 @@ export function BrandingForm({ business, slug }: BrandingFormProps) {
             <div className="flex items-stretch gap-2">
               <input
                 id="biz-slug"
-                ref={urlInputRef}
                 type="text"
                 value={bookingUrl}
                 readOnly
                 className="input-base font-mono text-sm min-w-0 flex-1 select-all"
                 style={{ color: 'var(--primary-color)', opacity: 0.8 }}
               />
-              <button
-                type="button"
-                onClick={handleCopyUrl}
-                aria-label={copied ? 'URL copiada' : 'Copiar URL de reservas'}
-                className="shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 min-h-11 min-w-11 text-xs font-bold transition-colors"
-                style={{
-                  background: 'color-mix(in srgb, var(--primary-color) 12%, transparent)',
-                  color:      'var(--primary-color)',
-                  border:     '1px solid color-mix(in srgb, var(--primary-color) 35%, transparent)',
-                }}
-              >
-                {copied ? <Check size={15} /> : <Copy size={15} />}
-                <span>{copied ? '¡Copiada!' : 'Copiar'}</span>
-              </button>
+              <CopyButton text={bookingUrl} label="Copiar URL de reservas" />
             </div>
           </div>
         </div>

@@ -6,6 +6,7 @@ import type { Business, BusinessFeatures } from '@xinuco/types'
 import { requireSettingsAdmin } from '@/lib/settings-guard'
 import { businessTodayISODate } from '@/lib/agenda-time'
 import { bookingStatus, hoursStatus, loyaltyStatus, paymentMethodsStatus, profileStatus, workstationsStatus } from '@/lib/settings-status'
+import { CopyButton } from '@/components/ui/CopyButton'
 
 export const metadata: Metadata = {
   title: 'Configuración — Xinuco',
@@ -300,15 +301,16 @@ export default async function SettingsPage({
             <p className="text-lg font-bold text-xinuco-text break-words">{biz.name}</p>
             <div className="flex items-center gap-2 flex-wrap">
               <span
-                className="text-xs font-mono px-2 py-0.5 rounded break-all"
+                className="text-xs font-mono px-2 py-1 rounded break-all"
                 style={{
-                  background: 'rgba(197,160,89,0.08)',
+                  background: 'color-mix(in srgb, var(--primary-color) 8%, transparent)',
                   color:      'var(--primary-color)',
-                  border:     '1px solid rgba(197,160,89,0.2)',
+                  border:     '1px solid color-mix(in srgb, var(--primary-color) 20%, transparent)',
                 }}
               >
                 {bookingUrl}
               </span>
+              <CopyButton text={bookingUrl} label="Copiar el link de reservas" />
             </div>
           </div>
           <div className="flex items-center gap-3">
