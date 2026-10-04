@@ -7,6 +7,7 @@ import { CustomerCRM } from '@/components/dashboard/crm/CustomerCRM'
 import type { BusinessFeatures } from '@xinuco/types'
 import { businessTodayISODate } from '@/lib/agenda-time'
 import { parseCustomerFilter, parseCustomerSort } from '@/lib/crm-utils'
+import { getSessionUser, getMyProfile, getBusinessBySlug } from '@/lib/session'
 
 export const metadata: Metadata = {
   title: 'Clientes — Xinuco',
@@ -29,27 +30,19 @@ export default async function CRMPage({
 
   // 1. Auth guard
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getSessionUser(supabase)
   if (!user) redirect(`/${slug}/login`)
 
-  // 2. Obtener business_id desde el perfil autenticado
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('business_id, role')
-    .eq('id', user.id)
-    .single()
+  // 2. business_id desde el perfil autenticado + flags del negocio: independientes → en paralelo
+  //    (ambos memoizados por petición; el layout ya los cargó, lib/session.ts)
+  const [profile, biz] = await Promise.all([
+    getMyProfile(supabase),
+    getBusinessBySlug(supabase, slug),
+  ])
 
   if (!profile?.business_id) redirect(`/${slug}/login`)
 
   // 3. Feature gate: verificar flag crm
-  const { data: biz } = await supabase
-    .from('businesses')
-    .select('features_enabled')
-    .eq('slug', slug)
-    .single()
-
   const features = (biz?.features_enabled ?? {}) as unknown as BusinessFeatures
   if (!features?.crm) redirect(`/${slug}/dashboard`)
 

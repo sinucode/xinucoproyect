@@ -13,6 +13,7 @@ import { TeamPayments } from '@/components/dashboard/ledger/TeamPayments'
 import type { AccountViewFilters } from '@/components/dashboard/ledger/AccountParts'
 import { businessTodayISODate } from '@/lib/agenda-time'
 import { isLedgerEntryType, isRealDateKey } from '@/lib/team-payments'
+import { getSessionUser, getMyProfile, getBusinessBySlug } from '@/lib/session'
 import type { BusinessFeatures, Profile } from '@xinuco/types'
 
 /**
@@ -64,26 +65,19 @@ export default async function LedgerPage({
 
   // 1. Auth guard — mismo patrón que commissions/page.tsx
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getSessionUser(supabase)
   if (!user) redirect(`/${slug}/login`)
 
-  // 2. Perfil: business_id + role
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, business_id')
-    .eq('id', user.id)
-    .single<Pick<Profile, 'role' | 'business_id'>>()
+  // 2. Perfil (business_id + role) y flags del negocio: independientes → en paralelo
+  //    (memoizados por petición; el layout ya los cargó, lib/session.ts)
+  const [profile, biz] = await Promise.all([
+    getMyProfile(supabase),
+    getBusinessBySlug(supabase, slug),
+  ])
 
   if (!profile?.business_id) redirect(`/${slug}/login`)
 
   // Feature gate: staff_ledger, del lado del servidor
-  const { data: biz } = await supabase
-    .from('businesses')
-    .select('features_enabled')
-    .eq('slug', slug)
-    .single<{ features_enabled: unknown }>()
   const features = (biz?.features_enabled ?? {}) as unknown as BusinessFeatures
   if (!features?.staff_ledger) redirect(`/${slug}/dashboard`)
 
@@ -132,11 +126,14 @@ export default async function LedgerPage({
   }
 
   // ── Administrador: resumen del equipo + cuenta del profesional elegido ──
-  const overview = await getTeamPaymentsOverview()
+  // El resumen y las solicitudes pendientes son independientes: se piden a la vez.
+  const [overview, requestsRes] = await Promise.all([
+    getTeamPaymentsOverview(),
+    listPendingPayoutRequests(),
+  ])
   if ('error' in overview) redirect(`/${slug}/dashboard`)
 
   // Si la tabla aún no existe (migración pendiente) la página sigue sin solicitudes
-  const requestsRes = await listPendingPayoutRequests()
   const payoutRequests = 'requests' in requestsRes ? requestsRes.requests : []
 
   const requested = first(sp.staff)

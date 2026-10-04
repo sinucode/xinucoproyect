@@ -3,6 +3,7 @@
 import { ACCOUNT_UUID_RE } from '@/lib/account-resolve'
 
 import { createClient } from '@xinuco/supabase/server'
+import { getSessionUser, getMyProfile } from '@/lib/session'
 import { revalidatePath } from 'next/cache'
 import type { PaymentMethod, CashRegisterShift, Sale, SaleItem, Payment } from '@xinuco/types'
 import { loyaltyErrorMessage, stampRewardCop, type CustomerLoyalty } from '@/lib/loyalty-utils'
@@ -23,14 +24,11 @@ async function requireAdmin(
 ): Promise<{ supabase: FinanceClient; userId: string; businessId: string } | { error: string }> {
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // Sesión y perfil memoizados por petición (lib/session.ts); la verificación de rol sigue siendo de esta action
+  const user = await getSessionUser(supabase)
   if (!user) return { error: NOT_ADMIN_FINANCE }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, business_id')
-    .eq('id', user.id)
-    .single()
+  const profile = await getMyProfile(supabase)
 
   const role = (profile as { role?: string } | null)?.role
   const profileBusinessId = (profile as { business_id?: string | null } | null)?.business_id

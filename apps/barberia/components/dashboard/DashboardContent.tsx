@@ -27,6 +27,7 @@ import {
   type SummaryAppt,
 } from '@/lib/day-summary'
 import { roleLabel } from '@/lib/roles'
+import { getSessionUser, getMyProfile } from '@/lib/session'
 import type { PayoutUpdateView } from '@/lib/payout-requests'
 
 interface DashboardContentProps {
@@ -41,45 +42,44 @@ interface DashboardContentProps {
 export async function DashboardContent({ slug }: DashboardContentProps) {
   const supabase = await createClient()
 
-  // 1. Sesión activa
-  const { data: { user } } = await supabase.auth.getUser()
+  // 1. Sesión activa + 2. Perfil del usuario (memoizados por petición: el layout ya los cargó, lib/session.ts)
+  const user = await getSessionUser(supabase)
   if (!user) redirect(`/${slug}/login`)
 
-  // 2. Perfil del usuario
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id, full_name, role, business_id')
-    .eq('id', user.id)
-    .returns<{ id: string, full_name: string | null, role: string, business_id: string | null }[]>()
-    .single()
+  const profile = await getMyProfile(supabase)
 
   const businessId = profile?.business_id ?? ''
   const isAdmin = profile?.role === 'admin'
 
-  // 3. Consultar Turno de Caja Activo (Solo para administradores)
-  let activeShiftDetails = null
-  let moneyStatus: MoneyAccountsStatus | null = null
-  let pendingPayoutRequests = 0
-  if (isAdmin) {
-    // 3a. Turno de caja, saldos de cada medio ("Tu plata") y solicitudes de pago del equipo en paralelo
-    const [shiftDetails, money, payoutRequests] = await Promise.all([
+  // 3. Datos SOLO de administrador (turno de caja, "Tu plata", solicitudes de pago, gastos fijos próximos
+  //    y stock bajo). Son independientes entre sí y de la agenda: todo corre en paralelo.
+  //    Si los saldos no cargan, el resto del Inicio sigue funcionando sin la tarjeta.
+  const loadAdminData = async () => {
+    if (!isAdmin) {
+      return {
+        activeShiftDetails: null as Awaited<ReturnType<typeof getActiveShiftDetails>> | null,
+        moneyStatus: null as MoneyAccountsStatus | null,
+        pendingPayoutRequests: 0,
+        upcomingFixedExpenses: [] as Awaited<ReturnType<typeof getUpcomingFixedExpenses>>,
+        // El aviso de stock bajo se oculta si el plan no incluye Inventario
+        lowStockItems: [] as { id: string; name: string; current_stock: number }[],
+      }
+    }
+    const [shiftDetails, money, payoutRequests, fixedExpenses, lowStock] = await Promise.all([
       getActiveShiftDetails(businessId),
       getMoneyAccountsStatus(),
       getPendingPayoutRequestsCount(),
+      getUpcomingFixedExpenses(),
+      getLowStockItems(),
     ])
-    activeShiftDetails = shiftDetails
-    pendingPayoutRequests = payoutRequests
-    // Si los saldos no cargan, el resto del Inicio sigue funcionando sin la tarjeta
-    moneyStatus = money.data ?? null
+    return {
+      activeShiftDetails: shiftDetails,
+      moneyStatus: money.data ?? null,
+      pendingPayoutRequests: payoutRequests,
+      upcomingFixedExpenses: fixedExpenses,
+      lowStockItems: (lowStock.data ?? []).map(({ id, name, current_stock }) => ({ id, name, current_stock })),
+    }
   }
-
-  // 3b. Gastos fijos que vencen hoy o mañana sin registrar (Solo para administradores)
-  const upcomingFixedExpenses = isAdmin ? await getUpcomingFixedExpenses() : []
-
-  // 3c. Productos con stock bajo (Solo para administradores; el aviso se oculta si el plan no incluye Inventario)
-  const lowStockItems = isAdmin
-    ? ((await getLowStockItems()).data ?? []).map(({ id, name, current_stock }) => ({ id, name, current_stock }))
-    : []
 
   // 4. Citas de HOY filtradas por start_time (no created_at — una cita de hoy pudo
   //    haberse creado hace días).
@@ -99,79 +99,95 @@ export async function DashboardContent({ slug }: DashboardContentProps) {
   // Si es barbero o manicurista, filtrar solo sus propias citas via staff.user_id
   // barber_id no existe en el schema — se usa staff_id (FK a tabla staff)
   const isStaffMember = profile?.role === 'barber' || profile?.role === 'manicurist'
-  let linkedStaffId: string | null = null
-  if (isStaffMember) {
-    const { data: linkedStaff } = await supabase
-      .from('staff')
-      .select('id')
-      .eq('business_id', businessId)
-      .eq('user_id', user.id)
-      .returns<{ id: string }[]>()
-      .maybeSingle()
 
-    linkedStaffId = linkedStaff?.id ?? null
-    // Si no tiene staff vinculado, retornar 0 citas (seguridad: nunca mostrar todo)
-    query = query.eq('staff_id', linkedStaffId ?? 'no-linked-staff')
-  }
+  // Agenda del día (+ "Tu día" y avisos del barbero). Corre en paralelo con los datos del administrador.
+  const loadAgenda = async () => {
+    let linkedStaffId: string | null = null
+    if (isStaffMember) {
+      const { data: linkedStaff } = await supabase
+        .from('staff')
+        .select('id')
+        .eq('business_id', businessId)
+        .eq('user_id', user.id)
+        .returns<{ id: string }[]>()
+        .maybeSingle()
 
-  const { data: todayAppointments } = await query
-  const appointments = (todayAppointments ?? []) as Record<string, unknown>[]
-  const nowWallMs = businessWallNowMs()
-
-  // 4b. "Tu día" (solo el barbero): próxima cita, citas de hoy, lo ganado y la fila de espera.
-  //     Si algo falla se muestra "—" en esa tarjeta; el resto del Inicio sigue funcionando.
-  let tuDia: TuDiaData | null = null
-  if (isStaffMember && linkedStaffId) {
-    const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null))
-    const summary = computeDaySummary(
-      appointments.map((a): SummaryAppt => {
-        const customer = one<{ full_name?: string }>(a.customers as { full_name?: string } | null)
-        const service = one<{ name?: string; duration_minutes?: number }>(a.services as { name?: string; duration_minutes?: number } | null)
-        return {
-          id: String(a.id),
-          status: String(a.status),
-          start_time: (a.start_time as string | null) ?? null,
-          customer_name: customer?.full_name || 'Cliente sin nombre',
-          service_name: service?.name || 'Servicio',
-          duration_minutes: service?.duration_minutes ?? 30,
-        }
-      }),
-      nowWallMs,
-    )
-
-    // created_at / arrived_at son instantes reales: el día del negocio se delimita en America/Bogota
-    const { from, to } = businessDayInstants(todayStr)
-    let earned: number | null = null
-    let queue: { waiting: number; mine: number } | null = null
-    try {
-      const [ledgerRes, queueRes] = await Promise.all([
-        supabase
-          .from('staff_ledger')
-          .select('entry_type, amount')
-          .eq('business_id', businessId)
-          .eq('staff_id', linkedStaffId)
-          .in('entry_type', [...EARNED_ENTRY_TYPES])
-          .gte('created_at', from)
-          .lt('created_at', to),
-        supabase
-          .from('walk_ins')
-          .select('status, staff_id')
-          .eq('business_id', businessId)
-          .eq('status', 'waiting')
-          .gte('arrived_at', from),
-      ])
-      if (!ledgerRes.error) earned = sumEarned((ledgerRes.data ?? []) as { entry_type: string; amount: number }[])
-      if (!queueRes.error) queue = summarizeQueue((queueRes.data ?? []) as { status: string; staff_id: string | null }[], linkedStaffId)
-    } catch {
-      // degradar: tarjetas con "—"
+      linkedStaffId = linkedStaff?.id ?? null
+      // Si no tiene staff vinculado, retornar 0 citas (seguridad: nunca mostrar todo)
+      query = query.eq('staff_id', linkedStaffId ?? 'no-linked-staff')
     }
-    tuDia = { summary, earned, queue }
+
+    // 4b. "Tu día" (solo el barbero): lo ganado y la fila de espera dependen solo del staff vinculado,
+    //     así que se piden a la vez que las citas. Si algo falla se muestra "—" en esa tarjeta;
+    //     el resto del Inicio sigue funcionando.
+    // created_at / arrived_at son instantes reales: el día del negocio se delimita en America/Bogota
+    const loadTuDiaExtras = async (staffId: string) => {
+      const { from, to } = businessDayInstants(todayStr)
+      let earned: number | null = null
+      let queue: { waiting: number; mine: number } | null = null
+      try {
+        const [ledgerRes, queueRes] = await Promise.all([
+          supabase
+            .from('staff_ledger')
+            .select('entry_type, amount')
+            .eq('business_id', businessId)
+            .eq('staff_id', staffId)
+            .in('entry_type', [...EARNED_ENTRY_TYPES])
+            .gte('created_at', from)
+            .lt('created_at', to),
+          supabase
+            .from('walk_ins')
+            .select('status, staff_id')
+            .eq('business_id', businessId)
+            .eq('status', 'waiting')
+            .gte('arrived_at', from),
+        ])
+        if (!ledgerRes.error) earned = sumEarned((ledgerRes.data ?? []) as { entry_type: string; amount: number }[])
+        if (!queueRes.error) queue = summarizeQueue((queueRes.data ?? []) as { status: string; staff_id: string | null }[], staffId)
+      } catch {
+        // degradar: tarjetas con "—"
+      }
+      return { earned, queue }
+    }
+
+    // 4c. Avisos de solicitudes de pago/anticipo ya resueltas (solo el barbero; fallo → sin aviso)
+    const [appointmentsRes, tuDiaExtras, payoutUpdates] = await Promise.all([
+      query,
+      isStaffMember && linkedStaffId ? loadTuDiaExtras(linkedStaffId) : Promise.resolve(null),
+      isStaffMember && linkedStaffId ? getMyResolvedPayoutUpdates() : Promise.resolve([] as PayoutUpdateView[]),
+    ])
+
+    const appointments = (appointmentsRes.data ?? []) as Record<string, unknown>[]
+    const nowWallMs = businessWallNowMs()
+
+    let tuDia: TuDiaData | null = null
+    if (tuDiaExtras) {
+      const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null))
+      const summary = computeDaySummary(
+        appointments.map((a): SummaryAppt => {
+          const customer = one<{ full_name?: string }>(a.customers as { full_name?: string } | null)
+          const service = one<{ name?: string; duration_minutes?: number }>(a.services as { name?: string; duration_minutes?: number } | null)
+          return {
+            id: String(a.id),
+            status: String(a.status),
+            start_time: (a.start_time as string | null) ?? null,
+            customer_name: customer?.full_name || 'Cliente sin nombre',
+            service_name: service?.name || 'Servicio',
+            duration_minutes: service?.duration_minutes ?? 30,
+          }
+        }),
+        nowWallMs,
+      )
+      tuDia = { summary, earned: tuDiaExtras.earned, queue: tuDiaExtras.queue }
+    }
+
+    return { appointments, nowWallMs, tuDia, payoutUpdates }
   }
 
-  // 4c. Avisos de solicitudes de pago/anticipo ya resueltas (solo el barbero; fallo → sin aviso)
-  const payoutUpdates: PayoutUpdateView[] = isStaffMember && linkedStaffId
-    ? await getMyResolvedPayoutUpdates()
-    : []
+  const [
+    { activeShiftDetails, moneyStatus, pendingPayoutRequests, upcomingFixedExpenses, lowStockItems },
+    { appointments, nowWallMs, tuDia, payoutUpdates },
+  ] = await Promise.all([loadAdminData(), loadAgenda()])
 
   // 5. Validar integridad de cierre: hay citas En Curso?
   const hasInProgressAppointments = appointments.some((a) => a.status === 'in_progress')

@@ -16,6 +16,7 @@
 //  - business_id se extrae del JWT de Supabase (no del body del request)
 // ══════════════════════════════════════════════════════════════════════════════
 
+import { revalidatePath } from 'next/cache'
 import { Preference, PreApproval } from 'mercadopago'
 import { getMPClient } from '@/lib/mercadopago/client'
 import { calculateMPFee } from '@/lib/mercadopago/fees'
@@ -381,6 +382,9 @@ export async function createMPSaaSSubscription(params: {
         updated_at:         new Date().toISOString(),
       }, { onConflict: 'business_id' })
 
+    // Invalida el router cache del cliente (staleTimes): Configuración > Plan muestra el estado "pendiente"
+    revalidatePath('/[slug]/dashboard/settings', 'layout')
+
     return { init_point: initPoint, preapproval_id: preapprovalId }
 
   } catch (err) {
@@ -513,6 +517,10 @@ export async function cancelMPSaaSSubscription(
         features_enabled:    basicFeatures as unknown as Record<string, boolean>,
       })
       .eq('id', businessId)
+
+    // Los features/plan cambiaron: el layout del dashboard (sidebar, FeaturesProvider) debe re-renderizar
+    // y el router cache del cliente (staleTimes) no debe servir la versión anterior.
+    revalidatePath('/[slug]/dashboard', 'layout')
 
     return { success: true }
 

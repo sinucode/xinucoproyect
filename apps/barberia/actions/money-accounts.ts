@@ -6,6 +6,7 @@
 // get_money_accounts_status, record_account_movement). Los saldos los calcula la base.
 
 import { createClient } from '@xinuco/supabase/server'
+import { getSessionUser, getMyProfile } from '@/lib/session'
 import { revalidatePath } from 'next/cache'
 import type {
   AccountMovementKind,
@@ -29,14 +30,11 @@ async function requireAdmin(): Promise<
 > {
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // Sesión y perfil memoizados por petición (lib/session.ts); la verificación de rol sigue siendo de esta action
+  const user = await getSessionUser(supabase)
   if (!user) return { error: NOT_ADMIN }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, business_id')
-    .eq('id', user.id)
-    .single()
+  const profile = await getMyProfile(supabase)
 
   const role = (profile as { role?: string } | null)?.role
   const businessId = (profile as { business_id?: string | null } | null)?.business_id
@@ -140,14 +138,11 @@ export async function listMoneyAccounts(): Promise<{ data?: MoneyAccount[]; erro
 export async function listActiveAccountsForCheckout(): Promise<{ data?: CheckoutAccount[]; error?: string }> {
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // Sesión y perfil memoizados por petición (lib/session.ts); la verificación de rol sigue siendo de esta action
+  const user = await getSessionUser(supabase)
   if (!user) return { error: LOAD_FAILED }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('business_id')
-    .eq('id', user.id)
-    .single()
+  const profile = await getMyProfile(supabase)
   const businessId = (profile as { business_id?: string | null } | null)?.business_id
   if (!businessId) return { error: LOAD_FAILED }
 

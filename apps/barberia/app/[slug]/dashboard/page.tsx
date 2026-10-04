@@ -5,6 +5,7 @@ import type { Metadata }       from 'next'
 
 import { DashboardContent }    from '@/components/dashboard/DashboardContent'
 import { DashboardSkeleton }   from '@/components/dashboard/DashboardSkeleton'
+import { getSessionUser }      from '@/lib/session'
 
 export const metadata: Metadata = {
   title: 'Dashboard — Xinuco',
@@ -31,7 +32,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   const supabase  = await createClient()
 
   // Guard rápido de sesión
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getSessionUser(supabase)
   if (!user) redirect(`/${slug}/login`)
 
   return (

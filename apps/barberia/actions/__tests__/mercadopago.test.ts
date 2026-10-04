@@ -7,6 +7,10 @@ jest.mock('@xinuco/supabase/server', () => ({
   createAdminClient: jest.fn(),
 }))
 
+jest.mock('next/cache', () => ({
+  revalidatePath: jest.fn(),
+}))
+
 jest.mock('mercadopago', () => ({
   Preference: jest.fn().mockImplementation(() => ({
     create: jest.fn().mockResolvedValue({

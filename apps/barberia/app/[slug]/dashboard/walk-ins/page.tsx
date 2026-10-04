@@ -7,6 +7,7 @@ import { getActiveShiftDetails } from '@/actions/finance'
 import { WalkInQueue } from '@/components/dashboard/walk-ins/WalkInQueue'
 import type { BusinessFeatures, Staff, Service } from '@xinuco/types'
 import { normalizeAudiences } from '@/lib/service-audience'
+import { getSessionUser, getMyProfile, getBusinessBySlug } from '@/lib/session'
 
 export const metadata: Metadata = {
   title: 'Fila de espera — Xinuco',
@@ -18,73 +19,69 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
 
   // 1. Auth guard
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getSessionUser(supabase)
   if (!user) redirect(`/${slug}/login`)
 
-  // 2. Obtener business_id
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('business_id, role')
-    .eq('id', user.id)
-    .single()
+  // 2. business_id/rol (perfil) y flags del negocio: independientes entre sí → en paralelo.
+  //    Ambos memoizados por petición (el layout ya los cargó, lib/session.ts).
+  const [profile, biz] = await Promise.all([
+    getMyProfile(supabase),
+    getBusinessBySlug(supabase, slug),
+  ])
 
   if (!profile?.business_id) redirect(`/${slug}/login`)
+  const businessId = profile.business_id
 
   // 3. Feature gate
-  const { data: biz } = await supabase
-    .from('businesses')
-    .select('features_enabled')
-    .eq('slug', slug)
-    .single()
-
   const features = (biz?.features_enabled ?? {}) as unknown as BusinessFeatures
   if (!features?.walk_ins) redirect(`/${slug}/dashboard`)
 
-  // 3b. Turno de caja activo (solo admin, igual que la Agenda) para poder cobrar desde la fila
-  let activeShiftId: string | null = null
-  if (profile.role === 'admin') {
-    const shiftDetails = await getActiveShiftDetails(profile.business_id)
-    activeShiftId = shiftDetails?.shift?.id || null
-  }
-
-  // 3c. Rol y profesional ligado: el barbero solo atiende lo suyo (reglas en la BD y las actions)
+  // Rol y profesional ligado: el barbero solo atiende lo suyo (reglas en la BD y las actions)
   const isAdmin = profile.role === 'admin' || profile.role === 'super_admin'
-  let viewerStaffId: string | null = null
-  if (!isAdmin) {
-    const { data: me } = await supabase
-      .from('staff')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('business_id', profile.business_id)
-      .maybeSingle()
-    viewerStaffId = (me as { id?: string } | null)?.id ?? null
-  }
 
-  // 3d. Limpieza: turnos que quedaron en espera de un día anterior se cierran antes de listar
-  await closeStaleWalkIns(profile.business_id)
-
-  // 4. Carga paralela: cola activa + historial + estado de barberos + staff + servicios
-  const [queue, history, staffStatus, staffRows, serviceRows, audienceRow] = await Promise.all([
-    getWalkInQueue(profile.business_id),
-    getWalkInHistory(profile.business_id, 10),
-    getStaffStatusNow(profile.business_id),
+  // 3b-3d. Lecturas independientes en paralelo:
+  //   - Turno de caja activo (solo admin, igual que la Agenda) para poder cobrar desde la fila
+  //   - Profesional ligado al usuario (solo no-admin)
+  //   - Limpieza: turnos que quedaron en espera de un día anterior se cierran ANTES de listar la cola
+  //   - Staff activo, servicios y audiencias (no dependen de la limpieza)
+  const [shiftDetails, me, , staffRows, serviceRows, audienceRow] = await Promise.all([
+    profile.role === 'admin' ? getActiveShiftDetails(businessId) : Promise.resolve(null),
+    !isAdmin
+      ? supabase
+          .from('staff')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('business_id', businessId)
+          .maybeSingle()
+      : Promise.resolve(null),
+    closeStaleWalkIns(businessId),
     supabase
       .from('staff')
       .select('id, full_name')
-      .eq('business_id', profile.business_id)
+      .eq('business_id', businessId)
       .eq('is_active', true)
       .order('full_name'),
     supabase
       .from('services')
       .select('id, name, price_cop, duration_minutes, audience')
-      .eq('business_id', profile.business_id)
+      .eq('business_id', businessId)
       .eq('is_active', true)
       .order('name'),
     supabase
       .from('businesses')
       .select('service_audiences')
-      .eq('id', profile.business_id)
+      .eq('id', businessId)
       .maybeSingle(),
+  ])
+
+  const activeShiftId: string | null = shiftDetails?.shift?.id || null
+  const viewerStaffId: string | null = (me?.data as { id?: string } | null)?.id ?? null
+
+  // 4. Con la limpieza hecha: cola activa + historial + estado de barberos en paralelo
+  const [queue, history, staffStatus] = await Promise.all([
+    getWalkInQueue(businessId),
+    getWalkInHistory(businessId, 10),
+    getStaffStatusNow(businessId),
   ])
 
   // 5. Recomendación de barbero para los primeros 10 turnos en espera sin apartar
@@ -110,7 +107,7 @@ export default async function WalkInsPage({ params }: { params: Promise<{ slug: 
         staffList={staffList}
         serviceList={serviceList}
         serviceAudiences={serviceAudiences}
-        businessId={profile.business_id}
+        businessId={businessId}
         activeShiftId={activeShiftId}
         isAdmin={isAdmin}
         viewerStaffId={viewerStaffId}

@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@xinuco/supabase/server'
+import { getSessionUser, getMyProfile } from '@/lib/session'
 import { revalidatePath } from 'next/cache'
 import type { Customer, Staff } from '@xinuco/types'
 import {
@@ -129,14 +130,11 @@ interface TenantContext {
 
 /** businessId SIEMPRE desde el perfil de la sesión (nunca del cliente). */
 async function getTenantContext(supabase: SupabaseClient): Promise<TenantContext | null> {
-  const { data: { user } } = await supabase.auth.getUser()
+  // Sesión y perfil memoizados por petición (lib/session.ts); la verificación de rol sigue siendo de esta action
+  const user = await getSessionUser(supabase)
   if (!user) return null
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('business_id, full_name, role')
-    .eq('id', user.id)
-    .single()
+  const profile = await getMyProfile(supabase)
 
   const p = profile as { business_id?: string | null; full_name?: string | null; role?: string | null } | null
   if (!p?.business_id) return null

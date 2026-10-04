@@ -9,7 +9,8 @@ import { DashboardSidebar } from '@/components/layout/DashboardSidebar'
 import { FeaturesProvider } from '@/lib/features/context'
 import { RoleProvider } from '@/lib/features/role-context'
 import { TrialBanner } from '@/components/dashboard/TrialBanner'
-import type { Business, BusinessFeatures, UserRole, Profile, ThemeMode } from '@xinuco/types'
+import { getSessionUser, getMyProfile, getBusinessBySlug } from '@/lib/session'
+import type { BusinessFeatures, UserRole, ThemeMode } from '@xinuco/types'
 
 // El dashboard (admin y barberos) sigue el modo claro/oscuro elegido en Apariencia (brand_config.themeMode).
 // Ignora fondo/superficie/texto personalizados del negocio y conserva color principal y tipografía
@@ -57,23 +58,16 @@ export default async function DashboardLayout({
   const { slug } = await params
   const supabase = await createClient()
 
-  // Seguridad: Obtener usuario
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect(`/${slug}/login`)
-
-  // Fetch para el Header, Sidebar, FeaturesProvider y Trial
-  const [{ data: profile }, { data: business }] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('full_name, role')
-      .eq('id', user.id)
-      .single<Pick<Profile, 'full_name' | 'role'>>(),
-    supabase
-      .from('businesses')
-      .select('id, name, branding, brand_config, features_enabled, trial_expires_at')
-      .eq('slug', slug)
-      .single<Pick<Business, 'id' | 'name' | 'branding' | 'brand_config' | 'features_enabled' | 'trial_expires_at'>>(),
+  // Sesión, perfil y negocio en paralelo (el negocio no depende del usuario). Memoizados por petición:
+  // la página y las actions que se renderizan después reutilizan estos mismos resultados (lib/session.ts).
+  const [user, profile, business] = await Promise.all([
+    getSessionUser(supabase),
+    getMyProfile(supabase),
+    getBusinessBySlug(supabase, slug),
   ])
+
+  // Seguridad: sin sesión no se renderiza nada del dashboard
+  if (!user) redirect(`/${slug}/login`)
 
   const features        = (business?.features_enabled ?? {}) as unknown as BusinessFeatures
   const trialExpiresAt  = business?.trial_expires_at ?? null

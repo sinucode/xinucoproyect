@@ -9,6 +9,7 @@ import { StaffDayTimeline } from '@/components/dashboard/agenda/StaffDayTimeline
 import type { BreakRow, TimeOffRow, TimelineAppt } from '@/components/dashboard/agenda/staff-day-utils'
 import { businessTodayISODate, addDaysToDateKey, businessNowHHMM } from '@/lib/agenda-time'
 import { businessWallNowMs } from '@/lib/agenda-status'
+import { getSessionUser, getMyProfile } from '@/lib/session'
 
 interface AppointmentsPageProps {
   params: Promise<{ slug: string }>
@@ -43,25 +44,14 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
   const supabase = await createClient()
 
   // 1. Auth Guard
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getSessionUser(supabase)
   if (!user) redirect(`/${slug}/login`)
 
-  // 2. Fetch Profile & Business
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, business_id')
-    .eq('id', user.id)
-    .single()
+  // 2. Fetch Profile & Business (memoizado por petición: el layout ya lo cargó)
+  const profile = await getMyProfile(supabase)
 
   const businessId = profile?.business_id ?? ''
   const isAdmin = profile?.role === 'admin'
-
-  // 3. Obtener Turno Activo para permitir el CheckoutModal desde esta página
-  let activeShiftId = null
-  if (isAdmin) {
-    const shiftDetails = await getActiveShiftDetails(businessId)
-    activeShiftId = shiftDetails?.shift?.id || null
-  }
 
   // 4. Citas de hoy en adelante (por start_time, en hora local del negocio) +
   //    citas de los últimos 30 días que siguen ABIERTAS (sin cobrar/cerrar), para
@@ -70,22 +60,37 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
   const todayKey    = businessTodayISODate()
   const fromOpenKey = addDaysToDateKey(todayKey, -30)
 
-  // 4a. Si es barbero, obtener su staff.id vinculado al user.id
-  //     La relación es: auth.users.id → staff.user_id → staff.id → appointments.staff_id
-  //     NO usar barber_id (campo eliminado) ni user.id directo (no es staff.id)
   // Barbero y manicurista solo ven sus propias citas
   const isBarber = profile?.role === 'barber' || profile?.role === 'manicurist'
-  let linkedStaffId: string | null = null
-  if (isBarber) {
-    const { data: staffRecord } = await supabase
-      .from('staff')
-      .select('id')
-      .eq('business_id', businessId)
-      .eq('user_id', user.id)
-      .maybeSingle()
 
-    linkedStaffId = staffRecord?.id ?? null
-  }
+  // 3 / 4a. Tres lecturas independientes entre sí (según el rol solo aplican algunas): en paralelo.
+  //   - Turno activo (solo admin) para permitir el CheckoutModal desde esta página.
+  //   - Barbero: su staff.id vinculado. La relación es: auth.users.id → staff.user_id → staff.id →
+  //     appointments.staff_id. NO usar barber_id (campo eliminado) ni user.id directo (no es staff.id).
+  //   - Resto: staff activo del negocio (opciones del filtro + validación del id recibido).
+  const [shiftDetails, staffRecordRes, staffOptionsRes] = await Promise.all([
+    isAdmin ? getActiveShiftDetails(businessId) : Promise.resolve(null),
+    isBarber
+      ? supabase
+          .from('staff')
+          .select('id')
+          .eq('business_id', businessId)
+          .eq('user_id', user.id)
+          .maybeSingle()
+      : Promise.resolve(null),
+    !isBarber
+      ? supabase
+          .from('staff')
+          .select('id, full_name')
+          .eq('business_id', businessId)
+          .eq('is_active', true)
+          .order('full_name', { ascending: true })
+      : Promise.resolve(null),
+  ])
+
+  const activeShiftId = shiftDetails?.shift?.id || null
+  const linkedStaffId: string | null = staffRecordRes?.data?.id ?? null
+  const staffOptions = (staffOptionsRes?.data ?? []) as { id: string; full_name: string }[]
 
   // 4b. Filtros (URL): valores inválidos → por defecto
   const rawDate = firstParam(sp.date)
@@ -101,17 +106,6 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
   const rawStatus = firstParam(sp.status)
   const statusFilter = rawStatus in STATUS_FILTERS ? rawStatus : 'all'
 
-  // Staff activo del negocio (opciones del filtro + validación del id recibido)
-  let staffOptions: { id: string; full_name: string }[] = []
-  if (!isBarber) {
-    const { data: staffRows } = await supabase
-      .from('staff')
-      .select('id, full_name')
-      .eq('business_id', businessId)
-      .eq('is_active', true)
-      .order('full_name', { ascending: true })
-    staffOptions = (staffRows ?? []) as { id: string; full_name: string }[]
-  }
   const rawStaff = firstParam(sp.staff)
   const staffFilter = !isBarber && staffOptions.some((s) => s.id === rawStaff) ? rawStaff : ''
 
@@ -148,9 +142,12 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
     }
   }
 
-  // En la vista de día del barbero no se muestra la lista: se evita la consulta
-  const { data: appointmentsData } = barberDayView ? { data: [] as Record<string, unknown>[] } : await query
-  const appointments = (appointmentsData ?? []) as Record<string, unknown>[]
+  // En la vista de día del barbero no se muestra la lista: se evita la consulta.
+  // La consulta se dispara YA (Promise.resolve ejecuta el builder) y se espera después de armar la
+  // línea de tiempo: la lista y la línea de tiempo son independientes y corren en paralelo.
+  const appointmentsPromise = barberDayView
+    ? Promise.resolve({ data: [] as Record<string, unknown>[] })
+    : Promise.resolve(query)
 
   // 5. Vista de día del staff: admin/otros con staff elegido; barbero (siempre él mismo) en su vista de día
   const timelineStaffId = isBarber ? (dateFilter !== 'upcoming' ? linkedStaffId : null) : staffFilter || null
@@ -281,6 +278,9 @@ export default async function AppointmentsPage({ params, searchParams }: Appoint
       unresolved: unresolvedRows.map(toTimelineAppt),
     }
   }
+
+  const { data: appointmentsData } = await appointmentsPromise
+  const appointments = (appointmentsData ?? []) as Record<string, unknown>[]
 
   // Remonta la lista cuando cambian filtros o datos (InteractiveAgenda guarda las citas en estado local)
   const agendaKey =
