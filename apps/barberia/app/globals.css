@@ -65,6 +65,19 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Red de seguridad: nada puede ensanchar la página de lado (clip no rompe el header sticky) */
+  overflow-x: clip;
+}
+
+/* iPhone (Safari y Chrome) amplía la página al tocar un campo con letra de menos de 16 px y el
+   zoom se queda puesto al entrar (no se ven los botones ni la barra de abajo). En pantallas de
+   celular todos los campos usan 16 px; en PC conservan su tamaño. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="hidden"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
 
 /* ============================================================
