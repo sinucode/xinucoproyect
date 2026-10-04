@@ -233,28 +233,29 @@ export function StaffDayTimeline({
     <section aria-label={`Día de ${staffName}`} className="card !p-4 space-y-4">
       {/* Encabezado */}
       <div className="flex flex-col gap-3">
-        <div className="flex items-start justify-between gap-3">
+        {/* En el celular el nombre va arriba y los botones debajo, a lo ancho (no se salen) */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <h2 className="text-base font-bold text-xinuco-text truncate">{staffName}</h2>
             <p className="text-xs text-xinuco-muted">{dayLabel(dateKey, todayKey)}</p>
           </div>
           {isAdmin && (
-            <div className="flex flex-wrap justify-end gap-2 shrink-0">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end sm:shrink-0">
               <button
                 type="button"
                 onClick={() => setPanel(panel === 'break' ? null : 'break')}
-                className="text-xs px-2.5 py-1.5 rounded-lg border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors flex items-center gap-1"
+                className="min-h-10 text-xs px-2.5 py-1.5 rounded-lg border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors flex items-center justify-center gap-1 text-center"
               >
-                <Coffee size={12} />
-                Agregar almuerzo/pausa
+                <Coffee size={12} className="shrink-0" />
+                Almuerzo / pausa
               </button>
               <button
                 type="button"
                 onClick={() => setPanel(panel === 'timeoff' ? null : 'timeoff')}
-                className="text-xs px-2.5 py-1.5 rounded-lg border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 transition-colors flex items-center gap-1"
+                className="min-h-10 text-xs px-2.5 py-1.5 rounded-lg border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-1 text-center"
               >
-                <UserX size={12} />
-                Bloquear horario (permiso)
+                <UserX size={12} className="shrink-0" />
+                Bloquear horario
               </button>
             </div>
           )}
