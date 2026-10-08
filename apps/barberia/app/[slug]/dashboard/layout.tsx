@@ -9,6 +9,7 @@ import { DashboardSidebar } from '@/components/layout/DashboardSidebar'
 import { FeaturesProvider } from '@/lib/features/context'
 import { RoleProvider } from '@/lib/features/role-context'
 import { TrialBanner } from '@/components/dashboard/TrialBanner'
+import { RealtimeRefresher } from '@/components/realtime/RealtimeRefresher'
 import { getSessionUser, getMyProfile, getBusinessBySlug } from '@/lib/session'
 import type { BusinessFeatures, UserRole, ThemeMode } from '@xinuco/types'
 
@@ -100,6 +101,9 @@ export default async function DashboardLayout({
             <div className="md:hidden">
               <BottomNav slug={slug} />
             </div>
+
+            {/* Actualización en vivo (Supabase Realtime) para admin y barberos */}
+            {business?.id && <RealtimeRefresher businessId={business.id} />}
           </div>
         </DashboardSidebar>
       </FeaturesProvider>

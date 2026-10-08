@@ -57,6 +57,8 @@ const nextConfig = {
   // cada toque en la barra inferior esperaba al servidor. Con 30 s volver a una pestaña ya visitada es
   // instantáneo y los <Link> prefetchean el loading.tsx de cada ruta. Es seguro porque las Server Actions
   // que mutan datos llaman revalidatePath (invalida este caché) y el cliente usa router.refresh() tras escribir.
+  // Además, RealtimeRefresher (dashboard) llama router.refresh() ante cambios en vivo de citas / turnos /
+  // solicitudes de pago, lo que también invalida este caché: los datos nunca quedan viejos 30 s.
   experimental: {
     staleTimes: { dynamic: 30, static: 180 },
   },
