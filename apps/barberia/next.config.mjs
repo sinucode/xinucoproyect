@@ -59,8 +59,10 @@ const nextConfig = {
   // que mutan datos llaman revalidatePath (invalida este caché) y el cliente usa router.refresh() tras escribir.
   // Además, RealtimeRefresher (dashboard) llama router.refresh() ante cambios en vivo de citas / turnos /
   // solicitudes de pago, lo que también invalida este caché: los datos nunca quedan viejos 30 s.
+  // static = 30 (mínimo permitido) porque las pestañas de la barra inferior usan prefetch completo
+  // (BottomNav), que se rige por este valor: así esa precarga tampoco supera 30 s de antigüedad.
   experimental: {
-    staleTimes: { dynamic: 30, static: 180 },
+    staleTimes: { dynamic: 30, static: 30 },
   },
   typescript: {
     ignoreBuildErrors: true,

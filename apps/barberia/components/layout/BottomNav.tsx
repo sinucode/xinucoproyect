@@ -57,6 +57,10 @@ export function BottomNav({ slug }: BottomNavProps) {
         <Link
           id={item.id}
           href={href}
+          // Precarga completa (datos incluidos) de las pestañas principales: el toque abre la pantalla al
+          // instante y, mientras la app está abierta, mantiene la función del servidor caliente (sin arranque
+          // en frío). Son ≤ 5 rutas; la antigüedad máxima la acota staleTimes.static (30 s) y RealtimeRefresher.
+          prefetch={active ? false : true}
           aria-label={item.label}
           aria-current={active ? 'page' : undefined}
           className={`${TAB_BASE} ${active ? 'text-xinuco-primary' : 'text-xinuco-muted active:text-xinuco-text'}`}
