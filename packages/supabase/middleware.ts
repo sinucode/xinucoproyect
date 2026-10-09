@@ -42,12 +42,30 @@ export async function updateSession(request: NextRequest) {
     },
   )
 
-  // ── 1. Descifrar JWT localmente (sin round-trip a BD) ────────────────────────
-  // IMPORTANT: No escribir lógica entre createServerClient y getUser().
+  // ── 1. Verificar la sesión ───────────────────────────────────────────────────
+  // IMPORTANT: No escribir lógica entre createServerClient y la verificación.
   // Un error aquí puede causar cierres de sesión aleatorios.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  //
+  // getClaims() verifica la FIRMA del JWT localmente con las llaves públicas del proyecto
+  // (ES256, JWKS en caché) y refresca la sesión si expiró: sin viaje a Supabase Auth en cada
+  // navegación (antes getUser() hacía uno por petición, también en los prefetch). Si no se
+  // puede verificar así (p. ej. llave simétrica), cae a getUser() como antes.
+  let user: { id: string; app_metadata?: Record<string, unknown> } | null = null
+  try {
+    const { data, error } = await supabase.auth.getClaims()
+    if (!error && data?.claims?.sub) {
+      user = {
+        id:           String(data.claims.sub),
+        app_metadata: (data.claims.app_metadata ?? {}) as Record<string, unknown>,
+      }
+    }
+  } catch {
+    user = null
+  }
+  if (!user) {
+    const { data: { user: fallback } } = await supabase.auth.getUser()
+    user = fallback ? { id: fallback.id, app_metadata: fallback.app_metadata } : null
+  }
 
   const url = request.nextUrl.clone()
   const pathname = url.pathname
