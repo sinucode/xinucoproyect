@@ -11,7 +11,8 @@ const securityHeaders = [
     key: 'Content-Security-Policy',
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://hcaptcha.com https://*.hcaptcha.com",
+      // 'unsafe-eval' solo en desarrollo (lo necesita el HMR de Next); en producción no se permite eval().
+      `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : ''} https://hcaptcha.com https://*.hcaptcha.com`,
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://hcaptcha.com https://*.hcaptcha.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data: https://*.supabase.co https://api.qrserver.com",
@@ -23,6 +24,8 @@ const securityHeaders = [
 ]
 
 const nextConfig = {
+  // No anunciar el framework en cada respuesta (cabecera x-powered-by)
+  poweredByHeader: false,
   // ── ZONA RAÍZ del dominio xinuco.com ─────────────────────────────────────────
   // apps/barberia sirve /adminbarberia y /[slug].
   // Reescribe / y /admin/* hacia la zona web (apps/web, puerto 3000 en dev).

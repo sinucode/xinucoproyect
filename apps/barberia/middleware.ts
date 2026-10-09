@@ -18,6 +18,13 @@ export async function middleware(request: NextRequest) {
 
   const pathParts = pathname.split('/').filter(Boolean)
 
+  // Un slug de negocio solo tiene letras, números y guiones (actions/admin.ts). Cualquier otra cosa
+  // (/robots.txt, /.env, /wp-login.php…) no es un negocio: sigue de largo sin sesión ni redirect a /book,
+  // así la atiende su ruta (robots.ts) o el 404 de Next, y los escaneos de bots no levantan páginas.
+  if (pathParts.length > 0 && !pathname.startsWith('/_next') && !/^[a-z0-9-]+$/i.test(pathParts[0])) {
+    return NextResponse.next()
+  }
+
   // Solo ejecutar si hay segmentos y no son archivos estáticos o rutas core del sistema
   if (
     pathParts.length > 0 &&
